@@ -1,122 +1,108 @@
 import { Slot, router, useSegments } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { useEffect, useState } from "react";
+import { View } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import Toast from "react-native-toast-message";
 import "../../global.css";
 import { AuthService } from "../src/shared/services/AuthService";
 import { useAuthStore } from "../src/shared/store/authStore";
-import { getAppFlavor, isStaffApp } from "../src/shared/utils/flavor";
+import { ThemeProvider, useAppTheme } from "../src/shared/theme/ThemeProvider";
+import { isStaffApp } from "../src/shared/utils/flavor";
 
 export default function RootLayout() {
+  return (
+    <ThemeProvider>
+      <SafeAreaProvider>
+        <RootNavigator />
+      </SafeAreaProvider>
+    </ThemeProvider>
+  );
+}
+
+function RootNavigator() {
+  const { colors, isDark } = useAppTheme();
   const [isReady, setIsReady] = useState(false);
-  const [showSplash, setShowSplash] = useState(true);
   const segments = useSegments();
 
-  const { user, setUser, isAuthenticated } = useAuthStore();
-  const APP_FLAVOR = getAppFlavor();
+  const { user, setUser, isAuthenticated, isGuest } = useAuthStore();
 
-  // Check auth on app start
   useEffect(() => {
     checkAuth();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const checkAuth = async () => {
     try {
-      // First check if we have a user in the store (from persistence)
       if (user) {
-        console.log("✅ User found in store:", user.email);
         setIsReady(true);
-        // Hide splash after a moment
-        setTimeout(() => setShowSplash(false), 1500);
         return;
       }
-
-      // If no user in store, try to get from Supabase
       const currentUser = await AuthService.getCurrentUser();
-      if (currentUser) {
-        console.log("✅ User found in Supabase:", currentUser.email);
-        setUser(currentUser);
-      } else {
-        console.log("❌ No user found");
-        setUser(null);
-      }
+      setUser(currentUser ?? null);
     } catch (error) {
       console.error("Auth check error:", error);
       setUser(null);
     } finally {
       setIsReady(true);
-      // Hide splash after a minimum display time
-      setTimeout(() => {
-        setShowSplash(false);
-      }, 2000);
     }
   };
 
-  // Navigation logic
+  // ─── Routing ──────────────────────────────────────────────────────
   useEffect(() => {
-    // Don't navigate while splash is showing or not ready
-    if (!isReady || showSplash) return;
+    if (!isReady) return;
 
-    // Only handle staff app routing
-    if (!isStaffApp()) return;
+    const root = segments[0];
 
-    const inLogin = segments[0] === "staff" && segments[1] === "login";
-    const inStaff = segments[0] === "staff";
+    // ── Commuter flavor: guests are allowed everywhere except login ──
+    if (!isStaffApp()) {
+      const inCommuter = root === "commuter";
+      const inCommuterLogin = inCommuter && segments[1] === "login";
+      const hasAccess = isAuthenticated || isGuest;
 
-    console.log(`📍 Navigation check:`, {
-      isAuthenticated,
-      inLogin,
-      inStaff,
-      segments,
-      role: user?.role,
-    });
+      if (hasAccess && inCommuterLogin) {
+        router.replace("/commuter");
+        return;
+      }
+      if (!hasAccess && inCommuter && !inCommuterLogin) {
+        router.replace("/commuter/login");
+        return;
+      }
+      if (segments.length === 0) {
+        router.replace(hasAccess ? "/commuter" : "/commuter/login");
+      }
+      return;
+    }
 
-    // If user is authenticated and trying to access login, redirect to dashboard
+    // ── Staff flavor ──
+    const inStaff = root === "staff";
+    const inLogin = inStaff && segments[1] === "login";
+
     if (isAuthenticated && inLogin) {
-      const route = getRouteByRole(user?.role);
-      console.log(`✅ Authenticated, redirecting to: ${route}`);
-      router.replace(route as any);
+      router.replace(getRouteByRole(user?.role) as any);
       return;
     }
-
-    // If user is NOT authenticated and trying to access staff routes (except login), redirect to login
     if (!isAuthenticated && inStaff && !inLogin) {
-      console.log("🔒 Not authenticated, redirecting to login");
       router.replace("/staff/login");
       return;
     }
-
-    // If user is authenticated and on staff root, redirect to their dashboard
-    if (isAuthenticated && segments[0] === "staff" && !segments[1]) {
-      const route = getRouteByRole(user?.role);
-      console.log(`✅ Authenticated on staff root, redirecting to: ${route}`);
-      router.replace(route as any);
+    if (isAuthenticated && inStaff && !segments[1]) {
+      router.replace(getRouteByRole(user?.role) as any);
       return;
     }
-
-    // If user is authenticated and on the root path, redirect to staff
-    if (isAuthenticated && segments.length === 0) {
-      const route = getRouteByRole(user?.role);
-      console.log(`✅ Authenticated on root, redirecting to: ${route}`);
-      router.replace(route as any);
-      return;
+    if (segments.length === 0) {
+      router.replace(
+        isAuthenticated ? (getRouteByRole(user?.role) as any) : "/staff/login",
+      );
     }
-
-    // If user is NOT authenticated and on root, redirect to staff login
-    if (!isAuthenticated && segments.length === 0) {
-      console.log("🔒 Not authenticated on root, redirecting to login");
-      router.replace("/staff/login");
-      return;
-    }
-  }, [isReady, isAuthenticated, segments, user, showSplash]);
+  }, [isReady, isAuthenticated, isGuest, segments, user]);
 
   return (
-    <SafeAreaProvider>
-      <StatusBar style="auto" />
+    <View style={{ flex: 1, backgroundColor: colors.background }}>
+      <StatusBar style={isDark ? "light" : "dark"} />
       <Slot />
       <Toast />
-    </SafeAreaProvider>
+    </View>
   );
 }
 

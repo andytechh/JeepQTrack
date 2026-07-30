@@ -1,5 +1,4 @@
-// app/staff/(dispatcher)/index.tsx - Updated with GPS navigation
-
+// app/staff/(dispatcher)/index.tsx
 import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
 import { Eye, MapPin } from "lucide-react-native";
@@ -45,6 +44,7 @@ export default function DispatcherIndex() {
   const [refreshing, setRefreshing] = useState(false);
   const [trips, setTrips] = useState<any[]>([]);
   const [drivers, setDrivers] = useState<any[]>([]);
+  const [onlineJeepneysCount, setOnlineJeepneysCount] = useState(0);
 
   const [assignModalVisible, setAssignModalVisible] = useState(false);
   const [selectedTrip, setSelectedTrip] = useState<any | null>(null);
@@ -76,6 +76,16 @@ export default function DispatcherIndex() {
 
       if (driversError) {
         console.error("Failed to fetch drivers:", driversError);
+      }
+
+      // Fetch online jeepneys count
+      const { count, error: countError } = await supabase
+        .from("jeepneys")
+        .select("*", { count: "exact", head: true })
+        .in("status", ["en_route", "waiting", "loading"]);
+
+      if (!countError) {
+        setOnlineJeepneysCount(count || 0);
       }
 
       // Normalize trips for UI
@@ -139,23 +149,17 @@ export default function DispatcherIndex() {
   }, []);
 
   useEffect(() => {
-    // Initial load
     fetchData();
 
-    // Subscribe to trips table changes
     const tripsChannel = supabase
       .channel("realtime_trips")
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "trips" },
-        (payload) => {
-          console.log("trips change:", payload);
-          fetchData();
-        },
+        () => fetchData(),
       )
       .subscribe();
 
-    // Subscribe to users (drivers) changes
     const driversChannel = supabase
       .channel("realtime_drivers")
       .on(
@@ -166,10 +170,7 @@ export default function DispatcherIndex() {
           table: "users",
           filter: `role=eq.driver`,
         },
-        (payload) => {
-          console.log("drivers change:", payload);
-          fetchData();
-        },
+        () => fetchData(),
       )
       .subscribe();
 
@@ -196,7 +197,13 @@ export default function DispatcherIndex() {
     }
   };
 
-  // ─── Assign Trip Flow ───────────────────────────────────────────
+  // ─── FIXED: Navigate to GPS Tracking ──────────────────────────────
+  const navigateToGPS = () => {
+    console.log("📍 Navigating to GPS tracking...");
+    // Use the correct path - go to driver's gps-tracking
+    router.push("/staff/(driver)/gps-tracking");
+  };
+
   const openAssignModal = (trip: any) => {
     setSelectedTrip(trip);
     setSelectedDriverId(null);
@@ -227,11 +234,6 @@ export default function DispatcherIndex() {
     }
   };
 
-  // ─── Navigate to GPS Tracking ───────────────────────────────────
-  const navigateToGPS = () => {
-    router.push("/staff/(driver)/gps-tracking");
-  };
-
   if (loading) {
     return (
       <View className="flex-1 items-center justify-center bg-[#0a1628]">
@@ -248,7 +250,6 @@ export default function DispatcherIndex() {
       className="flex-1 bg-[#0a1628]"
       style={{ paddingTop: insets.top }}
     >
-      {/* ─── DRIVER-STYLE HEADER ───────────────────────────── */}
       <LinearGradient
         colors={["#0a1628", "#0c4a6e"]}
         start={{ x: 0, y: 0 }}
@@ -299,7 +300,6 @@ export default function DispatcherIndex() {
         {/* ─── GPS TRACKING PLACEHOLDER ────────────────────────────── */}
         <TouchableOpacity onPress={navigateToGPS} activeOpacity={0.9}>
           <Card className="p-4 h-48 items-center justify-center mb-4 relative overflow-hidden">
-            {/* Background gradient */}
             <LinearGradient
               colors={["#0c4a6e", "#0a1628"]}
               start={{ x: 0, y: 0 }}
@@ -313,7 +313,6 @@ export default function DispatcherIndex() {
               }}
             />
 
-            {/* Content */}
             <View className="items-center z-10">
               <View className="flex-row items-center gap-2 mb-3">
                 <MapPin size={24} color="#38bdf8" />
@@ -326,7 +325,7 @@ export default function DispatcherIndex() {
                 <View className="items-center">
                   <Text className="text-white/60 text-xs">Active Vehicles</Text>
                   <Text className="text-white text-xl font-bold">
-                    {/* {onlineJeepneysCount || 0} */}
+                    {onlineJeepneysCount || 0}
                   </Text>
                 </View>
                 <View className="items-center">
@@ -340,11 +339,10 @@ export default function DispatcherIndex() {
               <View className="flex-row items-center gap-2 mt-1">
                 <Eye size={16} color="#94a3b8" />
                 <Text className="text-white/40 text-xs">
-                  Tap to view live maps
+                  Tap to view live map
                 </Text>
               </View>
 
-              {/* Simulated route line */}
               <View className="flex-row items-center gap-2 mt-2">
                 <View className="w-2 h-2 rounded-full bg-[#22c55e]" />
                 <View className="w-16 h-0.5 bg-[#38bdf8]/50" />
@@ -356,7 +354,6 @@ export default function DispatcherIndex() {
               </View>
             </View>
 
-            {/* Tap indicator */}
             <View className="absolute bottom-3 right-3 z-10">
               <Text className="text-white/20 text-xs">View Map →</Text>
             </View>

@@ -18,7 +18,11 @@
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "com.andevs.JeepQTrack"
+      "googleServicesFile": "./google-services.json",
+      "package": "com.andevs.JeepQTrack",
+      "permissions": [
+        "android.permission.POST_NOTIFICATIONS"
+      ]
     },
     "web": {
       "output": "static",
@@ -27,6 +31,7 @@
     },
     "plugins": [
       "expo-router",
+      "expo-notifications",
       [
         "expo-splash-screen",
         {
@@ -42,6 +47,14 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
-    }
+    },
+
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "59e56dea-8e12-4f2e-ba74-cb0b92e84592"
+      }
+    },
+    "owner": "andevs"
   }
 }

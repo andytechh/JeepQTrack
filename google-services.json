@@ -1,0 +1,63 @@
+{
+  "project_info": {
+    "project_number": "914343500857",
+    "firebase_url": "https://my-jeepq-app-default-rtdb.asia-southeast1.firebasedatabase.app",
+    "project_id": "my-jeepq-app",
+    "storage_bucket": "my-jeepq-app.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:914343500857:android:b7828c5618fabac84301e8",
+        "android_client_info": {
+          "package_name": "com.andevs.JeepQTrack"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "914343500857-3rofsgmtvmsaot00i5trf1kqtpm79vc3.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDkyaoTfiaEsZdO5IQtKC56aaHFiPLbx6I"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "914343500857-3rofsgmtvmsaot00i5trf1kqtpm79vc3.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "oauth_client": [
+        {
+          "client_id": "914343500857-3rofsgmtvmsaot00i5trf1kqtpm79vc3.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDkyaoTfiaEsZdO5IQtKC56aaHFiPLbx6I"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "914343500857-3rofsgmtvmsaot00i5trf1kqtpm79vc3.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

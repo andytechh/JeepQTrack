@@ -1,18 +1,16 @@
 // app/staff/(driver)/queue.tsx
 import { LinearGradient } from "expo-linear-gradient";
-import { router } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
 import {
-  AlertCircle,
   ArrowLeft,
   Bus,
   ChevronRight,
   Clock,
-  Clock as ClockIcon,
   MapPin,
   RefreshCw,
   Users
 } from "lucide-react-native";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -22,9 +20,10 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { supabase } from "../../../src/shared/config/supabase";
-import { useAuthStore } from "../../../src/shared/store/authStore";
+import { supabase } from "../../../../src/shared/config/supabase";
+import { useAuthStore } from "../../../../src/shared/store/authStore";
 
+// ─── TYPES ──────────────────────────────────────────────────────────
 interface QueueItem {
   id: string;
   plate_number: string;
@@ -37,7 +36,6 @@ interface QueueItem {
   driver_name: string;
   loading_started_at: string | null;
   loading_ends_at: string | null;
-  last_location_update: string | null;
 }
 
 interface Terminal {
@@ -51,6 +49,10 @@ const TERMINALS: Terminal[] = [
   { id: 2, name: "Daraga Terminal", location: "Daraga, Albay" },
 ];
 
+// ─── CACHE ──────────────────────────────────────────────────────────
+const queueCache = new Map<number, { data: QueueItem[]; timestamp: number }>();
+const CACHE_DURATION = 30000; // 30 seconds cache
+
 export default function QueueScreen() {
   const { user } = useAuthStore();
   const [loading, setLoading] = useState(true);
@@ -59,24 +61,40 @@ export default function QueueScreen() {
   const [queueItems, setQueueItems] = useState<QueueItem[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdate, setLastUpdate] = useState<string | null>(null);
+  const channelRef = useRef<any>(null);
 
-  useEffect(() => {
-    fetchQueue();
-    subscribeToQueue();
-  }, [selectedTerminal]);
+  // ─── FETCH QUEUE ──────────────────────────────────────────────────
+  const fetchQueue = useCallback(
+    async (forceRefresh = false) => {
+      try {
+        // Check cache first
+        const cached = queueCache.get(selectedTerminal);
+        const now = Date.now();
 
-  const fetchQueue = useCallback(async () => {
-    try {
-      setLoading(true);
-      setError(null);
+        if (
+          !forceRefresh &&
+          cached &&
+          now - cached.timestamp < CACHE_DURATION
+        ) {
+          console.log(
+            "📦 Using cached queue data for terminal:",
+            selectedTerminal,
+          );
+          setQueueItems(cached.data);
+          setLastUpdate(new Date(cached.timestamp).toISOString());
+          setLoading(false);
+          return;
+        }
 
-      console.log("📊 Fetching queue for terminal:", selectedTerminal);
+        setLoading(true);
+        setError(null);
 
-      // FIXED: Removed terminal_id filter since we're using separate function
-      const { data, error: fetchError } = await supabase
-        .from("jeepneys")
-        .select(
-          `
+        console.log("📊 Fetching queue for terminal:", selectedTerminal);
+
+        const { data, error: fetchError } = await supabase
+          .from("jeepneys")
+          .select(
+            `
           id,
           plate_number,
           bracket,
@@ -87,40 +105,62 @@ export default function QueueScreen() {
           capacity,
           driver_name,
           loading_started_at,
-          loading_ends_at,
-          last_location_update
+          loading_ends_at
         `,
-        )
-        .eq("terminal_id", selectedTerminal)
-        .in("status", ["waiting", "loading"])
-        .order("bracket", { ascending: true })
-        .order("queue_position", { ascending: true, nullsLast: true });
+          )
+          .eq("terminal_id", selectedTerminal)
+          .in("status", ["waiting", "loading"])
+          .order("bracket", { ascending: true })
+          .order("queue_position", { ascending: true, nullsLast: true });
 
-      if (fetchError) {
-        console.error("❌ Supabase error:", fetchError);
-        throw fetchError;
+        if (fetchError) throw fetchError;
+
+        const items = data || [];
+        console.log("✅ Queue data:", items.length, "items");
+
+        // Update cache
+        queueCache.set(selectedTerminal, { data: items, timestamp: now });
+
+        setQueueItems(items);
+        setLastUpdate(new Date().toISOString());
+      } catch (err: any) {
+        console.error("❌ Queue fetch error:", err);
+        setError(err.message || "Failed to fetch queue");
+      } finally {
+        setLoading(false);
+        setRefreshing(false);
       }
+    },
+    [selectedTerminal],
+  );
 
-      console.log("✅ Queue data:", data?.length || 0, "items");
-      setQueueItems(data || []);
-      setLastUpdate(new Date().toISOString());
-    } catch (err: any) {
-      console.error("Queue fetch error:", err);
-      setError(err.message || "Failed to fetch queue");
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, [selectedTerminal]);
+  // ─── FETCH ON FOCUS ───────────────────────────────────────────────
+  useFocusEffect(
+    useCallback(() => {
+      console.log("👁️ Queue screen focused - fetching data");
+      fetchQueue(); // Uses cache if available
+      subscribeToQueue();
 
+      return () => {
+        console.log("🔌 Queue screen unfocused - unsubscribing");
+        if (channelRef.current) {
+          channelRef.current.unsubscribe();
+          channelRef.current = null;
+        }
+      };
+    }, [fetchQueue]),
+  );
+
+  // ─── REALTIME SUBSCRIPTION ────────────────────────────────────────
   const subscribeToQueue = () => {
-    console.log(
-      "🔔 Subscribing to queue updates for terminal:",
-      selectedTerminal,
-    );
+    if (channelRef.current) {
+      channelRef.current.unsubscribe();
+    }
+
+    console.log("🔔 Subscribing to queue for terminal:", selectedTerminal);
 
     const channel = supabase
-      .channel(`queue_updates_${selectedTerminal}`)
+      .channel(`queue_terminal_${selectedTerminal}`)
       .on(
         "postgres_changes",
         {
@@ -130,25 +170,28 @@ export default function QueueScreen() {
           filter: `terminal_id=eq.${selectedTerminal}`,
         },
         (payload) => {
-          console.log("🔄 Queue update received:", payload.eventType);
-          fetchQueue();
+          console.log("🔄 Queue realtime update:", payload.eventType);
+          fetchQueue(true); // Force refresh on realtime update
         },
       )
       .subscribe((status) => {
-        console.log("📡 Subscription status:", status);
+        console.log("📡 Queue subscription status:", status);
       });
 
-    return () => {
-      console.log("🔌 Unsubscribing from queue updates");
-      channel.unsubscribe();
-    };
+    channelRef.current = channel;
   };
 
   const handleRefresh = async () => {
     setRefreshing(true);
-    await fetchQueue();
+    await fetchQueue(true); // Force refresh
   };
 
+  const handleTerminalChange = (terminalId: number) => {
+    setSelectedTerminal(terminalId);
+    // fetchQueue will be called by useFocusEffect dependency
+  };
+
+  // ─── HELPERS ──────────────────────────────────────────────────────
   const getStatusColor = (status: string) => {
     switch (status) {
       case "loading":
@@ -160,39 +203,7 @@ export default function QueueScreen() {
     }
   };
 
-  const getStatusLabel = (status: string) => {
-    switch (status) {
-      case "loading":
-        return "Loading";
-      case "waiting":
-        return "Waiting";
-      default:
-        return status || "Unknown";
-    }
-  };
-
-  const getStatusIcon = (status: string) => {
-    switch (status) {
-      case "loading":
-        return <ClockIcon size={16} color="#22c55e" />;
-      case "waiting":
-        return <Clock size={16} color="#f59e0b" />;
-      default:
-        return <AlertCircle size={16} color="#94a3b8" />;
-    }
-  };
-
-  const formatTime = (timestamp: string | null) => {
-    if (!timestamp) return "N/A";
-    const date = new Date(timestamp);
-    return date.toLocaleTimeString("en-US", {
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  };
-
   const getEstimatedWaitTime = (position: number) => {
-    // Each jeepney takes ~30 minutes loading
     return position * 30;
   };
 
@@ -206,6 +217,7 @@ export default function QueueScreen() {
     return "Finishing...";
   };
 
+  // ─── RENDER ──────────────────────────────────────────────────────
   const renderQueueItem = ({
     item,
     index,
@@ -217,7 +229,7 @@ export default function QueueScreen() {
     const isFirst = index === 0 && item.status === "loading";
 
     return (
-      <TouchableOpacity
+      <View
         style={{
           backgroundColor: isFirst
             ? "rgba(34,197,94,0.1)"
@@ -227,10 +239,6 @@ export default function QueueScreen() {
           marginBottom: 10,
           borderWidth: isFirst ? 2 : 1,
           borderColor: isFirst ? "#22c55e" : "rgba(255,255,255,0.05)",
-        }}
-        onPress={() => {
-          // Navigate to jeepney details
-          router.push(`/staff/jeepney/${item.id}`);
         }}
       >
         <View
@@ -283,7 +291,7 @@ export default function QueueScreen() {
                       fontWeight: "600",
                     }}
                   >
-                    {getStatusLabel(item.status)}
+                    {item.status === "loading" ? "Loading" : "Waiting"}
                   </Text>
                 </View>
               </View>
@@ -334,11 +342,11 @@ export default function QueueScreen() {
             </Text>
           </View>
         )}
-      </TouchableOpacity>
+      </View>
     );
   };
 
-  if (loading) {
+  if (loading && queueItems.length === 0) {
     return (
       <SafeAreaView
         style={{
@@ -356,47 +364,8 @@ export default function QueueScreen() {
     );
   }
 
-  if (error) {
-    return (
-      <SafeAreaView
-        style={{
-          flex: 1,
-          backgroundColor: "#0a1628",
-          justifyContent: "center",
-          alignItems: "center",
-          padding: 20,
-        }}
-      >
-        <AlertCircle size={48} color="#ef4444" />
-        <Text
-          style={{
-            color: "#ef4444",
-            fontSize: 16,
-            marginTop: 12,
-            textAlign: "center",
-          }}
-        >
-          {error}
-        </Text>
-        <TouchableOpacity
-          style={{
-            marginTop: 16,
-            backgroundColor: "#0ea5e9",
-            paddingHorizontal: 24,
-            paddingVertical: 10,
-            borderRadius: 12,
-          }}
-          onPress={handleRefresh}
-        >
-          <Text style={{ color: "white", fontWeight: "600" }}>Retry</Text>
-        </TouchableOpacity>
-      </SafeAreaView>
-    );
-  }
-
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: "#0a1628" }}>
-      {/* Header */}
       <LinearGradient
         colors={["#0c4a6e", "#0a1628"]}
         start={{ x: 0, y: 0 }}
@@ -470,7 +439,7 @@ export default function QueueScreen() {
                     : "rgba(255,255,255,0.05)",
                 alignItems: "center",
               }}
-              onPress={() => setSelectedTerminal(terminal.id)}
+              onPress={() => handleTerminalChange(terminal.id)}
             >
               <Text
                 style={{
@@ -490,7 +459,6 @@ export default function QueueScreen() {
         </View>
       </LinearGradient>
 
-      {/* Queue List */}
       <FlatList
         data={queueItems}
         renderItem={renderQueueItem}
@@ -504,13 +472,7 @@ export default function QueueScreen() {
         }
         contentContainerStyle={{ padding: 16, paddingBottom: 100 }}
         ListEmptyComponent={
-          <View
-            style={{
-              alignItems: "center",
-              justifyContent: "center",
-              paddingVertical: 60,
-            }}
-          >
+          <View style={{ alignItems: "center", paddingVertical: 60 }}>
             <Bus size={48} color="#334155" />
             <Text
               style={{
@@ -530,7 +492,7 @@ export default function QueueScreen() {
                 textAlign: "center",
               }}
             >
-              No jeepneys currently waiting or loading at this terminal.
+              No jeepneys waiting or loading at this terminal.
             </Text>
           </View>
         }

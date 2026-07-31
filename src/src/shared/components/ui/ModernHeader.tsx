@@ -32,8 +32,10 @@ export const ModernHeader: React.FC<ModernHeaderProps> = ({
       <View className="flex-row items-center justify-between">
         {/* Logo */}
         <View className="flex-row items-center">
-          <View className=" bg-white/20 rounded-lg items-center justify-center mr-2">
-            <Text className="text-black font-bold text-3xl">JeepQss</Text>
+          <View className=" bg-[#4B5694]/20 rounded-lg items-center justify-center mr-2">
+            <Text className="text-[#EAE0CF] font-bold text-3xl">
+              JeepQs Track
+            </Text>
           </View>
         </View>
 
@@ -43,7 +45,7 @@ export const ModernHeader: React.FC<ModernHeaderProps> = ({
             onPress={onNotificationPress}
             className="relative p-1"
           >
-            <Bell size={27} color="black" />
+            <Bell size={27} color="#EAE0CF" />
             {notificationCount > 0 && (
               <View className="absolute -top-0.5 -right-0.5 bg-red-500 rounded-full min-w-[18px] h-[18px] items-center justify-center border-2 border-primary-500">
                 <Text className="text-black text-[10px] font-bold">
@@ -57,7 +59,7 @@ export const ModernHeader: React.FC<ModernHeaderProps> = ({
             onPress={onAvatarPress}
             className="w-9 h-9 bg-white/20 rounded-full items-center justify-center border border-white/30"
           >
-            <Text className="text-black font-bold text-sm">
+            <Text className="text-[#EAE0CF]  font-bold text-sm">
               {getInitials(avatarText)}
             </Text>
           </TouchableOpacity>

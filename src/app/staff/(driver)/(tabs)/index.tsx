@@ -21,10 +21,10 @@ import {
   View,
 } from "react-native";
 
+import { TripHistory } from "../(screen)/trip-history";
 import { supabase } from "../../../../src/shared/config/supabase";
 import { NotificationService } from "../../../../src/shared/services/NotificationService";
 import { useAuthStore } from "../../../../src/shared/store/authStore";
-
 const { width } = Dimensions.get("window");
 
 // ─── TYPES ──────────────────────────────────────────────────────────
@@ -137,6 +137,8 @@ export default function DriverDashboard() {
     { status: string; timestamp: string }[]
   >([]);
   const [onlineStatus, setOnlineStatus] = useState(true);
+  const [trips, setTrips] = useState<any[]>([]);
+  const [showAllTrips, setShowAllTrips] = useState(false);
 
   // ─── DATA FETCHING ────────────────────────────────────────────────
   const fetchData = useCallback(async () => {
@@ -207,6 +209,15 @@ export default function DriverDashboard() {
           ), // Assuming ₱15 fare
         });
       }
+      // Fetch trip history
+      const { data: tripHistory } = await supabase
+        .from("trips_history")
+        .select("*")
+        .eq("jeepney_id", user.jeepneyId)
+        .order("departure_time", { ascending: false })
+        .limit(10);
+
+      if (tripHistory) setTrips(tripHistory);
 
       // 5. Fetch status history
       const { data: historyData } = await supabase
@@ -731,23 +742,28 @@ export default function DriverDashboard() {
                 </Text>
                 <Text
                   style={{
-                    color: queueInfo ? "#38bdf8" : "#64748b",
+                    color:
+                      jeepney?.queue_position && jeepney.queue_position > 0
+                        ? "#38bdf8"
+                        : "#64748b",
                     fontSize: 22,
                     fontWeight: "900",
                     letterSpacing: -0.66,
                   }}
                 >
-                  #{queueInfo?.queue_position || "—"}
+                  #{jeepney?.queue_position || "—"}
                 </Text>
-                {queueInfo && (
+                {jeepney?.queue_position && jeepney.queue_position > 0 && (
                   <Text style={{ color: "rgba(255,255,255,0.3)", fontSize: 9 }}>
-                    Entered:{" "}
-                    {new Date(queueInfo.entered_at).toLocaleTimeString()}
+                    {jeepney.status === "waiting"
+                      ? "Waiting for dispatch"
+                      : jeepney.status === "loading"
+                        ? "Currently loading"
+                        : `Position #${jeepney.queue_position}`}
                   </Text>
                 )}
               </View>
             </View>
-
             <View
               style={{
                 height: 1,
@@ -1102,7 +1118,7 @@ export default function DriverDashboard() {
 
             {/* Camera feed mockup */}
             <TouchableOpacity
-              onPress={() => router.push("/staff/(driver)/camera")}
+              onPress={() => router.push("/")}
               style={{
                 height: 120,
                 borderRadius: 14,
@@ -1282,6 +1298,12 @@ export default function DriverDashboard() {
               ))}
             </View>
           </View>
+          {/* Trip History */}
+          <TripHistory
+            trips={trips}
+            showAll={showAllTrips}
+            onToggleShowAll={() => setShowAllTrips(!showAllTrips)}
+          />
         </View>
       </ScrollView>
     </View>

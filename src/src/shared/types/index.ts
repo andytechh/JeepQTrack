@@ -27,6 +27,7 @@ export interface Jeepney {
   plateNumber: string;
   bracket: number;
   capacity: number;
+  queue_position: number;
   status: "waiting" | "en_route" | "arrived" | "dispatched" | "inactive";
   currentOccupancy: number;
   lastOccupancyUpdate: string;

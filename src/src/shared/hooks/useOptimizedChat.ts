@@ -1,7 +1,10 @@
+// src/shared/hooks/useOptimizedChat.ts
+import * as Notifications from "expo-notifications";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AppState } from "react-native";
+import { AppState, Platform } from "react-native";
 import { supabase } from "../config/supabase";
 import { useAuthStore } from "../store/authStore";
+import { useChatStore } from "../store/chatStore";
 
 // ─── TYPES ──────────────────────────────────────────────────────────
 interface ChatMessage {
@@ -10,7 +13,9 @@ interface ChatMessage {
   sender_id: string;
   message: string;
   created_at: string;
+  updated_at?: string;
   read_by: string[];
+  status?: string;
   sender?: {
     id: string;
     display_name: string;
@@ -22,16 +27,39 @@ interface ChatMessage {
 // ─── CONSTANTS ──────────────────────────────────────────────────────
 const ROOM_ID = "staff-general-chat";
 const PAGE_SIZE = 20;
-const CACHE_SIZE = 50; // Only keep last 50 messages in memory
-const DEBOUNCE_MS = 1000; // 1 second debounce
+const CACHE_SIZE = 50;
+const DEBOUNCE_MS = 1000;
+
+// ─── NOTIFICATION CHANNEL ───────────────────────────────────────────
+const setupNotificationChannel = async () => {
+  if (Platform.OS === "android") {
+    try {
+      await Notifications.setNotificationChannelAsync("chat", {
+        name: "Chat Messages",
+        importance: Notifications.AndroidImportance.HIGH,
+        vibrationPattern: [0, 250, 250, 250],
+        enableVibrate: true,
+        showBadge: true,
+      });
+      console.log("✅ Chat notification channel created");
+    } catch (error) {
+      console.error("❌ Failed to create chat notification channel:", error);
+    }
+  }
+};
 
 // ─── SINGLETON CONNECTION ───────────────────────────────────────────
-// 1. Single WebSocket for entire app
 class ChatConnection {
   private static instance: ChatConnection;
   private channel: any = null;
   private listeners = new Set<(msg: ChatMessage) => void>();
   private debounceTimer: NodeJS.Timeout | null = null;
+  private currentUserId: string | null = null;
+  private appState = "active";
+  private isSubscribed = false;
+  private isConnecting = false;
+  private reconnectAttempts = 0;
+  private maxReconnectAttempts = 5;
 
   static getInstance() {
     if (!ChatConnection.instance) {
@@ -41,38 +69,103 @@ class ChatConnection {
   }
 
   connect(userId: string) {
-    if (this.channel) return; // Already connected
+    this.currentUserId = userId;
 
-    // 4. Debounce realtime updates
-    this.channel = supabase
-      .channel(`chat_${ROOM_ID}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "chat_messages",
-          filter: `room_id=eq.${ROOM_ID}`,
-        },
-        (payload) => {
-          // Debounce: batch updates within 1 second
-          if (this.debounceTimer) clearTimeout(this.debounceTimer);
-          this.debounceTimer = setTimeout(() => {
-            this.notifyListeners(payload.new);
-          }, DEBOUNCE_MS);
-        },
-      )
-      .subscribe();
+    if (this.isSubscribed) {
+      console.log("📡 Already subscribed to chat channel");
+      return;
+    }
+
+    if (this.isConnecting) {
+      console.log("📡 Already connecting to chat channel");
+      return;
+    }
+
+    if (this.channel) {
+      try {
+        this.channel.unsubscribe();
+      } catch (e) {
+        console.log("Error unsubscribing:", e);
+      }
+      this.channel = null;
+      this.isSubscribed = false;
+    }
+
+    this.isConnecting = true;
+    setupNotificationChannel();
+
+    console.log("📡 Creating new chat subscription...");
+
+    const channelName = `chat_${ROOM_ID}_${Date.now()}`;
+    this.channel = supabase.channel(channelName);
+
+    this.channel.on(
+      "postgres_changes",
+      {
+        event: "INSERT",
+        schema: "public",
+        table: "chat_messages",
+        filter: `room_id=eq.${ROOM_ID}`,
+      },
+      (payload) => {
+        if (this.debounceTimer) clearTimeout(this.debounceTimer);
+        this.debounceTimer = setTimeout(() => {
+          const newMsg = payload.new as ChatMessage;
+          this.notifyListeners(newMsg);
+          this.sendPushIfNeeded(newMsg);
+        }, DEBOUNCE_MS);
+      },
+    );
+
+    this.channel.subscribe((status: string) => {
+      console.log(`📡 Chat subscription status: ${status}`);
+      if (status === "SUBSCRIBED") {
+        this.isSubscribed = true;
+        this.isConnecting = false;
+        this.reconnectAttempts = 0;
+      } else if (status === "CHANNEL_ERROR") {
+        this.isConnecting = false;
+        this.isSubscribed = false;
+        this.handleReconnect();
+      }
+    });
   }
 
-  // 5. Disconnect when app in background
+  private handleReconnect() {
+    if (
+      this.reconnectAttempts < this.maxReconnectAttempts &&
+      this.currentUserId
+    ) {
+      this.reconnectAttempts++;
+      console.log(
+        `🔄 Reconnecting attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts}`,
+      );
+      setTimeout(() => {
+        this.connect(this.currentUserId!);
+      }, 2000 * this.reconnectAttempts);
+    } else {
+      console.log("❌ Max reconnect attempts reached");
+    }
+  }
+
+  setAppState(state: string) {
+    this.appState = state;
+  }
+
   disconnect() {
     if (this.channel) {
-      this.channel.unsubscribe();
+      try {
+        this.channel.unsubscribe();
+      } catch (e) {
+        console.log("Error unsubscribing:", e);
+      }
       this.channel = null;
+      this.isSubscribed = false;
+      this.isConnecting = false;
     }
     if (this.debounceTimer) {
       clearTimeout(this.debounceTimer);
+      this.debounceTimer = null;
     }
   }
 
@@ -82,12 +175,65 @@ class ChatConnection {
   }
 
   private notifyListeners(message: ChatMessage) {
-    this.listeners.forEach((cb) => cb(message));
+    this.listeners.forEach((cb) => {
+      try {
+        cb(message);
+      } catch (error) {
+        console.error("Error in listener:", error);
+      }
+    });
+  }
+
+  private async sendPushIfNeeded(message: ChatMessage) {
+    if (
+      this.appState !== "active" &&
+      message.sender_id !== this.currentUserId &&
+      this.currentUserId
+    ) {
+      try {
+        const { data: sender } = await supabase
+          .from("users")
+          .select("display_name")
+          .eq("id", message.sender_id)
+          .single();
+
+        const senderName = sender?.display_name || "Someone";
+
+        const { data: receiver } = await supabase
+          .from("users")
+          .select("expo_push_token")
+          .eq("id", this.currentUserId)
+          .single();
+
+        if (receiver?.expo_push_token) {
+          await fetch("https://exp.host/--/api/v2/push/send", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              to: receiver.expo_push_token,
+              title: `💬 ${senderName}`,
+              body: message.message.substring(0, 100),
+              priority: "high",
+              channelId: "chat",
+              badge: 1,
+              data: {
+                type: "chat",
+                room_id: ROOM_ID,
+                sender_id: message.sender_id,
+                message_id: message.id,
+              },
+            }),
+          });
+          console.log("📲 Push notification sent for chat message");
+        }
+      } catch (error) {
+        console.error("Push notification error:", error);
+      }
+    }
   }
 }
 
 // ─── MEMORY CACHE ───────────────────────────────────────────────────
-// 2. Cache only last 50 messages
 class MessageCache {
   private messages: ChatMessage[] = [];
   private readonly maxSize: number;
@@ -101,11 +247,8 @@ class MessageCache {
   }
 
   add(message: ChatMessage) {
-    // Avoid duplicates
     if (this.messages.some((m) => m.id === message.id)) return;
-
     this.messages.push(message);
-    // Trim to max size
     if (this.messages.length > this.maxSize) {
       this.messages = this.messages.slice(-this.maxSize);
     }
@@ -127,15 +270,17 @@ class MessageCache {
   clear() {
     this.messages = [];
   }
-
-  get size() {
-    return this.messages.length;
-  }
 }
 
 // ─── MAIN HOOK ──────────────────────────────────────────────────────
 export function useOptimizedChat() {
   const { user } = useAuthStore();
+  const {
+    unreadCount,
+    setUnreadCount,
+    incrementUnreadCount,
+    resetUnreadCount,
+  } = useChatStore();
   const connection = useMemo(() => ChatConnection.getInstance(), []);
   const cache = useMemo(() => new MessageCache(CACHE_SIZE), []);
 
@@ -143,15 +288,14 @@ export function useOptimizedChat() {
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [hasMore, setHasMore] = useState(true);
-  const [unreadCount, setUnreadCount] = useState(0);
 
   const oldestMessageRef = useRef<string | null>(null);
+  const mountedRef = useRef(true);
+  const isInitialLoadRef = useRef(true);
 
-  // ─── FETCH INITIAL MESSAGES ───────────────────────────────────────
   const fetchInitialMessages = useCallback(async () => {
     try {
       setLoading(true);
-
       const { data, error } = await supabase
         .from("chat_messages")
         .select("*, sender:users!sender_id(id, display_name, role, avatar_url)")
@@ -164,24 +308,35 @@ export function useOptimizedChat() {
       const msgs = (data || []).reverse();
       cache.clear();
       cache.addBatch(msgs);
-      setMessages(cache.getAll());
 
-      if (msgs.length > 0) {
-        oldestMessageRef.current = msgs[0].id;
+      if (mountedRef.current) {
+        setMessages(cache.getAll());
+
+        if (user?.uid) {
+          const unread = msgs.filter(
+            (msg) =>
+              msg.sender_id !== user.uid && !msg.read_by?.includes(user.uid),
+          ).length;
+          setUnreadCount(unread);
+          console.log(`📊 Unread count: ${unread}`);
+        }
+
+        if (msgs.length > 0) {
+          oldestMessageRef.current = msgs[0].id;
+        }
+        setHasMore(msgs.length === PAGE_SIZE);
       }
-      setHasMore(msgs.length === PAGE_SIZE);
     } catch (error) {
       console.error("Fetch error:", error);
     } finally {
-      setLoading(false);
+      if (mountedRef.current) {
+        setLoading(false);
+      }
     }
-  }, [cache]);
+  }, [cache, user?.uid, setUnreadCount]);
 
-  // ─── PAGINATE OLDER MESSAGES ──────────────────────────────────────
-  // 3. Paginate older messages from server
   const loadOlderMessages = useCallback(async () => {
     if (!oldestMessageRef.current || !hasMore) return;
-
     try {
       const { data: olderMsg } = await supabase
         .from("chat_messages")
@@ -202,7 +357,7 @@ export function useOptimizedChat() {
       if (error) throw error;
 
       const olderMessages = (data || []).reverse();
-      if (olderMessages.length > 0) {
+      if (olderMessages.length > 0 && mountedRef.current) {
         oldestMessageRef.current = olderMessages[0].id;
         cache.prepend(olderMessages);
         setMessages(cache.getAll());
@@ -213,11 +368,9 @@ export function useOptimizedChat() {
     }
   }, [cache, hasMore]);
 
-  // ─── SEND MESSAGE ─────────────────────────────────────────────────
   const sendMessage = useCallback(
     async (text: string) => {
       if (!text.trim() || !user?.uid) return;
-
       setSending(true);
       try {
         const { data, error } = await supabase
@@ -235,8 +388,7 @@ export function useOptimizedChat() {
 
         if (error) throw error;
 
-        // Optimistically add to cache
-        if (data) {
+        if (data && mountedRef.current) {
           cache.add(data);
           setMessages(cache.getAll());
         }
@@ -249,62 +401,115 @@ export function useOptimizedChat() {
     [user?.uid, cache],
   );
 
-  // ─── MARK AS READ ─────────────────────────────────────────────────
   const markAsRead = useCallback(async () => {
     if (!user?.uid) return;
-    setUnreadCount(0);
+
+    resetUnreadCount();
 
     try {
-      await supabase.rpc("mark_messages_read", {
+      const { error: rpcError } = await supabase.rpc("mark_messages_read", {
         p_room_id: ROOM_ID,
         p_user_id: user.uid,
       });
+
+      if (rpcError) {
+        console.error("❌ RPC Error:", rpcError);
+        const { error: updateError } = await supabase
+          .from("chat_messages")
+          .update({
+            read_by: supabase.sql`array_append(read_by, ${user.uid})`,
+          })
+          .eq("room_id", ROOM_ID)
+          .neq("sender_id", user.uid)
+          .not("read_by", "cs", `{${user.uid}}`);
+
+        if (updateError) {
+          console.error("❌ Fallback update error:", updateError);
+        } else {
+          console.log("✅ Messages marked as read (fallback)");
+        }
+      } else {
+        console.log("✅ Messages marked as read (RPC)");
+      }
     } catch (error) {
-      console.error("Mark read error:", error);
+      console.error("❌ Mark read error:", error);
     }
-  }, [user?.uid]);
+  }, [user?.uid, resetUnreadCount]);
 
-  // ─── CONNECTION LIFECYCLE ─────────────────────────────────────────
+  const refreshMessages = useCallback(async () => {
+    await fetchInitialMessages();
+  }, [fetchInitialMessages]);
+
   useEffect(() => {
-    if (!user?.uid) return;
+    mountedRef.current = true;
+    isInitialLoadRef.current = true;
 
-    // Connect
+    if (!user?.uid) {
+      setLoading(false);
+      return;
+    }
+
     connection.connect(user.uid);
 
-    // Listen for new messages
     const unsubscribe = connection.addListener((newMessage) => {
-      if (newMessage.sender_id !== user.uid) {
-        setUnreadCount((prev) => Math.min(prev + 1, 99));
+      if (mountedRef.current) {
+        if (newMessage.sender_id !== user.uid) {
+          const isRead = newMessage.read_by?.includes(user.uid);
+          if (!isRead) {
+            incrementUnreadCount();
+          }
+        }
+        cache.add(newMessage);
+        setMessages(cache.getAll());
       }
-      cache.add(newMessage);
-      setMessages(cache.getAll());
     });
 
-    // Fetch initial messages
     fetchInitialMessages();
 
     return () => {
+      mountedRef.current = false;
       unsubscribe();
     };
-  }, [user?.uid, connection, cache, fetchInitialMessages]);
+  }, [
+    user?.uid,
+    connection,
+    cache,
+    fetchInitialMessages,
+    incrementUnreadCount,
+  ]);
 
-  // ─── APP STATE HANDLER ────────────────────────────────────────────
-  // 5. Disconnect when app in background
   useEffect(() => {
     const handleAppState = (nextState: string) => {
+      connection.setAppState(nextState);
+
       if (nextState === "active") {
         if (user?.uid) {
           connection.connect(user.uid);
-          fetchInitialMessages(); // Refresh when coming back
+          if (!isInitialLoadRef.current) {
+            fetchInitialMessages();
+          }
+          isInitialLoadRef.current = false;
         }
-      } else if (nextState === "background") {
-        connection.disconnect();
       }
     };
 
     const subscription = AppState.addEventListener("change", handleAppState);
     return () => subscription.remove();
   }, [user?.uid, connection, fetchInitialMessages]);
+
+  useEffect(() => {
+    const subscription = Notifications.addNotificationResponseReceivedListener(
+      (response) => {
+        const data = response.notification.request.content.data;
+        if (data?.type === "chat") {
+          console.log("👆 Chat notification tapped");
+          markAsRead();
+        }
+      },
+    );
+
+    return () => subscription.remove();
+  }, [markAsRead]);
 
   return {
     messages,
@@ -315,6 +520,6 @@ export function useOptimizedChat() {
     sendMessage,
     loadOlderMessages,
     markAsRead,
-    refreshMessages: fetchInitialMessages,
+    refreshMessages,
   };
 }

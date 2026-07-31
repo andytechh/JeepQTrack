@@ -1,4 +1,3 @@
-// app/staff/(driver)/(tabs)/_layout.tsx
 import { Tabs } from "expo-router";
 import {
   LayoutDashboard,
@@ -7,8 +6,12 @@ import {
   MessageCircle,
   Settings,
 } from "lucide-react-native";
+import { Text, View } from "react-native";
+import { useOptimizedChat } from "../../../../src/shared/hooks/useOptimizedChat";
 
 export default function DriverTabsLayout() {
+  const { unreadCount, markAsRead } = useOptimizedChat();
+
   return (
     <Tabs
       screenOptions={{
@@ -60,7 +63,37 @@ export default function DriverTabsLayout() {
         options={{
           title: "Chat",
           tabBarIcon: ({ color, size }) => (
-            <MessageCircle size={size} color={color} />
+            <View>
+              <MessageCircle size={size} color={color} />
+              {unreadCount > 0 && (
+                <View
+                  style={{
+                    position: "absolute",
+                    top: -6,
+                    right: -8,
+                    backgroundColor: "#ef4444",
+                    borderRadius: 10,
+                    minWidth: 18,
+                    height: 18,
+                    justifyContent: "center",
+                    alignItems: "center",
+                    paddingHorizontal: 4,
+                    borderWidth: 2,
+                    borderColor: "#0C2C55",
+                  }}
+                >
+                  <Text
+                    style={{
+                      color: "white",
+                      fontSize: 10,
+                      fontWeight: "700",
+                    }}
+                  >
+                    {unreadCount > 99 ? "99+" : unreadCount}
+                  </Text>
+                </View>
+              )}
+            </View>
           ),
         }}
       />

@@ -33,11 +33,11 @@ import {
   Card,
   LoadingSpinner,
   StatusBadge,
-} from "../../../src/shared/components";
-import { supabase } from "../../../src/shared/config/supabase";
-import { AuthService } from "../../../src/shared/services/AuthService";
-import { ChatService } from "../../../src/shared/services/ChatService";
-import { useAuthStore } from "../../../src/shared/store/authStore";
+} from "../../../../src/shared/components";
+import { supabase } from "../../../../src/shared/config/supabase";
+import { AuthService } from "../../../../src/shared/services/AuthService";
+import { ChatService } from "../../../../src/shared/services/ChatService";
+import { useAuthStore } from "../../../../src/shared/store/authStore";
 
 interface UserProfile {
   id: string;

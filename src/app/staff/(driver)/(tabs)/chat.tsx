@@ -27,17 +27,17 @@ import {
   TextInput,
   TouchableOpacity,
   TouchableWithoutFeedback,
-  View
+  View,
 } from "react-native";
 import Toast from "react-native-toast-message";
-import { supabase } from "../../../src/shared/config/supabase";
-import { theme } from "../../../src/shared/constants/theme";
+import { supabase } from "../../../../src/shared/config/supabase";
+import { theme } from "../../../../src/shared/constants/theme";
 import {
   ChatMessage,
   ChatService,
-} from "../../../src/shared/services/ChatService";
-import { NotificationService } from "../../../src/shared/services/NotificationService";
-import { useAuthStore } from "../../../src/shared/store/authStore";
+} from "../../../../src/shared/services/ChatService";
+import { NotificationService } from "../../../../src/shared/services/NotificationService";
+import { useAuthStore } from "../../../../src/shared/store/authStore";
 
 const ROOM_ID = "staff-general-chat";
 const { height: SCREEN_HEIGHT } = Dimensions.get("window");

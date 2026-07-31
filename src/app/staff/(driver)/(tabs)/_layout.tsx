@@ -23,11 +23,11 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-import { ModernHeader } from "../../../src/shared/components";
-import { supabase } from "../../../src/shared/config/supabase";
-import { AuthService } from "../../../src/shared/services/AuthService";
-import { NotificationService } from "../../../src/shared/services/NotificationService";
-import { useAuthStore } from "../../../src/shared/store/authStore";
+import { ModernHeader } from "../../../../src/shared/components";
+import { supabase } from "../../../../src/shared/config/supabase";
+import { AuthService } from "../../../../src/shared/services/AuthService";
+import { NotificationService } from "../../../../src/shared/services/NotificationService";
+import { useAuthStore } from "../../../../src/shared/store/authStore";
 
 // ─── Types ──────────────────────────────────────────────────────────
 interface Notification {

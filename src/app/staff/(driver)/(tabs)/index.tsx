@@ -21,9 +21,9 @@ import {
   View,
 } from "react-native";
 
-import { supabase } from "../../../src/shared/config/supabase";
-import { NotificationService } from "../../../src/shared/services/NotificationService";
-import { useAuthStore } from "../../../src/shared/store/authStore";
+import { supabase } from "../../../../src/shared/config/supabase";
+import { NotificationService } from "../../../../src/shared/services/NotificationService";
+import { useAuthStore } from "../../../../src/shared/store/authStore";
 
 const { width } = Dimensions.get("window");
 

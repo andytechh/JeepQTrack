@@ -35,7 +35,9 @@ export default function ChatScreen() {
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const flatListRef = useRef<FlatList>(null);
   const inputRef = useRef<TextInput>(null);
+  const hasMarkedAsReadRef = useRef(false);
 
+  // --- Keyboard Listeners ──────────────────────────────────────────
   useEffect(() => {
     const keyboardDidShowListener = Keyboard.addListener(
       "keyboardDidShow",
@@ -72,10 +74,21 @@ export default function ChatScreen() {
     }
   };
 
+  // ─── FOCUS EFFECT - Mark as read when screen focuses ────────────
   useFocusEffect(
     useCallback(() => {
       console.log("📱 Chat focused, marking as read");
+      hasMarkedAsReadRef.current = true;
       markAsRead();
+
+      // Reset the flag after a delay
+      const timer = setTimeout(() => {
+        hasMarkedAsReadRef.current = false;
+      }, 2000);
+
+      return () => {
+        clearTimeout(timer);
+      };
     }, [markAsRead]),
   );
 
@@ -113,6 +126,7 @@ export default function ChatScreen() {
       />
 
       <View className="flex-1">
+        {/* Header */}
         <View className="flex-row items-center justify-between px-4 py-3 border-b border-white/10 bg-[#0a1628]">
           <Text className="text-white text-lg font-bold">Staff Chat</Text>
           {unreadCount > 0 && (
@@ -124,6 +138,7 @@ export default function ChatScreen() {
           )}
         </View>
 
+        {/* Messages */}
         <FlatList
           ref={flatListRef}
           data={messages}
@@ -162,6 +177,7 @@ export default function ChatScreen() {
           }
         />
 
+        {/* Input bar */}
         <View
           className="flex-row items-end p-4 border-t border-white/10 gap-2"
           style={{
@@ -201,6 +217,7 @@ export default function ChatScreen() {
           </TouchableOpacity>
         </View>
 
+        {/* Bottom spacer */}
         {keyboardVisible && keyboardHeight > 0 && (
           <View style={{ height: keyboardHeight }} />
         )}

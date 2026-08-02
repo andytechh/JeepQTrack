@@ -1,527 +1,224 @@
-// app/staff/(driver)/queue.tsx
-import { LinearGradient } from "expo-linear-gradient";
-import { router, useFocusEffect } from "expo-router";
+import { JeepneyCard } from "@/src/shared/components/ui/JeepneyCard";
+import { useJeepneyQueue } from "@/src/shared/hooks/useJeepneyQueue";
+import { useRouter } from "expo-router";
+import { ArrowLeft, Bus, Search } from "lucide-react-native";
+import { useMemo, useState } from "react";
 import {
-  ArrowLeft,
-  Bus,
-  ChevronRight,
-  Clock,
-  MapPin,
-  RefreshCw,
-  Users
-} from "lucide-react-native";
-import { useCallback, useRef, useState } from "react";
-import {
-  ActivityIndicator,
   FlatList,
   RefreshControl,
   SafeAreaView,
+  StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
-import { supabase } from "../../../../src/shared/config/supabase";
-import { useAuthStore } from "../../../../src/shared/store/authStore";
 
-// ─── TYPES ──────────────────────────────────────────────────────────
-interface QueueItem {
-  id: string;
-  plate_number: string;
-  bracket: number;
-  status: string;
-  queue_position: number;
-  terminal_id: number;
-  current_occupancy: number;
-  capacity: number;
-  driver_name: string;
-  loading_started_at: string | null;
-  loading_ends_at: string | null;
-}
-
-interface Terminal {
-  id: number;
-  name: string;
-  location: string;
-}
-
-const TERMINALS: Terminal[] = [
-  { id: 1, name: "Donsol Terminal", location: "Donsol, Sorsogon" },
-  { id: 2, name: "Daraga Terminal", location: "Daraga, Albay" },
-];
-
-// ─── CACHE ──────────────────────────────────────────────────────────
-const queueCache = new Map<number, { data: QueueItem[]; timestamp: number }>();
-const CACHE_DURATION = 30000; // 30 seconds cache
+const TERMINAL_NAMES: Record<number, string> = {
+  1: "Donsol",
+  2: "Daraga",
+};
 
 export default function QueueScreen() {
-  const { user } = useAuthStore();
-  const [loading, setLoading] = useState(true);
+  const router = useRouter();
+  const { data, loading, error, lastUpdate, refetch } = useJeepneyQueue();
   const [refreshing, setRefreshing] = useState(false);
-  const [selectedTerminal, setSelectedTerminal] = useState<number>(1);
-  const [queueItems, setQueueItems] = useState<QueueItem[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [lastUpdate, setLastUpdate] = useState<string | null>(null);
-  const channelRef = useRef<any>(null);
+  const [query, setQuery] = useState("");
+  const [terminalFilter, setTerminalFilter] = useState<number | "all">("all");
 
-  // ─── FETCH QUEUE ──────────────────────────────────────────────────
-  const fetchQueue = useCallback(
-    async (forceRefresh = false) => {
-      try {
-        // Check cache first
-        const cached = queueCache.get(selectedTerminal);
-        const now = Date.now();
+  // Find the first loading jeepney to highlight as hero
+  const loadingJeepneys = useMemo(
+    () => data.filter((j) => j.status === "loading"),
+    [data],
+  );
+  const currentLoading = loadingJeepneys.length > 0 ? loadingJeepneys[0] : null;
 
-        if (
-          !forceRefresh &&
-          cached &&
-          now - cached.timestamp < CACHE_DURATION
-        ) {
-          console.log(
-            "📦 Using cached queue data for terminal:",
-            selectedTerminal,
-          );
-          setQueueItems(cached.data);
-          setLastUpdate(new Date(cached.timestamp).toISOString());
-          setLoading(false);
-          return;
-        }
-
-        setLoading(true);
-        setError(null);
-
-        console.log("📊 Fetching queue for terminal:", selectedTerminal);
-
-        const { data, error: fetchError } = await supabase
-          .from("jeepneys")
-          .select(
-            `
-          id,
-          plate_number,
-          bracket,
-          status,
-          queue_position,
-          terminal_id,
-          current_occupancy,
-          capacity,
-          driver_name,
-          loading_started_at,
-          loading_ends_at
-        `,
-          )
-          .eq("terminal_id", selectedTerminal)
-          .in("status", ["waiting", "loading"])
-          .order("bracket", { ascending: true })
-          .order("queue_position", { ascending: true, nullsLast: true });
-
-        if (fetchError) throw fetchError;
-
-        const items = data || [];
-        console.log("✅ Queue data:", items.length, "items");
-
-        // Update cache
-        queueCache.set(selectedTerminal, { data: items, timestamp: now });
-
-        setQueueItems(items);
-        setLastUpdate(new Date().toISOString());
-      } catch (err: any) {
-        console.error("❌ Queue fetch error:", err);
-        setError(err.message || "Failed to fetch queue");
-      } finally {
-        setLoading(false);
-        setRefreshing(false);
-      }
-    },
-    [selectedTerminal],
+  // All other jeepneys (waiting + any extra loading after the first)
+  const restQueue = useMemo(
+    () => data.filter((j) => j.id !== currentLoading?.id),
+    [data, currentLoading],
   );
 
-  // ─── FETCH ON FOCUS ───────────────────────────────────────────────
-  useFocusEffect(
-    useCallback(() => {
-      console.log("👁️ Queue screen focused - fetching data");
-      fetchQueue(); // Uses cache if available
-      subscribeToQueue();
-
-      return () => {
-        console.log("🔌 Queue screen unfocused - unsubscribing");
-        if (channelRef.current) {
-          channelRef.current.unsubscribe();
-          channelRef.current = null;
-        }
-      };
-    }, [fetchQueue]),
-  );
-
-  // ─── REALTIME SUBSCRIPTION ────────────────────────────────────────
-  const subscribeToQueue = () => {
-    if (channelRef.current) {
-      channelRef.current.unsubscribe();
-    }
-
-    console.log("🔔 Subscribing to queue for terminal:", selectedTerminal);
-
-    const channel = supabase
-      .channel(`queue_terminal_${selectedTerminal}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "jeepneys",
-          filter: `terminal_id=eq.${selectedTerminal}`,
-        },
-        (payload) => {
-          console.log("🔄 Queue realtime update:", payload.eventType);
-          fetchQueue(true); // Force refresh on realtime update
-        },
-      )
-      .subscribe((status) => {
-        console.log("📡 Queue subscription status:", status);
-      });
-
-    channelRef.current = channel;
-  };
+  // Apply search + terminal filter to the rest (hero is always shown if exists)
+  const visibleRest = useMemo(() => {
+    return restQueue.filter((item) => {
+      const matchesTerminal =
+        terminalFilter === "all" || item.terminal_id === terminalFilter;
+      const matchesSearch =
+        item.plate_number?.toLowerCase().includes(query.toLowerCase()) ||
+        item.driver_name?.toLowerCase().includes(query.toLowerCase());
+      return matchesTerminal && matchesSearch;
+    });
+  }, [restQueue, query, terminalFilter]);
 
   const handleRefresh = async () => {
     setRefreshing(true);
-    await fetchQueue(true); // Force refresh
+    await refetch();
+    setRefreshing(false);
   };
-
-  const handleTerminalChange = (terminalId: number) => {
-    setSelectedTerminal(terminalId);
-    // fetchQueue will be called by useFocusEffect dependency
-  };
-
-  // ─── HELPERS ──────────────────────────────────────────────────────
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case "loading":
-        return "#22c55e";
-      case "waiting":
-        return "#f59e0b";
-      default:
-        return "#94a3b8";
-    }
-  };
-
-  const getEstimatedWaitTime = (position: number) => {
-    return position * 30;
-  };
-
-  const getTimeRemaining = (endsAt: string | null) => {
-    if (!endsAt) return null;
-    const end = new Date(endsAt).getTime();
-    const now = Date.now();
-    const diff = Math.max(0, end - now);
-    const minutes = Math.floor(diff / 60000);
-    if (minutes > 0) return `${minutes}m remaining`;
-    return "Finishing...";
-  };
-
-  // ─── RENDER ──────────────────────────────────────────────────────
-  const renderQueueItem = ({
-    item,
-    index,
-  }: {
-    item: QueueItem;
-    index: number;
-  }) => {
-    const statusColor = getStatusColor(item.status);
-    const isFirst = index === 0 && item.status === "loading";
-
-    return (
-      <View
-        style={{
-          backgroundColor: isFirst
-            ? "rgba(34,197,94,0.1)"
-            : "rgba(15,23,42,0.8)",
-          borderRadius: 12,
-          padding: 16,
-          marginBottom: 10,
-          borderWidth: isFirst ? 2 : 1,
-          borderColor: isFirst ? "#22c55e" : "rgba(255,255,255,0.05)",
-        }}
-      >
-        <View
-          style={{
-            flexDirection: "row",
-            alignItems: "center",
-            justifyContent: "space-between",
-          }}
-        >
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-            <View
-              style={{
-                width: 36,
-                height: 36,
-                borderRadius: 18,
-                backgroundColor: isFirst
-                  ? "rgba(34,197,94,0.2)"
-                  : "rgba(14,165,233,0.2)",
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              <Text
-                style={{ fontSize: 16, fontWeight: "bold", color: statusColor }}
-              >
-                #{item.queue_position || "?"}
-              </Text>
-            </View>
-            <View>
-              <View
-                style={{ flexDirection: "row", alignItems: "center", gap: 6 }}
-              >
-                <Text
-                  style={{ color: "white", fontSize: 16, fontWeight: "600" }}
-                >
-                  {item.plate_number || "Unknown"}
-                </Text>
-                <View
-                  style={{
-                    backgroundColor: `${statusColor}20`,
-                    paddingHorizontal: 8,
-                    paddingVertical: 2,
-                    borderRadius: 10,
-                  }}
-                >
-                  <Text
-                    style={{
-                      color: statusColor,
-                      fontSize: 10,
-                      fontWeight: "600",
-                    }}
-                  >
-                    {item.status === "loading" ? "Loading" : "Waiting"}
-                  </Text>
-                </View>
-              </View>
-              <Text style={{ color: "#94a3b8", fontSize: 12 }}>
-                Bracket {item.bracket || 1} • {item.driver_name || "No Driver"}
-              </Text>
-            </View>
-          </View>
-          <ChevronRight size={20} color="#64748b" />
-        </View>
-
-        <View style={{ flexDirection: "row", gap: 16, marginTop: 12 }}>
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
-            <Users size={14} color="#64748b" />
-            <Text style={{ color: "#94a3b8", fontSize: 12 }}>
-              {item.current_occupancy || 0}/{item.capacity || 24}
-            </Text>
-          </View>
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
-            <Clock size={14} color="#64748b" />
-            <Text style={{ color: "#94a3b8", fontSize: 12 }}>
-              {item.status === "loading"
-                ? `Loading ${getTimeRemaining(item.loading_ends_at) || ""}`
-                : `ETA ~${getEstimatedWaitTime(item.queue_position || 0)} min`}
-            </Text>
-          </View>
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
-            <MapPin size={14} color="#64748b" />
-            <Text style={{ color: "#94a3b8", fontSize: 12 }}>
-              {item.terminal_id === 1 ? "Donsol" : "Daraga"}
-            </Text>
-          </View>
-        </View>
-
-        {isFirst && (
-          <View
-            style={{
-              marginTop: 8,
-              backgroundColor: "rgba(34,197,94,0.15)",
-              paddingHorizontal: 10,
-              paddingVertical: 4,
-              borderRadius: 6,
-              alignSelf: "flex-start",
-            }}
-          >
-            <Text style={{ color: "#4ade80", fontSize: 10, fontWeight: "600" }}>
-              ⭐ Currently Loading
-            </Text>
-          </View>
-        )}
-      </View>
-    );
-  };
-
-  if (loading && queueItems.length === 0) {
-    return (
-      <SafeAreaView
-        style={{
-          flex: 1,
-          backgroundColor: "#0a1628",
-          justifyContent: "center",
-          alignItems: "center",
-        }}
-      >
-        <ActivityIndicator size="large" color="#0ea5e9" />
-        <Text style={{ color: "#94a3b8", marginTop: 12 }}>
-          Loading queue...
-        </Text>
-      </SafeAreaView>
-    );
-  }
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: "#0a1628" }}>
-      <LinearGradient
-        colors={["#0c4a6e", "#0a1628"]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 16 }}
-      >
-        <View style={{ flexDirection: "row", alignItems: "center" }}>
+    <SafeAreaView style={styles.safe}>
+      {/* Header */}
+      <View style={styles.header}>
+        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+          <ArrowLeft size={24} color="#0f172a" />
+        </TouchableOpacity>
+        <Text style={styles.title}>Jeepney Queue</Text>
+        <Text style={styles.updateText}>
+          Updated {lastUpdate ? lastUpdate.toLocaleTimeString() : "just now"}
+        </Text>
+      </View>
+
+      {/* Search */}
+      <View style={styles.searchContainer}>
+        <Search size={18} color="#94a3b8" style={{ marginRight: 8 }} />
+        <TextInput
+          style={styles.searchInput}
+          placeholder="Search plate number or driver"
+          value={query}
+          onChangeText={setQuery}
+          placeholderTextColor="#94a3b8"
+        />
+      </View>
+
+      {/* Terminal toggle (All / Donsol / Daraga) */}
+      <View style={styles.toggleGroup}>
+        {(["all", 1, 2] as const).map((value) => (
           <TouchableOpacity
-            style={{
-              padding: 8,
-              borderRadius: 100,
-              backgroundColor: "rgba(255,255,255,0.1)",
-            }}
-            onPress={() => router.back()}
+            key={value}
+            style={[
+              styles.toggleItem,
+              terminalFilter === value && styles.toggleItemActive,
+            ]}
+            onPress={() => setTerminalFilter(value)}
           >
-            <ArrowLeft size={24} color="white" />
+            <Text
+              style={[
+                styles.toggleText,
+                terminalFilter === value && styles.toggleTextActive,
+              ]}
+            >
+              {value === "all" ? "All Terminals" : TERMINAL_NAMES[value]}
+            </Text>
           </TouchableOpacity>
-          <Text
-            style={{
-              flex: 1,
-              color: "white",
-              fontSize: 20,
-              fontWeight: "bold",
-              marginLeft: 12,
-            }}
-          >
-            Queue
-          </Text>
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-            <View
-              style={{
-                backgroundColor: "rgba(14,165,233,0.15)",
-                paddingHorizontal: 10,
-                paddingVertical: 4,
-                borderRadius: 12,
-                borderWidth: 1,
-                borderColor: "rgba(14,165,233,0.2)",
-              }}
-            >
-              <Text
-                style={{ color: "#38bdf8", fontSize: 12, fontWeight: "600" }}
-              >
-                {queueItems.filter((q) => q.status === "loading").length}{" "}
-                Loading
+        ))}
+      </View>
+
+      {/* Main content */}
+      {loading && !data.length ? (
+        <View style={styles.centered}>
+          <Text>Loading queue...</Text>
+        </View>
+      ) : error ? (
+        <View style={styles.centered}>
+          <Text style={{ color: "red" }}>{error}</Text>
+        </View>
+      ) : (
+        <FlatList
+          data={visibleRest}
+          renderItem={({ item }) => <JeepneyCard item={item} />}
+          keyExtractor={(item) => item.id}
+          contentContainerStyle={{ padding: 16, paddingBottom: 40 }}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
+          }
+          ListHeaderComponent={
+            <View>
+              {/* Hero card for currently loading jeepney */}
+              {currentLoading ? (
+                <View style={{ marginBottom: 20 }}>
+                  <Text style={styles.sectionTitle}>⭐ Currently Loading</Text>
+                  <JeepneyCard item={currentLoading} isCurrent />
+                </View>
+              ) : (
+                <View style={styles.centered}>
+                  <Text style={{ color: "#94a3b8", marginBottom: 16 }}>
+                    No jeepney is loading at the moment.
+                  </Text>
+                </View>
+              )}
+
+              {/* Summary of remaining queue */}
+              <View style={styles.listSummaryRow}>
+                <Text style={styles.listSummary}>
+                  {visibleRest.length} jeepney
+                  {visibleRest.length !== 1 ? "s" : ""} in queue
+                </Text>
+              </View>
+            </View>
+          }
+          ListEmptyComponent={
+            <View style={styles.centered}>
+              <Bus size={48} color="#cbd5e1" />
+              <Text style={{ marginTop: 12, fontSize: 16, color: "#94a3b8" }}>
+                No jeepneys match your filters
               </Text>
             </View>
-            <TouchableOpacity onPress={handleRefresh}>
-              <RefreshCw size={20} color="#94a3b8" />
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        {/* Terminal Selector */}
-        <View style={{ flexDirection: "row", gap: 10, marginTop: 16 }}>
-          {TERMINALS.map((terminal) => (
-            <TouchableOpacity
-              key={terminal.id}
-              style={{
-                flex: 1,
-                backgroundColor:
-                  selectedTerminal === terminal.id
-                    ? "rgba(14,165,233,0.2)"
-                    : "rgba(255,255,255,0.05)",
-                paddingVertical: 10,
-                paddingHorizontal: 16,
-                borderRadius: 12,
-                borderWidth: 1,
-                borderColor:
-                  selectedTerminal === terminal.id
-                    ? "rgba(14,165,233,0.3)"
-                    : "rgba(255,255,255,0.05)",
-                alignItems: "center",
-              }}
-              onPress={() => handleTerminalChange(terminal.id)}
-            >
-              <Text
-                style={{
-                  color:
-                    selectedTerminal === terminal.id ? "#38bdf8" : "#94a3b8",
-                  fontWeight: "600",
-                }}
-              >
-                {terminal.name.split(" ")[0]}
-              </Text>
-              <Text style={{ color: "#64748b", fontSize: 10 }}>
-                {queueItems.filter((q) => q.terminal_id === terminal.id).length}{" "}
-                jeepneys
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-      </LinearGradient>
-
-      <FlatList
-        data={queueItems}
-        renderItem={renderQueueItem}
-        keyExtractor={(item) => item.id}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={handleRefresh}
-            tintColor="#0ea5e9"
-          />
-        }
-        contentContainerStyle={{ padding: 16, paddingBottom: 100 }}
-        ListEmptyComponent={
-          <View style={{ alignItems: "center", paddingVertical: 60 }}>
-            <Bus size={48} color="#334155" />
-            <Text
-              style={{
-                color: "white",
-                fontSize: 18,
-                fontWeight: "600",
-                marginTop: 16,
-              }}
-            >
-              Queue is Empty
-            </Text>
-            <Text
-              style={{
-                color: "#64748b",
-                fontSize: 14,
-                marginTop: 8,
-                textAlign: "center",
-              }}
-            >
-              No jeepneys waiting or loading at this terminal.
-            </Text>
-          </View>
-        }
-        ListHeaderComponent={
-          queueItems.length > 0 ? (
-            <View
-              style={{
-                flexDirection: "row",
-                justifyContent: "space-between",
-                paddingHorizontal: 4,
-                paddingBottom: 8,
-                borderBottomWidth: 1,
-                borderBottomColor: "rgba(255,255,255,0.05)",
-              }}
-            >
-              <Text style={{ color: "#64748b", fontSize: 12 }}>
-                {queueItems.length} jeepney{queueItems.length > 1 ? "s" : ""} in
-                queue
-              </Text>
-              <Text style={{ color: "#64748b", fontSize: 12 }}>
-                Updated{" "}
-                {lastUpdate
-                  ? new Date(lastUpdate).toLocaleTimeString()
-                  : "just now"}
-              </Text>
-            </View>
-          ) : null
-        }
-      />
+          }
+        />
+      )}
     </SafeAreaView>
   );
 }
+
+const styles = StyleSheet.create({
+  safe: { flex: 1, backgroundColor: "#f8fafc" },
+  header: {
+    flexDirection: "row",
+    alignItems: "center",
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: "#e2e8f0",
+  },
+  backBtn: { marginRight: 12 },
+  title: { fontSize: 20, fontWeight: "bold", color: "#0f172a", flex: 1 },
+  updateText: { fontSize: 12, color: "#64748b" },
+  searchContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    margin: 16,
+    marginBottom: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    backgroundColor: "#ffffff",
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
+  },
+  searchInput: { flex: 1, fontSize: 16, color: "#0f172a" },
+  toggleGroup: {
+    flexDirection: "row",
+    marginHorizontal: 16,
+    marginBottom: 8,
+    borderRadius: 10,
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
+  },
+  toggleItem: {
+    flex: 1,
+    paddingVertical: 8,
+    alignItems: "center",
+    backgroundColor: "#ffffff",
+  },
+  toggleItemActive: { backgroundColor: "#0ea5e9" },
+  toggleText: { fontSize: 13, color: "#334155" },
+  toggleTextActive: { color: "#ffffff", fontWeight: "600" },
+  sectionTitle: {
+    fontSize: 15,
+    fontWeight: "600",
+    color: "#0f172a",
+    marginBottom: 8,
+    paddingHorizontal: 4,
+  },
+  listSummaryRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingHorizontal: 4,
+    marginBottom: 8,
+  },
+  listSummary: { fontSize: 13, color: "#64748b" },
+  centered: { paddingVertical: 40, alignItems: "center" },
+});

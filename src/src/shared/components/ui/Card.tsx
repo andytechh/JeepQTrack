@@ -1,28 +1,41 @@
-// src/shared/components/ui/Card.tsx
+// src/shared/components/Card.tsx
 import React from "react";
-import { View, ViewProps } from "react-native";
+import { View, ViewStyle } from "react-native";
+import { lightTheme, theme } from "../../constants/theme";
 
-interface CardProps extends ViewProps {
-  variant?: "default" | "stats" | "action" | "elevated";
-  className?: string;
+interface CardProps {
   children: React.ReactNode;
+  style?: ViewStyle;
+  variant?: "default" | "primary" | "accent";
 }
 
 export const Card: React.FC<CardProps> = ({
-  variant = "default",
-  className = "",
   children,
-  ...props
+  style,
+  variant = "default",
 }) => {
-  const variants = {
-    default: "bg-white rounded-2xl p-4",
-    stats: "bg-white rounded-2xl p-4 shadow-sm",
-    action: "bg-white rounded-2xl p-4 shadow-sm border border-gray-100",
-    elevated: "bg-white rounded-2xl p-4 shadow-lg",
+  const getBackground = () => {
+    if (variant === "primary") return theme.colors.primary[500];
+    if (variant === "accent") return lightTheme.surfaceSecondary;
+    return lightTheme.surface;
   };
 
   return (
-    <View className={`${variants[variant]} ${className}`} {...props}>
+    <View
+      style={[
+        {
+          backgroundColor: getBackground(),
+          borderRadius: theme.borderRadius.lg,
+          padding: theme.spacing.md,
+          shadowColor: "#000",
+          shadowOffset: { width: 0, height: 2 },
+          shadowOpacity: 0.06,
+          shadowRadius: 8,
+          elevation: 2,
+        },
+        style,
+      ]}
+    >
       {children}
     </View>
   );

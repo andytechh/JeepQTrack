@@ -10,6 +10,7 @@ import "../../global.css";
 import { supabase } from "../src/shared/config/supabase";
 import { AuthService } from "../src/shared/services/AuthService";
 import { useAuthStore } from "../src/shared/store/authStore";
+import { useChatStore } from "../src/shared/store/chatStore";
 import { getAppFlavor, isStaffApp } from "../src/shared/utils/flavor";
 
 // ─── NOTIFICATION CHANNEL SETUP ──────────────────────────────────────
@@ -75,8 +76,9 @@ export default function RootLayout() {
   const [showSplash, setShowSplash] = useState(true);
   const segments = useSegments();
   const cleanupRef = useRef<(() => void) | null>(null);
-
+  const { resetUnreadCount } = useChatStore();
   const { user, setUser, isAuthenticated } = useAuthStore();
+  const { clearStore } = useChatStore();
   const APP_FLAVOR = getAppFlavor();
 
   // ─── INITIALIZE NOTIFICATION CHANNELS ──────────────────────────────
@@ -101,7 +103,7 @@ export default function RootLayout() {
           }
           return;
         }
-
+        resetUnreadCount();
         // If no user in store, try to get from Supabase
         const currentUser = await AuthService.getCurrentUser();
         if (currentUser) {
@@ -151,6 +153,9 @@ export default function RootLayout() {
     }
   }, [user?.id, isReady]);
 
+  useEffect(() => {
+    clearStore();
+  }, []);
   // ─── REGISTER PUSH TOKEN ───────────────────────────────────────────
   const registerPushToken = useCallback(async () => {
     try {

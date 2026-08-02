@@ -316,18 +316,6 @@ export default function DriverLayout() {
                   Profile Settings
                 </Text>
               </TouchableOpacity>
-
-              <TouchableOpacity
-                className="flex-row items-center gap-3 p-4 border-b border-[#1e293b]"
-                onPress={() => {
-                  setShowProfileMenu(false);
-                  router.push("/staff/notifications");
-                }}
-              >
-                <Bell size={20} color="#94a3b8" />
-                <Text className="text-gray-300 text-base">Notifications</Text>
-              </TouchableOpacity>
-
               <TouchableOpacity
                 className="flex-row items-center gap-3 p-4 border-b border-[#1e293b]"
                 onPress={() => {

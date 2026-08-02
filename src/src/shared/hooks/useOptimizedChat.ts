@@ -289,10 +289,14 @@ export function useOptimizedChat() {
   const [sending, setSending] = useState(false);
   const [hasMore, setHasMore] = useState(true);
 
+  // 🔥 ADD: Flag to prevent recalculation
+  const shouldSkipRecalculation = useRef(false);
+
   const oldestMessageRef = useRef<string | null>(null);
   const mountedRef = useRef(true);
   const isInitialLoadRef = useRef(true);
 
+  // ─── FETCH INITIAL MESSAGES ──────────────────────────────────────
   const fetchInitialMessages = useCallback(async () => {
     try {
       setLoading(true);
@@ -312,13 +316,16 @@ export function useOptimizedChat() {
       if (mountedRef.current) {
         setMessages(cache.getAll());
 
-        if (user?.uid) {
+        // 🔥 ONLY calculate if NOT skipping
+        if (user?.uid && !shouldSkipRecalculation.current) {
           const unread = msgs.filter(
             (msg) =>
               msg.sender_id !== user.uid && !msg.read_by?.includes(user.uid),
           ).length;
           setUnreadCount(unread);
-          console.log(`📊 Unread count: ${unread}`);
+          console.log(`📊 Unread count calculated: ${unread}`);
+        } else if (shouldSkipRecalculation.current) {
+          console.log("⏭️ Skipping unread count recalculation");
         }
 
         if (msgs.length > 0) {
@@ -335,6 +342,7 @@ export function useOptimizedChat() {
     }
   }, [cache, user?.uid, setUnreadCount]);
 
+  // ─── LOAD OLDER MESSAGES ──────────────────────────────────────────
   const loadOlderMessages = useCallback(async () => {
     if (!oldestMessageRef.current || !hasMore) return;
     try {
@@ -368,6 +376,7 @@ export function useOptimizedChat() {
     }
   }, [cache, hasMore]);
 
+  // ─── SEND MESSAGE ──────────────────────────────────────────────────
   const sendMessage = useCallback(
     async (text: string) => {
       if (!text.trim() || !user?.uid) return;
@@ -401,10 +410,16 @@ export function useOptimizedChat() {
     [user?.uid, cache],
   );
 
+  // ─── MARK AS READ ──────────────────────────────────────────────────
   const markAsRead = useCallback(async () => {
     if (!user?.uid) return;
 
+    // 🔥 Set flag to skip recalculation
+    shouldSkipRecalculation.current = true;
+
+    // Reset unread count immediately
     resetUnreadCount();
+    console.log("📊 Unread count reset to 0");
 
     try {
       const { error: rpcError } = await supabase.rpc("mark_messages_read", {
@@ -427,19 +442,39 @@ export function useOptimizedChat() {
           console.error("❌ Fallback update error:", updateError);
         } else {
           console.log("✅ Messages marked as read (fallback)");
+          setMessages((prev) =>
+            prev.map((msg) =>
+              msg.sender_id !== user.uid && !msg.read_by?.includes(user.uid!)
+                ? { ...msg, read_by: [...msg.read_by, user.uid!] }
+                : msg,
+            ),
+          );
         }
       } else {
         console.log("✅ Messages marked as read (RPC)");
+        setMessages((prev) =>
+          prev.map((msg) =>
+            msg.sender_id !== user.uid && !msg.read_by?.includes(user.uid!)
+              ? { ...msg, read_by: [...msg.read_by, user.uid!] }
+              : msg,
+          ),
+        );
       }
+
+      setUnreadCount(0);
     } catch (error) {
       console.error("❌ Mark read error:", error);
     }
-  }, [user?.uid, resetUnreadCount]);
+  }, [user?.uid, resetUnreadCount, setUnreadCount]);
 
+  // ─── REFRESH MESSAGES ─────────────────────────────────────────────
   const refreshMessages = useCallback(async () => {
+    // Reset the flag before refresh
+    shouldSkipRecalculation.current = false;
     await fetchInitialMessages();
   }, [fetchInitialMessages]);
 
+  // ─── CONNECTION LIFECYCLE ─────────────────────────────────────────
   useEffect(() => {
     mountedRef.current = true;
     isInitialLoadRef.current = true;
@@ -453,9 +488,10 @@ export function useOptimizedChat() {
 
     const unsubscribe = connection.addListener((newMessage) => {
       if (mountedRef.current) {
+        // 🔥 Only increment if NOT skipping recalculation
         if (newMessage.sender_id !== user.uid) {
           const isRead = newMessage.read_by?.includes(user.uid);
-          if (!isRead) {
+          if (!isRead && !shouldSkipRecalculation.current) {
             incrementUnreadCount();
           }
         }
@@ -478,6 +514,7 @@ export function useOptimizedChat() {
     incrementUnreadCount,
   ]);
 
+  // ─── APP STATE - HANDLE BACKGROUND/FOREGROUND ─────────────────────
   useEffect(() => {
     const handleAppState = (nextState: string) => {
       connection.setAppState(nextState);
@@ -485,7 +522,8 @@ export function useOptimizedChat() {
       if (nextState === "active") {
         if (user?.uid) {
           connection.connect(user.uid);
-          if (!isInitialLoadRef.current) {
+          // 🔥 Only refresh if not skipping
+          if (!isInitialLoadRef.current && !shouldSkipRecalculation.current) {
             fetchInitialMessages();
           }
           isInitialLoadRef.current = false;
@@ -497,6 +535,7 @@ export function useOptimizedChat() {
     return () => subscription.remove();
   }, [user?.uid, connection, fetchInitialMessages]);
 
+  // ─── HANDLE NOTIFICATION TAPS ─────────────────────────────────────
   useEffect(() => {
     const subscription = Notifications.addNotificationResponseReceivedListener(
       (response) => {

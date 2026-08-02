@@ -7,10 +7,10 @@ import {
   Settings,
 } from "lucide-react-native";
 import { Text, View } from "react-native";
-import { useOptimizedChat } from "../../../../src/shared/hooks/useOptimizedChat";
+import { useChatStore } from "../../../../src/shared/store/chatStore";
 
 export default function DriverTabsLayout() {
-  const { unreadCount, markAsRead } = useOptimizedChat();
+  const { unreadCount } = useChatStore();
 
   return (
     <Tabs

@@ -1,6 +1,8 @@
 // src/shared/components/chat/OptimizedMessage.tsx
-import React from "react";
-import { Text, View } from "react-native";
+import { CheckCheck } from "lucide-react-native";
+import { memo } from "react";
+import { Image, Text, View } from "react-native";
+import { theme } from "../../constants/theme";
 
 interface MessageProps {
   id: string;
@@ -10,33 +12,85 @@ interface MessageProps {
   isOwn: boolean;
   senderName: string;
   senderAvatar?: string;
+  read?: boolean; // add this if your hook provides it
 }
 
-// Only re-renders if props actually change
-export const OptimizedMessage = React.memo(
-  ({ message, isOwn, senderName, created_at }: MessageProps) => {
+export const OptimizedMessage = memo(
+  ({
+    message,
+    isOwn,
+    senderName,
+    senderAvatar,
+    created_at,
+    read,
+  }: MessageProps) => {
+    const initials = senderName?.[0]?.toUpperCase() || "?";
+    const timestamp = new Date(created_at).toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    });
+
     return (
-      <View className={`mb-3 max-w-[85%] ${isOwn ? "self-end" : "self-start"}`}>
+      <View
+        className={`flex-row mb-4 gap-2 ${isOwn ? "justify-end" : "justify-start"}`}
+      >
+        {/* Avatar for others */}
         {!isOwn && (
-          <Text className="text-xs text-sky-400 mb-1 ml-2">{senderName}</Text>
+          <View className="w-8 h-8 rounded-full bg-light-surface-secondary dark:bg-slate-700 items-center justify-center self-end">
+            {senderAvatar ? (
+              <Image
+                source={{ uri: senderAvatar }}
+                className="w-full h-full rounded-full"
+              />
+            ) : (
+              <Text className="text-xs font-semibold text-light-text-muted dark:text-slate-400">
+                {initials}
+              </Text>
+            )}
+          </View>
         )}
+
         <View
-          className={`p-3 rounded-2xl ${isOwn ? "bg-sky-500 rounded-tr-none" : "bg-white/10 rounded-tl-none"}`}
+          className={`flex-col max-w-[75%] ${isOwn ? "items-end self-end" : "items-start self-start"}`}
         >
-          <Text className="text-white text-sm">{message}</Text>
+          {/* Sender name (others) */}
+          {!isOwn && (
+            <Text className="text-xs text-light-text-muted dark:text-slate-400 mb-1 ml-1">
+              {senderName}
+            </Text>
+          )}
+
+          {/* Bubble */}
+          <View
+            className={`rounded-xl px-3 py-2 ${
+              isOwn
+                ? "bg-primary-500 dark:bg-primary-600 self-end"
+                : "bg-light-surface-secondary dark:bg-slate-800 self-start"
+            }`}
+          >
+            <Text
+              className={`text-sm leading-relaxed ${
+                isOwn ? "text-white" : "text-light-text-primary dark:text-white"
+              }`}
+            >
+              {message}
+            </Text>
+          </View>
+
+          {/* Timestamp + read receipt */}
+          <View className="flex-row items-center gap-1 mt-1 px-1">
+            <Text className="text-[10px] text-light-text-dim dark:text-slate-500">
+              {timestamp}
+            </Text>
+            {isOwn && read && (
+              <CheckCheck size={14} color={theme.colors.primary[500]} />
+            )}
+          </View>
         </View>
-        <Text
-          className={`text-[10px] text-white/40 mt-1 ${isOwn ? "text-right mr-2" : "text-left ml-2"}`}
-        >
-          {new Date(created_at).toLocaleTimeString([], {
-            hour: "2-digit",
-            minute: "2-digit",
-          })}
-        </Text>
       </View>
     );
   },
-  // Custom comparison - only re-render if these change
   (prevProps, nextProps) => {
     return (
       prevProps.id === nextProps.id &&

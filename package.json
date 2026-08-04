@@ -4,10 +4,12 @@
   "version": "1.0.0",
   "dependencies": {
     "@expo/ui": "~56.0.18",
+    "@react-aria/utils": "^3.34.1",
     "@react-native-async-storage/async-storage": "2.2.0",
     "@react-navigation/native": "^7.3.14",
     "@supabase/supabase-js": "^2.109.0",
     "babel-preset-expo": "^56.0.15",
+    "class-variance-authority": "^0.7.1",
     "expo": "~56.0.12",
     "expo-blur": "~56.0.4",
     "expo-constants": "~56.0.22",

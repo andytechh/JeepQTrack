@@ -1,13 +1,17 @@
+// app/staff/(dispatcher)/gps-tracking.tsx
 import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
 import {
   AlertCircle,
   ArrowLeft,
+  Bell,
+  Gauge,
+  Navigation,
   RefreshCw,
-  Send,
+  Route,
   Users
 } from "lucide-react-native";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -22,48 +26,194 @@ import { MapView } from "@/src/shared/components/map/MapView";
 import { Button } from "@/src/shared/components/ui/Button";
 import { Card } from "@/src/shared/components/ui/Card";
 import { StatusPill } from "@/src/shared/components/ui/StatusPill";
+import { supabase } from "@/src/shared/config/supabase";
 import { lightTheme, theme } from "@/src/shared/constants/theme";
 import { useDispatcherGPS } from "@/src/shared/hooks/useDispatcherGPS";
 import { JeepneyMarker } from "@/src/shared/hooks/useGPSMap";
+import { fetchRouteInfo, RouteInfo } from "@/src/shared/utils/routing";
 
+// ─── CONSTANTS ──────────────────────────────────────────────────────
+const DARAGA_TERMINAL = { latitude: 13.14769, longitude: 123.71216 };
+
+// Haversine distance helper
+const haversineDistance = (
+  lat1: number,
+  lon1: number,
+  lat2: number,
+  lon2: number,
+) => {
+  const R = 6371;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLon = ((lon2 - lon1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+};
+
+// ─── MAIN COMPONENT ──────────────────────────────────────────────────
 export default function DispatcherGPSTrackingScreen() {
   const { markers, loading, error, fetchMarkers } = useDispatcherGPS();
   const [selectedJeepney, setSelectedJeepney] = useState<JeepneyMarker | null>(
     null,
   );
-  const [dispatching, setDispatching] = useState(false);
+  const [sendingAlert, setSendingAlert] = useState(false);
 
+  // Stats
+  const [speed, setSpeed] = useState<number | null>(null);
+  const [distance, setDistance] = useState<number | null>(null);
+  const [eta, setEta] = useState<number | null>(null);
+
+  // Refs for route info
+  const routeInfoRef = useRef<RouteInfo | null>(null);
+  const initialStraightLineRef = useRef<number>(0);
+  const totalRoadDistanceRef = useRef<number>(0);
+  const lastEtaRef = useRef<number | null>(null);
+
+  // ─── HANDLE MARKER PRESS ─────────────────────────────────────────
   const handleMarkerPress = useCallback(
-    (jeepneyId: string) => {
+    async (jeepneyId: string) => {
       const jeep = markers.find((m) => m.id === jeepneyId);
-      if (jeep) setSelectedJeepney(jeep);
+      if (!jeep) return;
+
+      // Fetch latest door count for accurate occupancy
+      const { data } = await supabase
+        .from("door_counts")
+        .select("front_count, rear_count")
+        .eq("jeep_id", jeepneyId)
+        .order("updated_at", { ascending: false })
+        .limit(1);
+
+      const occupancy = data?.[0]
+        ? data[0].front_count + data[0].rear_count
+        : jeep.occupancy;
+
+      const updatedJeep = { ...jeep, occupancy };
+      setSelectedJeepney(updatedJeep);
+
+      // Compute stats if location exists
+      if (updatedJeep.lat && updatedJeep.lng) {
+        const spd = updatedJeep.speed || 0;
+        setSpeed(spd);
+
+        // Fetch route info once (OSRM or fallback)
+        const info = await fetchRouteInfo(
+          updatedJeep.lat,
+          updatedJeep.lng,
+          DARAGA_TERMINAL.latitude,
+          DARAGA_TERMINAL.longitude,
+        );
+        routeInfoRef.current = info;
+        totalRoadDistanceRef.current = info.distanceKm;
+        initialStraightLineRef.current = haversineDistance(
+          updatedJeep.lat,
+          updatedJeep.lng,
+          DARAGA_TERMINAL.latitude,
+          DARAGA_TERMINAL.longitude,
+        );
+
+        setDistance(info.distanceKm);
+        setEta(info.durationMin);
+        lastEtaRef.current = info.durationMin;
+      }
     },
     [markers],
   );
 
-  const handleDispatch = () => {
+  // ─── UPDATE STATS ON GPS UPDATE ──────────────────────────────────
+  useEffect(() => {
+    if (!selectedJeepney) return;
+
+    const channel = supabase
+      .channel(`dispatcher_gps_${selectedJeepney.id}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "gps_tracking",
+          filter: `jeepney_id=eq.${selectedJeepney.id}`,
+        },
+        (payload) => {
+          const newLoc = payload.new;
+          // Update marker position (already handled by useDispatcherGPS)
+          // Also update stats
+          const spd = newLoc.speed || 0;
+          setSpeed(spd);
+
+          const currentStraightLine = haversineDistance(
+            newLoc.latitude,
+            newLoc.longitude,
+            DARAGA_TERMINAL.latitude,
+            DARAGA_TERMINAL.longitude,
+          );
+
+          let remainingRoad: number;
+          if (
+            totalRoadDistanceRef.current > 0 &&
+            initialStraightLineRef.current > 0
+          ) {
+            const progressRatio =
+              currentStraightLine / initialStraightLineRef.current;
+            remainingRoad = totalRoadDistanceRef.current * progressRatio;
+          } else {
+            remainingRoad = currentStraightLine;
+          }
+          setDistance(remainingRoad);
+
+          let newEta: number | null = null;
+          if (spd > 0) {
+            newEta = Math.round((remainingRoad / spd) * 60);
+          } else {
+            newEta =
+              lastEtaRef.current ?? routeInfoRef.current?.durationMin ?? null;
+          }
+          if (newEta !== null) {
+            setEta(newEta);
+            lastEtaRef.current = newEta;
+          }
+        },
+      )
+      .subscribe();
+
+    return () => channel.unsubscribe();
+  }, [selectedJeepney]);
+
+  // ─── SEND ALERT ──────────────────────────────────────────────────
+  const sendAlertToDriver = async () => {
+    if (!selectedJeepney) return;
+    setSendingAlert(true);
+    try {
+      // Example: send a push notification via Supabase RPC or directly
+      // You can use the NotificationService or a custom function
+      const { error } = await supabase.rpc("send_driver_alert", {
+        driver_id: selectedJeepney.id,
+        message: "Please check your route and passenger load.",
+      });
+      if (error) throw error;
+      Alert.alert(
+        "Alert Sent",
+        `Notification sent to ${selectedJeepney.driverName}`,
+      );
+    } catch (err) {
+      console.error("Failed to send alert:", err);
+      Alert.alert("Error", "Could not send alert. Please try again.");
+    } finally {
+      setSendingAlert(false);
+    }
+  };
+
+  const viewDetails = () => {
     if (!selectedJeepney) return;
     Alert.alert(
-      "Dispatch Jeepney",
-      `Send ${selectedJeepney.plateNumber} to a new trip?`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Dispatch",
-          onPress: async () => {
-            setDispatching(true);
-            // TODO: Call Supabase to assign a new trip
-            Alert.alert(
-              "Dispatched",
-              `${selectedJeepney.plateNumber} is on the way.`,
-            );
-            setDispatching(false);
-          },
-        },
-      ],
+      "Jeepney Details",
+      `Plate: ${selectedJeepney.plateNumber}\nDriver: ${selectedJeepney.driverName}\nStatus: ${selectedJeepney.status}\nOccupancy: ${selectedJeepney.occupancy}/${selectedJeepney.capacity}\nSpeed: ${speed !== null ? Math.round(speed) : "?"} km/h\nDistance to Terminal: ${distance !== null ? distance.toFixed(1) : "?"} km\nETA: ${eta !== null ? eta : "?"} min`,
     );
   };
 
+  // ─── LOADING / ERROR ─────────────────────────────────────────────
   if (loading) {
     return (
       <View
@@ -250,6 +400,7 @@ export default function DispatcherGPSTrackingScreen() {
             />
           </View>
 
+          {/* Selected Jeepney Info */}
           <View
             style={{
               flexDirection: "row",
@@ -303,6 +454,88 @@ export default function DispatcherGPSTrackingScreen() {
             />
           </View>
 
+          {/* Stats Grid (Speed, Distance, ETA) */}
+          <View style={{ flexDirection: "row", gap: 12, marginBottom: 12 }}>
+            <View
+              style={{
+                flex: 1,
+                backgroundColor: lightTheme.surfaceSecondary,
+                padding: 12,
+                borderRadius: 12,
+              }}
+            >
+              <View
+                style={{ flexDirection: "row", alignItems: "center", gap: 4 }}
+              >
+                <Gauge size={14} color={lightTheme.text.muted} />
+                <Text style={{ fontSize: 11, color: lightTheme.text.muted }}>
+                  Speed
+                </Text>
+              </View>
+              <Text
+                style={{
+                  fontSize: 18,
+                  fontWeight: "700",
+                  color: lightTheme.text.primary,
+                }}
+              >
+                {speed !== null ? `${Math.round(speed)} km/h` : "—"}
+              </Text>
+            </View>
+            <View
+              style={{
+                flex: 1,
+                backgroundColor: lightTheme.surfaceSecondary,
+                padding: 12,
+                borderRadius: 12,
+              }}
+            >
+              <View
+                style={{ flexDirection: "row", alignItems: "center", gap: 4 }}
+              >
+                <Route size={14} color={lightTheme.text.muted} />
+                <Text style={{ fontSize: 11, color: lightTheme.text.muted }}>
+                  Distance
+                </Text>
+              </View>
+              <Text
+                style={{
+                  fontSize: 18,
+                  fontWeight: "700",
+                  color: lightTheme.text.primary,
+                }}
+              >
+                {distance !== null ? `${distance.toFixed(1)} km` : "—"}
+              </Text>
+            </View>
+            <View
+              style={{
+                flex: 1,
+                backgroundColor: lightTheme.surfaceSecondary,
+                padding: 12,
+                borderRadius: 12,
+              }}
+            >
+              <View
+                style={{ flexDirection: "row", alignItems: "center", gap: 4 }}
+              >
+                <Navigation size={14} color={lightTheme.text.muted} />
+                <Text style={{ fontSize: 11, color: lightTheme.text.muted }}>
+                  ETA
+                </Text>
+              </View>
+              <Text
+                style={{
+                  fontSize: 18,
+                  fontWeight: "700",
+                  color: lightTheme.text.primary,
+                }}
+              >
+                {eta !== null ? `${eta} min` : "—"}
+              </Text>
+            </View>
+          </View>
+
           <View
             style={{
               height: 1,
@@ -311,16 +544,7 @@ export default function DispatcherGPSTrackingScreen() {
             }}
           />
 
-          <View
-            style={{
-              flexDirection: "row",
-              justifyContent: "space-between",
-              marginBottom: 12,
-            }}
-          >
-            <Text style={{ color: lightTheme.text.muted }}>Actions</Text>
-          </View>
-
+          {/* Action Buttons */}
           <View className="flex-row gap-3">
             <Button
               variant="primary"
@@ -332,15 +556,15 @@ export default function DispatcherGPSTrackingScreen() {
                 alignItems: "center",
                 justifyContent: "center",
               }}
-              onPress={handleDispatch}
-              disabled={!selectedJeepney || dispatching}
+              onPress={sendAlertToDriver}
+              disabled={!selectedJeepney || sendingAlert}
             >
               <View style={{ flexDirection: "row", alignItems: "center" }}>
-                <Send size={20} color="white" style={{ marginRight: 8 }} />
+                <Bell size={20} color="white" style={{ marginRight: 8 }} />
                 <Text
                   style={{ color: "white", fontSize: 14, fontWeight: "600" }}
                 >
-                  {dispatching ? "Dispatching..." : "Dispatch"}
+                  {sendingAlert ? "Sending..." : "Send Alert"}
                 </Text>
               </View>
             </Button>
@@ -357,15 +581,7 @@ export default function DispatcherGPSTrackingScreen() {
                 alignItems: "center",
                 justifyContent: "center",
               }}
-              onPress={() => {
-                if (selectedJeepney) {
-                  // Navigate to jeepney details or chat with driver
-                  Alert.alert(
-                    "Info",
-                    `Details for ${selectedJeepney.plateNumber}`,
-                  );
-                }
-              }}
+              onPress={viewDetails}
               disabled={!selectedJeepney}
             >
               <View style={{ flexDirection: "row", alignItems: "center" }}>

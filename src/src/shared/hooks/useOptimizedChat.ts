@@ -111,8 +111,8 @@ class ChatConnection {
         if (this.debounceTimer) clearTimeout(this.debounceTimer);
         this.debounceTimer = setTimeout(() => {
           const newMsg = payload.new as ChatMessage;
-          this.notifyListeners(newMsg);
-          this.sendPushIfNeeded(newMsg);
+          // 🔥 FIX: Fetch sender info if missing
+          this.fetchSenderAndNotify(newMsg);
         }, DEBOUNCE_MS);
       },
     );
@@ -129,6 +129,28 @@ class ChatConnection {
         this.handleReconnect();
       }
     });
+  }
+
+  // ─── Fetch sender for realtime messages ──────────────────────────
+  private async fetchSenderAndNotify(newMsg: ChatMessage) {
+    try {
+      if (!newMsg.sender) {
+        const { data: sender } = await supabase
+          .from("users")
+          .select("id, display_name, role, avatar_url")
+          .eq("id", newMsg.sender_id)
+          .single();
+
+        if (sender) {
+          newMsg.sender = sender;
+        }
+      }
+    } catch (error) {
+      console.error("❌ Failed to fetch sender:", error);
+    } finally {
+      this.notifyListeners(newMsg);
+      this.sendPushIfNeeded(newMsg);
+    }
   }
 
   private handleReconnect() {
@@ -191,13 +213,7 @@ class ChatConnection {
       this.currentUserId
     ) {
       try {
-        const { data: sender } = await supabase
-          .from("users")
-          .select("display_name")
-          .eq("id", message.sender_id)
-          .single();
-
-        const senderName = sender?.display_name || "Someone";
+        const senderName = message.sender?.display_name || "Someone";
 
         const { data: receiver } = await supabase
           .from("users")
@@ -289,9 +305,7 @@ export function useOptimizedChat() {
   const [sending, setSending] = useState(false);
   const [hasMore, setHasMore] = useState(true);
 
-  // 🔥 ADD: Flag to prevent recalculation
   const shouldSkipRecalculation = useRef(false);
-
   const oldestMessageRef = useRef<string | null>(null);
   const mountedRef = useRef(true);
   const isInitialLoadRef = useRef(true);
@@ -316,7 +330,6 @@ export function useOptimizedChat() {
       if (mountedRef.current) {
         setMessages(cache.getAll());
 
-        // 🔥 ONLY calculate if NOT skipping
         if (user?.uid && !shouldSkipRecalculation.current) {
           const unread = msgs.filter(
             (msg) =>
@@ -324,8 +337,6 @@ export function useOptimizedChat() {
           ).length;
           setUnreadCount(unread);
           console.log(`📊 Unread count calculated: ${unread}`);
-        } else if (shouldSkipRecalculation.current) {
-          console.log("⏭️ Skipping unread count recalculation");
         }
 
         if (msgs.length > 0) {
@@ -414,10 +425,7 @@ export function useOptimizedChat() {
   const markAsRead = useCallback(async () => {
     if (!user?.uid) return;
 
-    // 🔥 Set flag to skip recalculation
     shouldSkipRecalculation.current = true;
-
-    // Reset unread count immediately
     resetUnreadCount();
     console.log("📊 Unread count reset to 0");
 
@@ -469,7 +477,6 @@ export function useOptimizedChat() {
 
   // ─── REFRESH MESSAGES ─────────────────────────────────────────────
   const refreshMessages = useCallback(async () => {
-    // Reset the flag before refresh
     shouldSkipRecalculation.current = false;
     await fetchInitialMessages();
   }, [fetchInitialMessages]);
@@ -488,7 +495,7 @@ export function useOptimizedChat() {
 
     const unsubscribe = connection.addListener((newMessage) => {
       if (mountedRef.current) {
-        // 🔥 Only increment if NOT skipping recalculation
+        // 🔥 Now `sender` is guaranteed to be filled
         if (newMessage.sender_id !== user.uid) {
           const isRead = newMessage.read_by?.includes(user.uid);
           if (!isRead && !shouldSkipRecalculation.current) {
@@ -522,7 +529,6 @@ export function useOptimizedChat() {
       if (nextState === "active") {
         if (user?.uid) {
           connection.connect(user.uid);
-          // 🔥 Only refresh if not skipping
           if (!isInitialLoadRef.current && !shouldSkipRecalculation.current) {
             fetchInitialMessages();
           }

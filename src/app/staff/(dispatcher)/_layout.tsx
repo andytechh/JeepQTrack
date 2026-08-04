@@ -1,3 +1,4 @@
+// app/staff/(dispatcher)/_layout.tsx
 import { router, Stack } from "expo-router";
 import { LogOut, User } from "lucide-react-native";
 import { useEffect, useState } from "react";
@@ -18,18 +19,36 @@ import { NotificationService } from "../../../src/shared/services/NotificationSe
 import { useAuthStore } from "../../../src/shared/store/authStore";
 
 export default function DispatcherLayout() {
-  const { user, isLoading, logout } = useAuthStore();
+  const { user, isLoading, logout, hydrate } = useAuthStore();
   const [notificationCount, setNotificationCount] = useState(0);
   const [notifications, setNotifications] = useState<any[]>([]);
   const [showNotifications, setShowNotifications] = useState(false);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
+  const [timedOut, setTimedOut] = useState(false);
+
+  // Force hydrate and add timeout fallback
+  useEffect(() => {
+    hydrate?.(); // Call hydrate if available
+
+    // Timeout fallback - if still loading after 5 seconds, show content anyway
+    const timer = setTimeout(() => {
+      if (isLoading) {
+        console.log("⚠️ Auth loading timed out, forcing render");
+        setTimedOut(true);
+      }
+    }, 5000);
+
+    return () => clearTimeout(timer);
+  }, []);
 
   const fetchNotificationCount = async () => {
     if (!user?.uid) return;
     try {
       const count = await NotificationService.getUnreadCount(user.uid);
       setNotificationCount(count);
-    } catch (error) {}
+    } catch (error) {
+      console.log("Notification count error:", error);
+    }
   };
 
   useEffect(() => {
@@ -53,10 +72,27 @@ export default function DispatcherLayout() {
     };
   }, [user?.uid]);
 
-  if (isLoading) {
+  // Only show loading if actually loading AND not timed out
+  if (isLoading && !timedOut && !user) {
     return (
       <View className="flex-1 items-center justify-center bg-[#0a1628]">
         <ActivityIndicator size="large" color="#0ea5e9" />
+        <Text className="text-white/60 mt-4">Loading...</Text>
+      </View>
+    );
+  }
+
+  // If no user at all, show login redirect
+  if (!user && !isLoading) {
+    return (
+      <View className="flex-1 items-center justify-center bg-[#0a1628] p-4">
+        <Text className="text-white/60 text-center">No user found</Text>
+        <TouchableOpacity
+          className="mt-4 bg-sky-500 px-6 py-2.5 rounded-xl"
+          onPress={() => router.replace("/staff/login")}
+        >
+          <Text className="text-white font-medium">Go to Login</Text>
+        </TouchableOpacity>
       </View>
     );
   }
@@ -71,7 +107,7 @@ export default function DispatcherLayout() {
         onAvatarPress={() => setShowProfileMenu(true)}
       />
 
-      {/* ✅ This Stack wraps the (tabs) group */}
+      {/* Tabs */}
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="(tabs)" />
       </Stack>

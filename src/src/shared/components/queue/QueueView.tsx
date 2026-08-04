@@ -1,29 +1,30 @@
-// app/staff/(driver)/queue.tsx
-import { JeepneyCard } from "@/src/shared/components/ui/JeepneyCard";
+// src/shared/components/QueueView.tsx
 import { useJeepneyQueue } from "@/src/shared/hooks/useJeepneyQueue";
-import { useRouter } from "expo-router";
 import { ArrowLeft, Bus, Search } from "lucide-react-native";
 import { useMemo, useState } from "react";
 import {
   FlatList,
   RefreshControl,
-  SafeAreaView,
   Text,
   TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
+import { JeepneyCard } from "../ui/JeepneyCard";
+
+interface QueueViewProps {
+  onBack?: () => void; // staff app uses this; commuter can omit
+  title?: string;
+}
 
 const TERMINAL_NAMES: Record<number, string> = { 1: "Donsol", 2: "Daraga" };
 
-export default function QueueScreen() {
-  const router = useRouter();
+export function QueueView({ onBack, title = "Jeepney Queue" }: QueueViewProps) {
   const { data, loading, error, lastUpdate, refetch } = useJeepneyQueue();
   const [refreshing, setRefreshing] = useState(false);
   const [query, setQuery] = useState("");
   const [terminalFilter, setTerminalFilter] = useState<number | "all">("all");
 
-  // Unified filtering and sorting
   const filteredQueue = useMemo(() => {
     const filtered = data.filter((item) => {
       const matchesTerminal =
@@ -55,25 +56,27 @@ export default function QueueScreen() {
   };
 
   return (
-    <SafeAreaView className="flex-1 bg-slate-50">
+    <View className="flex-1 bg-slate-50 dark:bg-slate-900">
       {/* Header */}
-      <View className="flex-row items-center px-4 py-3 border-b border-slate-200 bg-white">
-        <TouchableOpacity onPress={() => router.back()} className="mr-3 p-1">
-          <ArrowLeft size={24} color="#0f172a" />
-        </TouchableOpacity>
-        <Text className="text-xl font-bold text-slate-900 flex-1">
-          Jeepney Queue
+      <View className="flex-row items-center px-4 py-3 border-b border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800">
+        {onBack && (
+          <TouchableOpacity onPress={onBack} className="mr-3 p-1">
+            <ArrowLeft size={24} color="#0f172a" className="dark:text-white" />
+          </TouchableOpacity>
+        )}
+        <Text className="text-xl font-bold text-slate-900 dark:text-white flex-1">
+          {title}
         </Text>
-        <Text className="text-xs text-slate-500">
+        <Text className="text-xs text-slate-500 dark:text-slate-400">
           Updated {lastUpdate ? lastUpdate.toLocaleTimeString() : "just now"}
         </Text>
       </View>
 
       {/* Search */}
-      <View className="flex-row items-center mx-4 mt-4 mb-2 px-3 py-2.5 bg-white rounded-xl border border-slate-200">
+      <View className="flex-row items-center mx-4 mt-4 mb-2 px-3 py-2.5 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700">
         <Search size={18} color="#94a3b8" className="mr-2" />
         <TextInput
-          className="flex-1 text-base text-slate-900"
+          className="flex-1 text-base text-slate-900 dark:text-white"
           placeholder="Search plate number or driver"
           value={query}
           onChangeText={setQuery}
@@ -82,12 +85,14 @@ export default function QueueScreen() {
       </View>
 
       {/* Terminal toggle */}
-      <View className="flex-row mx-4 mb-3 rounded-xl overflow-hidden border border-slate-200">
+      <View className="flex-row mx-4 mb-3 rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700">
         {(["all", 1, 2] as const).map((value) => (
           <TouchableOpacity
             key={value}
             className={`flex-1 py-2 items-center ${
-              terminalFilter === value ? "bg-sky-500" : "bg-white"
+              terminalFilter === value
+                ? "bg-sky-500 dark:bg-sky-600"
+                : "bg-white dark:bg-slate-800"
             }`}
             onPress={() => setTerminalFilter(value)}
           >
@@ -95,7 +100,7 @@ export default function QueueScreen() {
               className={`text-sm ${
                 terminalFilter === value
                   ? "text-white font-semibold"
-                  : "text-slate-700"
+                  : "text-slate-700 dark:text-slate-300"
               }`}
             >
               {value === "all" ? "All" : TERMINAL_NAMES[value]}
@@ -104,10 +109,12 @@ export default function QueueScreen() {
         ))}
       </View>
 
-      {/* Main list */}
+      {/* List */}
       {loading && data.length === 0 ? (
         <View className="flex-1 items-center justify-center">
-          <Text className="text-slate-500">Loading queue...</Text>
+          <Text className="text-slate-500 dark:text-slate-400">
+            Loading queue...
+          </Text>
         </View>
       ) : error ? (
         <View className="flex-1 items-center justify-center px-6">
@@ -123,22 +130,22 @@ export default function QueueScreen() {
             />
           )}
           keyExtractor={(item) => item.id}
-          contentContainerStyle={{ padding: 16, paddingBottom: 40 }}
+          contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 40 }}
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
           }
           ListHeaderComponent={
-            <View className="mb-4">
+            <View className="mb-4 mt-2">
               {heroItem ? (
-                <Text className="text-base font-semibold text-slate-900 mb-1 text-lg">
-                  Currently Loading
+                <Text className="text-base font-semibold text-slate-900 dark:text-white mb-1">
+                  ⭐ Currently Loading
                 </Text>
               ) : filteredQueue.length > 0 ? (
-                <Text className="text-base font-semibold text-slate-900 mb-1">
+                <Text className="text-base font-semibold text-slate-900 dark:text-white mb-1">
                   Queue
                 </Text>
               ) : null}
-              <Text className="text-sm text-slate-500 mb-2">
+              <Text className="text-sm text-slate-500 dark:text-slate-400 mb-2">
                 {filteredQueue.length} jeepney
                 {filteredQueue.length !== 1 ? "s" : ""} matching
               </Text>
@@ -147,13 +154,13 @@ export default function QueueScreen() {
           ListEmptyComponent={
             <View className="items-center py-10">
               <Bus size={48} color="#cbd5e1" />
-              <Text className="mt-3 text-base text-slate-400">
+              <Text className="mt-3 text-base text-slate-400 dark:text-slate-500">
                 No jeepneys match your filters
               </Text>
             </View>
           }
         />
       )}
-    </SafeAreaView>
+    </View>
   );
 }

@@ -12,6 +12,7 @@ interface MessageProps {
   isOwn: boolean;
   senderName: string;
   senderAvatar?: string;
+  senderRole?: string;
   read?: boolean; // add this if your hook provides it
 }
 
@@ -21,9 +22,10 @@ export const OptimizedMessage = memo(
     isOwn,
     senderName,
     senderAvatar,
+    senderRole,
     created_at,
     read,
-  }: MessageProps) => {
+  }: MessageProps & { senderRole?: string }) => {
     const initials = senderName?.[0]?.toUpperCase() || "?";
     const timestamp = new Date(created_at).toLocaleTimeString([], {
       hour: "2-digit",
@@ -35,7 +37,6 @@ export const OptimizedMessage = memo(
       <View
         className={`flex-row mb-4 gap-2 ${isOwn ? "justify-end" : "justify-start"}`}
       >
-        {/* Avatar for others */}
         {!isOwn && (
           <View className="w-8 h-8 rounded-full bg-light-surface-secondary dark:bg-slate-700 items-center justify-center self-end">
             {senderAvatar ? (
@@ -54,14 +55,19 @@ export const OptimizedMessage = memo(
         <View
           className={`flex-col max-w-[75%] ${isOwn ? "items-end self-end" : "items-start self-start"}`}
         >
-          {/* Sender name (others) */}
           {!isOwn && (
-            <Text className="text-xs text-light-text-muted dark:text-slate-400 mb-1 ml-1">
-              {senderName}
-            </Text>
+            <View className="flex-row items-center gap-1 ml-1 mb-1">
+              <Text className="text-xs text-light-text-muted dark:text-slate-400">
+                {senderName}
+              </Text>
+              {senderRole ? (
+                <Text className="text-[10px] text-light-text-dim dark:text-slate-500 uppercase">
+                  ({senderRole})
+                </Text>
+              ) : null}
+            </View>
           )}
 
-          {/* Bubble */}
           <View
             className={`rounded-xl px-3 py-2 ${
               isOwn
@@ -78,7 +84,6 @@ export const OptimizedMessage = memo(
             </Text>
           </View>
 
-          {/* Timestamp + read receipt */}
           <View className="flex-row items-center gap-1 mt-1 px-1">
             <Text className="text-[10px] text-light-text-dim dark:text-slate-500">
               {timestamp}
@@ -91,11 +96,9 @@ export const OptimizedMessage = memo(
       </View>
     );
   },
-  (prevProps, nextProps) => {
-    return (
-      prevProps.id === nextProps.id &&
-      prevProps.message === nextProps.message &&
-      prevProps.isOwn === nextProps.isOwn
-    );
-  },
+  (prev, next) =>
+    prev.id === next.id &&
+    prev.message === next.message &&
+    prev.isOwn === next.isOwn &&
+    prev.senderRole === next.senderRole,
 );

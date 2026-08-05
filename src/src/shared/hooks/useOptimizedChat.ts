@@ -49,6 +49,7 @@ const setupNotificationChannel = async () => {
 };
 
 // ─── SINGLETON CONNECTION ───────────────────────────────────────────
+
 class ChatConnection {
   private static instance: ChatConnection;
   private channel: any = null;
@@ -248,6 +249,7 @@ class ChatConnection {
     }
   }
 }
+export const chatConnection = ChatConnection.getInstance();
 
 // ─── MEMORY CACHE ───────────────────────────────────────────────────
 class MessageCache {
@@ -259,7 +261,7 @@ class MessageCache {
   }
 
   getAll(): ChatMessage[] {
-    return this.messages;
+    return [...this.messages];
   }
 
   add(message: ChatMessage) {
@@ -472,6 +474,11 @@ export function useOptimizedChat() {
       setUnreadCount(0);
     } catch (error) {
       console.error("❌ Mark read error:", error);
+    } finally {
+      // 🔥 Reset the flag after 1 second so future unread increments work
+      setTimeout(() => {
+        shouldSkipRecalculation.current = false;
+      }, 1000);
     }
   }, [user?.uid, resetUnreadCount, setUnreadCount]);
 
@@ -495,13 +502,6 @@ export function useOptimizedChat() {
 
     const unsubscribe = connection.addListener((newMessage) => {
       if (mountedRef.current) {
-        // 🔥 Now `sender` is guaranteed to be filled
-        if (newMessage.sender_id !== user.uid) {
-          const isRead = newMessage.read_by?.includes(user.uid);
-          if (!isRead && !shouldSkipRecalculation.current) {
-            incrementUnreadCount();
-          }
-        }
         cache.add(newMessage);
         setMessages(cache.getAll());
       }

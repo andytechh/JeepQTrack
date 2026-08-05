@@ -1,10 +1,11 @@
-// app/staff/(driver)/chat.tsx
 import { useFocusEffect } from "expo-router";
-import { Paperclip, SendHorizontal, Users } from "lucide-react-native";
+import { SendHorizontal } from "lucide-react-native";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  ActivityIndicator,
   FlatList,
   Keyboard,
+  Platform,
   SafeAreaView,
   Text,
   TextInput,
@@ -12,11 +13,12 @@ import {
   View,
 } from "react-native";
 import { OptimizedMessage } from "../../../../src/shared/components/chat/OptimizedMessage";
-import { theme } from "../../../../src/shared/constants/theme";
 import { useOptimizedChat } from "../../../../src/shared/hooks/useOptimizedChat";
 import { useAuthStore } from "../../../../src/shared/store/authStore";
 
-export default function ChatScreen() {
+const NEAR_LATEST_THRESHOLD = 50;
+
+export default function StaffGroupChatScreen() {
   const { user } = useAuthStore();
   const {
     messages,
@@ -29,237 +31,193 @@ export default function ChatScreen() {
     markAsRead,
   } = useOptimizedChat();
 
-  const [newMessage, setNewMessage] = useState("");
+  const [inputText, setInputText] = useState("");
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const flatListRef = useRef<FlatList>(null);
-  const inputRef = useRef<TextInput>(null);
+  const isNearLatestRef = useRef(true);
 
-  // Smart scroll state
-  const [isNearBottom, setIsNearBottom] = useState(true);
-  const isNearBottomRef = useRef(true);
-  const firstUnreadIndex = useRef<number | null>(null);
-  const didScrollToUnread = useRef(false);
-
-  // Dynamic participant count
-  const participantCount = useMemo(
-    () => new Set(messages.map((m) => m.sender_id)).size,
-    [messages],
-  );
-
-  // Terminal name (adjust to your user model)
-  const terminalNames: Record<number, string> = { 1: "Donsol", 2: "Daraga" };
-  const currentTerminal =
-    (user as any)?.terminal_id && terminalNames[(user as any).terminal_id]
-      ? terminalNames[(user as any).terminal_id]
-      : "Terminal";
-
-  // ─── Find first unread message ─────────────────────────────────
-  useEffect(() => {
-    if (messages.length > 0 && user?.uid && !didScrollToUnread.current) {
-      const idx = messages.findIndex(
-        (m) => m.sender_id !== user.uid && !m.read_by?.includes(user.uid),
-      );
-      if (idx !== -1) {
-        firstUnreadIndex.current = idx;
-      }
-    }
-  }, [messages, user?.uid]);
-
-  // Scroll to first unread on initial load
-  const handleLayout = useCallback(() => {
-    if (
-      firstUnreadIndex.current !== null &&
-      !didScrollToUnread.current &&
-      flatListRef.current
-    ) {
-      flatListRef.current.scrollToIndex({
-        index: firstUnreadIndex.current,
-        animated: false,
-        viewPosition: 0.5,
-      });
-      didScrollToUnread.current = true;
-    }
-  }, []);
-
-  // ─── Track scroll position ────────────────────────────────────
-  const handleScroll = useCallback(({ nativeEvent }: any) => {
-    const { contentOffset, contentSize, layoutMeasurement } = nativeEvent;
-    const bottomOffset =
-      contentSize.height - layoutMeasurement.height - contentOffset.y;
-    const near = bottomOffset < 20;
-    setIsNearBottom(near);
-    isNearBottomRef.current = near;
-  }, []);
-
-  const handleContentSizeChange = useCallback(() => {
-    // Only auto-scroll if user is at the bottom (prevents jump)
-    if (isNearBottomRef.current && messages.length > 0) {
-      setTimeout(() => {
-        flatListRef.current?.scrollToEnd({ animated: false });
-      }, 50);
-    }
-  }, [messages]);
-
-  // ─── Keyboard handling (keep original) ────────────────────────
   useEffect(() => {
     const showSub = Keyboard.addListener("keyboardDidShow", (e) => {
       const inputBarHeight = 70;
-      setKeyboardHeight(e.endCoordinates.height - inputBarHeight);
-      if (isNearBottomRef.current) {
-        setTimeout(
-          () => flatListRef.current?.scrollToEnd({ animated: true }),
-          100,
-        );
-      }
+      const adjusted = e.endCoordinates.height - inputBarHeight;
+      setKeyboardHeight(adjusted > 0 ? adjusted : 0);
     });
-    const hideSub = Keyboard.addListener("keyboardDidHide", () =>
-      setKeyboardHeight(0),
-    );
+    const hideSub = Keyboard.addListener("keyboardDidHide", () => {
+      setKeyboardHeight(0);
+    });
     return () => {
       showSub.remove();
       hideSub.remove();
     };
   }, []);
 
-  const handleSend = () => {
-    if (newMessage.trim()) {
-      sendMessage(newMessage);
-      setNewMessage("");
-      setTimeout(() => {
-        flatListRef.current?.scrollToEnd({ animated: true });
-      }, 100);
-    }
-  };
-
   useFocusEffect(
     useCallback(() => {
-      markAsRead();
-    }, [markAsRead]),
+      if (unreadCount > 0) markAsRead();
+    }, [unreadCount, markAsRead]),
   );
 
-  const renderItem = useCallback(
-    ({ item }: { item: any }) => (
-      <OptimizedMessage
-        id={item.id}
-        message={item.message}
-        sender_id={item.sender_id}
-        created_at={item.created_at}
-        isOwn={item.sender_id === user?.uid}
-        senderName={item.sender?.display_name || "Unknown"}
-        senderAvatar={item.sender?.avatar_url}
-        read={item.read_by?.includes(user?.uid ?? "")} // pass read status
-      />
-    ),
+  const handleScroll = useCallback(({ nativeEvent }: any) => {
+    const { contentOffset } = nativeEvent;
+    isNearLatestRef.current = contentOffset.y < NEAR_LATEST_THRESHOLD;
+  }, []);
+
+  const scrollToLatestIfNeeded = useCallback(() => {
+    if (isNearLatestRef.current) {
+      flatListRef.current?.scrollToIndex({ index: 0, animated: false });
+    }
+  }, []);
+
+  // Send message
+  const handleSend = useCallback(async () => {
+    const trimmed = inputText.trim();
+    if (!trimmed || sending) return;
+    try {
+      await sendMessage(trimmed);
+      setInputText("");
+      if (isNearLatestRef.current) {
+        setTimeout(
+          () =>
+            flatListRef.current?.scrollToIndex({ index: 0, animated: true }),
+          100,
+        );
+      }
+    } catch (error) {
+      console.error("Failed to send message:", error);
+    }
+  }, [inputText, sending, sendMessage]);
+
+  // Pagination
+  const handleLoadMore = useCallback(async () => {
+    if (!hasMore || isLoadingMore) return;
+    setIsLoadingMore(true);
+    await loadOlderMessages();
+    setIsLoadingMore(false);
+  }, [hasMore, isLoadingMore, loadOlderMessages]);
+
+  const displayMessages = useMemo(() => [...messages].reverse(), [messages]);
+
+  const renderMessage = useCallback(
+    ({ item }: { item: (typeof messages)[number] }) => {
+      const isOwn = item.sender_id === user?.uid;
+      const senderRole = item.sender?.role || "";
+      const readByOthers =
+        isOwn && item.read_by?.filter((id) => id !== user?.uid).length > 0;
+      return (
+        <OptimizedMessage
+          id={item.id}
+          message={item.message}
+          sender_id={item.sender_id}
+          created_at={item.created_at}
+          isOwn={isOwn}
+          senderName={item.sender?.display_name ?? "Staff"}
+          senderRole={item.sender?.role ?? "staff"}
+          senderAvatar={item.sender?.avatar_url}
+          read={readByOthers}
+        />
+      );
+    },
     [user?.uid],
   );
 
+  const UnreadBadge = () => {
+    if (unreadCount <= 0) return null;
+    return (
+      <View className="ml-2 bg-red-500 rounded-full min-w-[22px] h-[22px] items-center justify-center px-1">
+        <Text className="text-white text-xs font-bold">
+          {unreadCount > 99 ? "99+" : unreadCount}
+        </Text>
+      </View>
+    );
+  };
+
   if (loading) {
     return (
-      <SafeAreaView className="flex-1 bg-light-background dark:bg-slate-900 items-center justify-center">
-        <Text className="text-light-text-muted dark:text-slate-400">
-          Loading messages...
-        </Text>
+      <SafeAreaView className="flex-1 bg-white dark:bg-slate-900 items-center justify-center">
+        <ActivityIndicator size="large" color="#6b7280" />
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView className="flex-1 bg-light-background dark:bg-slate-900">
-      {/* Header – new UI */}
-      <View className="flex-row items-center justify-between border-b border-light-border dark:border-slate-700 px-4 py-3 bg-light-background dark:bg-slate-900">
-        <View className="flex-col gap-0.5">
-          <Text className="text-base font-bold text-light-text-primary dark:text-white">
-            Staff chat
+    <SafeAreaView className="flex-1 bg-white dark:bg-slate-900">
+      {/* Header */}
+      <View className="px-4 py-3 border-b border-gray-200 dark:border-slate-700 flex-row items-center justify-between">
+        <View className="flex-row items-center">
+          <Text className="text-lg font-semibold text-gray-900 dark:text-white">
+            Staff Chat
           </Text>
-          <View className="flex-row items-center gap-1.5">
-            <Users size={14} color={theme.colors.light.text.muted} />
-            <Text className="text-xs text-light-text-muted dark:text-slate-400">
-              {participantCount > 0
-                ? `${participantCount} participant${participantCount > 1 ? "s" : ""}`
-                : "No participants yet"}
-              {" · "}
-              {currentTerminal}
-            </Text>
-          </View>
-        </View>
-        {/* Online indicator – static for now */}
-        <View className="flex-row items-center gap-1.5">
-          <View className="w-1.5 h-1.5 rounded-full bg-green-500" />
-          <Text className="text-xs font-medium text-green-600">Online</Text>
+          <UnreadBadge />
         </View>
       </View>
 
-      {/* Messages – smart scroll */}
+      {/* Chat list */}
       <FlatList
         ref={flatListRef}
-        data={messages}
-        renderItem={renderItem}
+        data={displayMessages}
+        renderItem={renderMessage}
         keyExtractor={(item) => item.id}
-        onEndReached={hasMore ? loadOlderMessages : undefined}
+        inverted
+        contentContainerStyle={{
+          paddingHorizontal: 12,
+          paddingBottom: 8,
+          paddingTop: 4,
+        }}
+        onEndReached={handleLoadMore}
         onEndReachedThreshold={0.3}
-        contentContainerStyle={{ padding: 16, paddingBottom: 10, flexGrow: 1 }}
-        keyboardShouldPersistTaps="handled"
-        onScroll={handleScroll}
-        onContentSizeChange={handleContentSizeChange}
-        onLayout={handleLayout} // scroll to first unread
+        removeClippedSubviews={Platform.OS === "android"}
         windowSize={10}
         maxToRenderPerBatch={10}
-        removeClippedSubviews={true}
+        updateCellsBatchingPeriod={50}
+        keyboardShouldPersistTaps="handled"
+        onScroll={handleScroll}
+        // Auto‑scroll only if user is viewing latest
+        onContentSizeChange={scrollToLatestIfNeeded}
+        ListFooterComponent={
+          isLoadingMore ? (
+            <View className="py-2 items-center">
+              <ActivityIndicator size="small" color="#9ca3af" />
+            </View>
+          ) : null
+        }
         ListEmptyComponent={
           <View className="flex-1 items-center justify-center py-20">
-            <Text className="text-light-text-dim dark:text-slate-500">
-              No messages yet
-            </Text>
-            <Text className="text-light-text-dim dark:text-slate-500 text-sm mt-1">
-              Be the first to send a message!
+            <Text className="text-gray-500 dark:text-slate-400">
+              No messages yet. Say hello!
             </Text>
           </View>
         }
       />
 
-      {/* Input bar – new UI with paperclip */}
-      <View className="border-t border-light-border dark:border-slate-700 px-4 py-3 bg-light-background dark:bg-slate-900">
-        <View className="flex-row items-end gap-2">
-          <View className="flex-1 flex-row items-end bg-light-surface-secondary dark:bg-slate-800 rounded-xl border border-light-border dark:border-slate-700 px-3 py-2">
-            <TextInput
-              ref={inputRef}
-              className="flex-1 text-base text-light-text-primary dark:text-white max-h-24"
-              value={newMessage}
-              onChangeText={setNewMessage}
-              placeholder="Message the terminal team…"
-              placeholderTextColor={theme.colors.light.text.muted}
-              multiline
-              returnKeyType="send"
-              onSubmitEditing={handleSend}
-              scrollEnabled
-              textAlignVertical="center"
-            />
-            <TouchableOpacity className="p-1">
-              <Paperclip size={18} color={theme.colors.light.text.muted} />
-            </TouchableOpacity>
-          </View>
-          <TouchableOpacity
-            onPress={handleSend}
-            disabled={sending || !newMessage.trim()}
-            className={`w-10 h-10 rounded-full items-center justify-center ${
-              newMessage.trim() && !sending
-                ? "bg-primary-500"
-                : "bg-light-surface-secondary dark:bg-slate-700"
-            }`}
-          >
-            <SendHorizontal
-              size={18}
-              color={
-                newMessage.trim() && !sending
-                  ? "white"
-                  : theme.colors.light.text.muted
-              }
-            />
-          </TouchableOpacity>
-        </View>
+      {/* Input bar */}
+      <View className="px-3 py-2 border-t border-gray-200 dark:border-slate-700 flex-row items-end bg-white dark:bg-slate-900">
+        <TextInput
+          className="flex-1 bg-gray-100 dark:bg-slate-800 rounded-full px-4 py-2 text-gray-900 dark:text-white max-h-24"
+          placeholder="Type a message..."
+          placeholderTextColor="#9ca3af"
+          value={inputText}
+          onChangeText={setInputText}
+          multiline
+          blurOnSubmit={false}
+          onSubmitEditing={handleSend}
+          returnKeyType="send"
+        />
+        <TouchableOpacity
+          onPress={handleSend}
+          disabled={!inputText.trim() || sending}
+          className="ml-2 w-10 h-10 rounded-full bg-primary-500 items-center justify-center disabled:opacity-50"
+        >
+          {sending ? (
+            <ActivityIndicator size="small" color="white" />
+          ) : (
+            <SendHorizontal size={20} color="white" />
+          )}
+        </TouchableOpacity>
       </View>
 
-      {keyboardHeight > 0 && <View style={{ height: keyboardHeight }} />}
+      {/* Keyboard spacer */}
+      {keyboardHeight > 0 && <View style={{ height: keyboardHeight + 15 }} />}
     </SafeAreaView>
   );
 }

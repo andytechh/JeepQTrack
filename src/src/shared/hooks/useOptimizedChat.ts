@@ -27,7 +27,7 @@ interface ChatMessage {
 // ─── CONSTANTS ──────────────────────────────────────────────────────
 const ROOM_ID = "staff-general-chat";
 const PAGE_SIZE = 20;
-const CACHE_SIZE = 50;
+const CACHE_SIZE = 500;
 const DEBOUNCE_MS = 1000;
 
 // ─── NOTIFICATION CHANNEL ───────────────────────────────────────────

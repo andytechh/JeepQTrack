@@ -1,8 +1,6 @@
-// src/shared/components/chat/OptimizedMessage.tsx
 import { CheckCheck } from "lucide-react-native";
 import { memo } from "react";
 import { Image, Text, View } from "react-native";
-import { theme } from "../../constants/theme";
 
 interface MessageProps {
   id: string;
@@ -13,7 +11,7 @@ interface MessageProps {
   senderName: string;
   senderAvatar?: string;
   senderRole?: string;
-  read?: boolean; // add this if your hook provides it
+  read?: boolean;
 }
 
 export const OptimizedMessage = memo(
@@ -38,14 +36,14 @@ export const OptimizedMessage = memo(
         className={`flex-row mb-4 gap-2 ${isOwn ? "justify-end" : "justify-start"}`}
       >
         {!isOwn && (
-          <View className="w-8 h-8 rounded-full bg-light-surface-secondary dark:bg-slate-700 items-center justify-center self-end">
+          <View className="w-8 h-8 rounded-full bg-blue-200 items-center justify-center self-end">
             {senderAvatar ? (
               <Image
                 source={{ uri: senderAvatar }}
                 className="w-full h-full rounded-full"
               />
             ) : (
-              <Text className="text-xs font-semibold text-light-text-muted dark:text-slate-400">
+              <Text className="text-xs font-semibold text-slate-600">
                 {initials}
               </Text>
             )}
@@ -57,11 +55,9 @@ export const OptimizedMessage = memo(
         >
           {!isOwn && (
             <View className="flex-row items-center gap-1 ml-1 mb-1">
-              <Text className="text-xs text-light-text-muted dark:text-slate-400">
-                {senderName}
-              </Text>
+              <Text className="text-xs text-slate-500">{senderName}</Text>
               {senderRole ? (
-                <Text className="text-[10px] text-light-text-dim dark:text-slate-500 uppercase">
+                <Text className="text-[10px] text-slate-400 uppercase">
                   ({senderRole})
                 </Text>
               ) : null}
@@ -70,14 +66,12 @@ export const OptimizedMessage = memo(
 
           <View
             className={`rounded-xl px-3 py-2 ${
-              isOwn
-                ? "bg-primary-500 dark:bg-primary-600 self-end"
-                : "bg-light-surface-secondary dark:bg-slate-800 self-start"
+              isOwn ? "bg-sky-500 self-end" : "bg-blue-100 self-start"
             }`}
           >
             <Text
               className={`text-sm leading-relaxed ${
-                isOwn ? "text-white" : "text-light-text-primary dark:text-white"
+                isOwn ? "text-white" : "text-slate-800"
               }`}
             >
               {message}
@@ -85,12 +79,8 @@ export const OptimizedMessage = memo(
           </View>
 
           <View className="flex-row items-center gap-1 mt-1 px-1">
-            <Text className="text-[10px] text-light-text-dim dark:text-slate-500">
-              {timestamp}
-            </Text>
-            {isOwn && read && (
-              <CheckCheck size={14} color={theme.colors.primary[500]} />
-            )}
+            <Text className="text-[10px] text-slate-400">{timestamp}</Text>
+            {isOwn && read && <CheckCheck size={14} color="#0ea5e9" />}
           </View>
         </View>
       </View>
@@ -100,5 +90,6 @@ export const OptimizedMessage = memo(
     prev.id === next.id &&
     prev.message === next.message &&
     prev.isOwn === next.isOwn &&
-    prev.senderRole === next.senderRole,
+    prev.senderRole === next.senderRole &&
+    prev.read === next.read,
 );

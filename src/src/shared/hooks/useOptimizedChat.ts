@@ -1,4 +1,3 @@
-// src/shared/hooks/useOptimizedChat.ts
 import * as Notifications from "expo-notifications";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppState, Platform } from "react-native";
@@ -6,7 +5,6 @@ import { supabase } from "../config/supabase";
 import { useAuthStore } from "../store/authStore";
 import { useChatStore } from "../store/chatStore";
 
-// ─── TYPES ──────────────────────────────────────────────────────────
 interface ChatMessage {
   id: string;
   room_id: string;
@@ -14,7 +12,10 @@ interface ChatMessage {
   message: string;
   created_at: string;
   updated_at?: string;
+  edited_at?: string;
+  deleted_at?: string;
   read_by: string[];
+  reactions?: Record<string, string[]>;
   status?: string;
   sender?: {
     id: string;
@@ -24,13 +25,11 @@ interface ChatMessage {
   };
 }
 
-// ─── CONSTANTS ──────────────────────────────────────────────────────
 const ROOM_ID = "staff-general-chat";
 const PAGE_SIZE = 20;
 const CACHE_SIZE = 500;
 const DEBOUNCE_MS = 1000;
 
-// ─── NOTIFICATION CHANNEL ───────────────────────────────────────────
 const setupNotificationChannel = async () => {
   if (Platform.OS === "android") {
     try {
@@ -41,14 +40,11 @@ const setupNotificationChannel = async () => {
         enableVibrate: true,
         showBadge: true,
       });
-      console.log("✅ Chat notification channel created");
     } catch (error) {
-      console.error("❌ Failed to create chat notification channel:", error);
+      console.error("Failed to create chat notification channel:", error);
     }
   }
 };
-
-// ─── SINGLETON CONNECTION ───────────────────────────────────────────
 
 class ChatConnection {
   private static instance: ChatConnection;
@@ -71,35 +67,18 @@ class ChatConnection {
 
   connect(userId: string) {
     this.currentUserId = userId;
-
-    if (this.isSubscribed) {
-      console.log("📡 Already subscribed to chat channel");
-      return;
-    }
-
-    if (this.isConnecting) {
-      console.log("📡 Already connecting to chat channel");
-      return;
-    }
-
+    if (this.isSubscribed || this.isConnecting) return;
     if (this.channel) {
       try {
         this.channel.unsubscribe();
-      } catch (e) {
-        console.log("Error unsubscribing:", e);
-      }
+      } catch (e) {}
       this.channel = null;
       this.isSubscribed = false;
     }
-
     this.isConnecting = true;
     setupNotificationChannel();
-
-    console.log("📡 Creating new chat subscription...");
-
     const channelName = `chat_${ROOM_ID}_${Date.now()}`;
     this.channel = supabase.channel(channelName);
-
     this.channel.on(
       "postgres_changes",
       {
@@ -112,14 +91,11 @@ class ChatConnection {
         if (this.debounceTimer) clearTimeout(this.debounceTimer);
         this.debounceTimer = setTimeout(() => {
           const newMsg = payload.new as ChatMessage;
-          // 🔥 FIX: Fetch sender info if missing
           this.fetchSenderAndNotify(newMsg);
         }, DEBOUNCE_MS);
       },
     );
-
     this.channel.subscribe((status: string) => {
-      console.log(`📡 Chat subscription status: ${status}`);
       if (status === "SUBSCRIBED") {
         this.isSubscribed = true;
         this.isConnecting = false;
@@ -132,7 +108,6 @@ class ChatConnection {
     });
   }
 
-  // ─── Fetch sender for realtime messages ──────────────────────────
   private async fetchSenderAndNotify(newMsg: ChatMessage) {
     try {
       if (!newMsg.sender) {
@@ -141,13 +116,10 @@ class ChatConnection {
           .select("id, display_name, role, avatar_url")
           .eq("id", newMsg.sender_id)
           .single();
-
-        if (sender) {
-          newMsg.sender = sender;
-        }
+        if (sender) newMsg.sender = sender;
       }
     } catch (error) {
-      console.error("❌ Failed to fetch sender:", error);
+      console.error("Failed to fetch sender:", error);
     } finally {
       this.notifyListeners(newMsg);
       this.sendPushIfNeeded(newMsg);
@@ -160,14 +132,10 @@ class ChatConnection {
       this.currentUserId
     ) {
       this.reconnectAttempts++;
-      console.log(
-        `🔄 Reconnecting attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts}`,
+      setTimeout(
+        () => this.connect(this.currentUserId!),
+        2000 * this.reconnectAttempts,
       );
-      setTimeout(() => {
-        this.connect(this.currentUserId!);
-      }, 2000 * this.reconnectAttempts);
-    } else {
-      console.log("❌ Max reconnect attempts reached");
     }
   }
 
@@ -179,9 +147,7 @@ class ChatConnection {
     if (this.channel) {
       try {
         this.channel.unsubscribe();
-      } catch (e) {
-        console.log("Error unsubscribing:", e);
-      }
+      } catch (e) {}
       this.channel = null;
       this.isSubscribed = false;
       this.isConnecting = false;
@@ -201,9 +167,7 @@ class ChatConnection {
     this.listeners.forEach((cb) => {
       try {
         cb(message);
-      } catch (error) {
-        console.error("Error in listener:", error);
-      }
+      } catch (e) {}
     });
   }
 
@@ -215,13 +179,11 @@ class ChatConnection {
     ) {
       try {
         const senderName = message.sender?.display_name || "Someone";
-
         const { data: receiver } = await supabase
           .from("users")
           .select("expo_push_token")
           .eq("id", this.currentUserId)
           .single();
-
         if (receiver?.expo_push_token) {
           await fetch("https://exp.host/--/api/v2/push/send", {
             method: "POST",
@@ -241,7 +203,6 @@ class ChatConnection {
               },
             }),
           });
-          console.log("📲 Push notification sent for chat message");
         }
       } catch (error) {
         console.error("Push notification error:", error);
@@ -251,46 +212,36 @@ class ChatConnection {
 }
 export const chatConnection = ChatConnection.getInstance();
 
-// ─── MEMORY CACHE ───────────────────────────────────────────────────
 class MessageCache {
   private messages: ChatMessage[] = [];
   private readonly maxSize: number;
-
   constructor(maxSize = CACHE_SIZE) {
     this.maxSize = maxSize;
   }
-
   getAll(): ChatMessage[] {
     return [...this.messages];
   }
-
   add(message: ChatMessage) {
     if (this.messages.some((m) => m.id === message.id)) return;
     this.messages.push(message);
-    if (this.messages.length > this.maxSize) {
+    if (this.messages.length > this.maxSize)
       this.messages = this.messages.slice(-this.maxSize);
-    }
   }
-
   addBatch(messages: ChatMessage[]) {
     messages.forEach((m) => this.add(m));
   }
-
   prepend(messages: ChatMessage[]) {
     const existingIds = new Set(this.messages.map((m) => m.id));
     const newMessages = messages.filter((m) => !existingIds.has(m.id));
     this.messages = [...newMessages, ...this.messages];
-    if (this.messages.length > this.maxSize) {
+    if (this.messages.length > this.maxSize)
       this.messages = this.messages.slice(-this.maxSize);
-    }
   }
-
   clear() {
     this.messages = [];
   }
 }
 
-// ─── MAIN HOOK ──────────────────────────────────────────────────────
 export function useOptimizedChat() {
   const { user } = useAuthStore();
   const {
@@ -301,7 +252,6 @@ export function useOptimizedChat() {
   } = useChatStore();
   const connection = useMemo(() => ChatConnection.getInstance(), []);
   const cache = useMemo(() => new MessageCache(CACHE_SIZE), []);
-
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
@@ -312,7 +262,6 @@ export function useOptimizedChat() {
   const mountedRef = useRef(true);
   const isInitialLoadRef = useRef(true);
 
-  // ─── FETCH INITIAL MESSAGES ──────────────────────────────────────
   const fetchInitialMessages = useCallback(async () => {
     try {
       setLoading(true);
@@ -322,40 +271,29 @@ export function useOptimizedChat() {
         .eq("room_id", ROOM_ID)
         .order("created_at", { ascending: false })
         .limit(PAGE_SIZE);
-
       if (error) throw error;
-
       const msgs = (data || []).reverse();
       cache.clear();
       cache.addBatch(msgs);
-
       if (mountedRef.current) {
         setMessages(cache.getAll());
-
         if (user?.uid && !shouldSkipRecalculation.current) {
           const unread = msgs.filter(
             (msg) =>
               msg.sender_id !== user.uid && !msg.read_by?.includes(user.uid),
           ).length;
           setUnreadCount(unread);
-          console.log(`📊 Unread count calculated: ${unread}`);
         }
-
-        if (msgs.length > 0) {
-          oldestMessageRef.current = msgs[0].id;
-        }
+        if (msgs.length > 0) oldestMessageRef.current = msgs[0].id;
         setHasMore(msgs.length === PAGE_SIZE);
       }
     } catch (error) {
       console.error("Fetch error:", error);
     } finally {
-      if (mountedRef.current) {
-        setLoading(false);
-      }
+      if (mountedRef.current) setLoading(false);
     }
   }, [cache, user?.uid, setUnreadCount]);
 
-  // ─── LOAD OLDER MESSAGES ──────────────────────────────────────────
   const loadOlderMessages = useCallback(async () => {
     if (!oldestMessageRef.current || !hasMore) return;
     try {
@@ -364,9 +302,7 @@ export function useOptimizedChat() {
         .select("created_at")
         .eq("id", oldestMessageRef.current)
         .single();
-
       if (!olderMsg) return;
-
       const { data, error } = await supabase
         .from("chat_messages")
         .select("*, sender:users!sender_id(id, display_name, role, avatar_url)")
@@ -374,9 +310,7 @@ export function useOptimizedChat() {
         .lt("created_at", olderMsg.created_at)
         .order("created_at", { ascending: false })
         .limit(PAGE_SIZE);
-
       if (error) throw error;
-
       const olderMessages = (data || []).reverse();
       if (olderMessages.length > 0 && mountedRef.current) {
         oldestMessageRef.current = olderMessages[0].id;
@@ -389,7 +323,6 @@ export function useOptimizedChat() {
     }
   }, [cache, hasMore]);
 
-  // ─── SEND MESSAGE ──────────────────────────────────────────────────
   const sendMessage = useCallback(
     async (text: string) => {
       if (!text.trim() || !user?.uid) return;
@@ -407,9 +340,7 @@ export function useOptimizedChat() {
             "*, sender:users!sender_id(id, display_name, role, avatar_url)",
           )
           .single();
-
         if (error) throw error;
-
         if (data && mountedRef.current) {
           cache.add(data);
           setMessages(cache.getAll());
@@ -423,35 +354,155 @@ export function useOptimizedChat() {
     [user?.uid, cache],
   );
 
-  // ─── MARK AS READ ──────────────────────────────────────────────────
+  const editMessage = useCallback(
+    async (messageId: string, newText: string) => {
+      if (!user?.uid || !newText.trim()) return;
+      try {
+        const { error } = await supabase
+          .from("chat_messages")
+          .update({
+            message: newText.trim(),
+            edited_at: new Date().toISOString(),
+          })
+          .eq("id", messageId)
+          .eq("sender_id", user.uid);
+        if (error) throw error;
+        const updatedMessages = cache
+          .getAll()
+          .map((m) =>
+            m.id === messageId
+              ? {
+                  ...m,
+                  message: newText.trim(),
+                  edited_at: new Date().toISOString(),
+                }
+              : m,
+          );
+        cache.clear();
+        cache.addBatch(updatedMessages);
+        if (mountedRef.current) setMessages(cache.getAll());
+      } catch (error) {
+        console.error("Edit error:", error);
+      }
+    },
+    [user?.uid, cache],
+  );
+
+  const deleteMessage = useCallback(
+    async (messageId: string) => {
+      if (!user?.uid) return;
+      try {
+        const { error } = await supabase
+          .from("chat_messages")
+          .update({ deleted_at: new Date().toISOString() })
+          .eq("id", messageId)
+          .eq("sender_id", user.uid);
+        if (error) throw error;
+        const updatedMessages = cache
+          .getAll()
+          .map((m) =>
+            m.id === messageId
+              ? { ...m, deleted_at: new Date().toISOString(), message: "" }
+              : m,
+          );
+        cache.clear();
+        cache.addBatch(updatedMessages);
+        if (mountedRef.current) setMessages(cache.getAll());
+      } catch (error) {
+        console.error("Delete error:", error);
+      }
+    },
+    [user?.uid, cache],
+  );
+
+  const addReaction = useCallback(
+    async (messageId: string, emoji: string) => {
+      if (!user?.uid) return;
+      try {
+        const currentMsg = cache.getAll().find((m) => m.id === messageId);
+        if (!currentMsg) return;
+        const reactions = currentMsg.reactions || {};
+        const users = reactions[emoji] || [];
+        if (users.includes(user.uid)) return;
+        const updatedReactions = {
+          ...reactions,
+          [emoji]: [...users, user.uid],
+        };
+        const updatedMessages = cache
+          .getAll()
+          .map((m) =>
+            m.id === messageId ? { ...m, reactions: updatedReactions } : m,
+          );
+        cache.clear();
+        cache.addBatch(updatedMessages);
+        if (mountedRef.current) setMessages(cache.getAll());
+
+        const { error } = await supabase
+          .from("chat_messages")
+          .update({ reactions: updatedReactions })
+          .eq("id", messageId);
+        if (error) throw error;
+      } catch (error) {
+        console.error("Add reaction error:", error);
+      }
+    },
+    [user?.uid, cache],
+  );
+
+  const removeReaction = useCallback(
+    async (messageId: string, emoji: string) => {
+      if (!user?.uid) return;
+      try {
+        const currentMsg = cache.getAll().find((m) => m.id === messageId);
+        if (!currentMsg) return;
+        const reactions = currentMsg.reactions || {};
+        const users = reactions[emoji] || [];
+        if (!users.includes(user.uid)) return;
+        const updatedUsers = users.filter((id) => id !== user.uid);
+        const updatedReactions = { ...reactions };
+        if (updatedUsers.length === 0) {
+          delete updatedReactions[emoji];
+        } else {
+          updatedReactions[emoji] = updatedUsers;
+        }
+        const updatedMessages = cache
+          .getAll()
+          .map((m) =>
+            m.id === messageId ? { ...m, reactions: updatedReactions } : m,
+          );
+        cache.clear();
+        cache.addBatch(updatedMessages);
+        if (mountedRef.current) setMessages(cache.getAll());
+
+        const { error } = await supabase
+          .from("chat_messages")
+          .update({ reactions: updatedReactions })
+          .eq("id", messageId);
+        if (error) throw error;
+      } catch (error) {
+        console.error("Remove reaction error:", error);
+      }
+    },
+    [user?.uid, cache],
+  );
+
   const markAsRead = useCallback(async () => {
     if (!user?.uid) return;
-
     shouldSkipRecalculation.current = true;
     resetUnreadCount();
-    console.log("📊 Unread count reset to 0");
-
     try {
       const { error: rpcError } = await supabase.rpc("mark_messages_read", {
         p_room_id: ROOM_ID,
         p_user_id: user.uid,
       });
-
       if (rpcError) {
-        console.error("❌ RPC Error:", rpcError);
         const { error: updateError } = await supabase
           .from("chat_messages")
-          .update({
-            read_by: supabase.sql`array_append(read_by, ${user.uid})`,
-          })
+          .update({ read_by: supabase.sql`array_append(read_by, ${user.uid})` })
           .eq("room_id", ROOM_ID)
           .neq("sender_id", user.uid)
           .not("read_by", "cs", `{${user.uid}}`);
-
-        if (updateError) {
-          console.error("❌ Fallback update error:", updateError);
-        } else {
-          console.log("✅ Messages marked as read (fallback)");
+        if (!updateError) {
           setMessages((prev) =>
             prev.map((msg) =>
               msg.sender_id !== user.uid && !msg.read_by?.includes(user.uid!)
@@ -461,7 +512,6 @@ export function useOptimizedChat() {
           );
         }
       } else {
-        console.log("✅ Messages marked as read (RPC)");
         setMessages((prev) =>
           prev.map((msg) =>
             msg.sender_id !== user.uid && !msg.read_by?.includes(user.uid!)
@@ -470,89 +520,64 @@ export function useOptimizedChat() {
           ),
         );
       }
-
       setUnreadCount(0);
     } catch (error) {
-      console.error("❌ Mark read error:", error);
+      console.error("Mark read error:", error);
     } finally {
-      // 🔥 Reset the flag after 1 second so future unread increments work
       setTimeout(() => {
         shouldSkipRecalculation.current = false;
       }, 1000);
     }
   }, [user?.uid, resetUnreadCount, setUnreadCount]);
 
-  // ─── REFRESH MESSAGES ─────────────────────────────────────────────
   const refreshMessages = useCallback(async () => {
     shouldSkipRecalculation.current = false;
     await fetchInitialMessages();
   }, [fetchInitialMessages]);
 
-  // ─── CONNECTION LIFECYCLE ─────────────────────────────────────────
   useEffect(() => {
     mountedRef.current = true;
     isInitialLoadRef.current = true;
-
     if (!user?.uid) {
       setLoading(false);
       return;
     }
-
     connection.connect(user.uid);
-
     const unsubscribe = connection.addListener((newMessage) => {
       if (mountedRef.current) {
         cache.add(newMessage);
         setMessages(cache.getAll());
       }
     });
-
     fetchInitialMessages();
-
     return () => {
       mountedRef.current = false;
       unsubscribe();
     };
-  }, [
-    user?.uid,
-    connection,
-    cache,
-    fetchInitialMessages,
-    incrementUnreadCount,
-  ]);
+  }, [user?.uid, connection, cache, fetchInitialMessages]);
 
-  // ─── APP STATE - HANDLE BACKGROUND/FOREGROUND ─────────────────────
   useEffect(() => {
     const handleAppState = (nextState: string) => {
       connection.setAppState(nextState);
-
-      if (nextState === "active") {
-        if (user?.uid) {
-          connection.connect(user.uid);
-          if (!isInitialLoadRef.current && !shouldSkipRecalculation.current) {
-            fetchInitialMessages();
-          }
-          isInitialLoadRef.current = false;
+      if (nextState === "active" && user?.uid) {
+        connection.connect(user.uid);
+        if (!isInitialLoadRef.current && !shouldSkipRecalculation.current) {
+          fetchInitialMessages();
         }
+        isInitialLoadRef.current = false;
       }
     };
-
     const subscription = AppState.addEventListener("change", handleAppState);
     return () => subscription.remove();
   }, [user?.uid, connection, fetchInitialMessages]);
 
-  // ─── HANDLE NOTIFICATION TAPS ─────────────────────────────────────
   useEffect(() => {
     const subscription = Notifications.addNotificationResponseReceivedListener(
       (response) => {
         const data = response.notification.request.content.data;
-        if (data?.type === "chat") {
-          console.log("👆 Chat notification tapped");
-          markAsRead();
-        }
+        if (data?.type === "chat") markAsRead();
       },
     );
-
     return () => subscription.remove();
   }, [markAsRead]);
 
@@ -566,5 +591,9 @@ export function useOptimizedChat() {
     loadOlderMessages,
     markAsRead,
     refreshMessages,
+    editMessage,
+    deleteMessage,
+    addReaction,
+    removeReaction,
   };
 }

@@ -1,5 +1,4 @@
 // app/staff/(driver)/settings.tsx
-import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
 import {
   ArrowLeft,
@@ -17,7 +16,7 @@ import {
   Shield,
   User,
   Volume2,
-  X
+  X,
 } from "lucide-react-native";
 import { useEffect, useState } from "react";
 import {
@@ -33,9 +32,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-
 import { supabase } from "../../../../src/shared/config/supabase";
-import { theme } from "../../../../src/shared/constants/theme";
 import { AuthService } from "../../../../src/shared/services/AuthService";
 import { ChatService } from "../../../../src/shared/services/ChatService";
 import { useAuthStore } from "../../../../src/shared/store/authStore";
@@ -88,23 +85,21 @@ export default function SettingsScreen() {
   const fetchProfileData = async () => {
     try {
       setLoading(true);
-
       const { data: userData, error: userError } = await supabase
         .from("users")
         .select("*")
         .eq("id", user?.uid)
         .single();
-
       if (userError) throw userError;
       setProfile(userData);
 
-      if (userData?.jeepney_id) {
+      // Only fetch jeepney info if driver
+      if (userData?.role === "driver" && userData?.jeepney_id) {
         const { data: jeepneyData, error: jeepneyError } = await supabase
           .from("jeepneys")
           .select("*")
           .eq("id", userData.jeepney_id)
           .single();
-
         if (!jeepneyError && jeepneyData) {
           setJeepneyInfo(jeepneyData);
         }
@@ -122,7 +117,6 @@ export default function SettingsScreen() {
       Alert.alert("Error", "Name is required");
       return;
     }
-
     setSaving(true);
     try {
       const { error } = await supabase
@@ -132,9 +126,7 @@ export default function SettingsScreen() {
           phone_number: editPhone.trim() || null,
         })
         .eq("id", user?.uid);
-
       if (error) throw error;
-
       setProfile((prev) =>
         prev
           ? {
@@ -144,7 +136,6 @@ export default function SettingsScreen() {
             }
           : null,
       );
-
       Alert.alert("Success", "Profile updated successfully");
       setEditModalVisible(false);
     } catch (error) {
@@ -184,206 +175,120 @@ export default function SettingsScreen() {
 
   if (loading) {
     return (
-      <View
-        className="flex-1 items-center justify-center"
-        style={{ backgroundColor: theme.colors.dark.background }}
-      >
-        <ActivityIndicator size="large" color={theme.colors.primary[500]} />
-        <Text
-          className="mt-4 text-sm"
-          style={{ color: theme.colors.dark.text.muted }}
-        >
-          Loading settings...
-        </Text>
-      </View>
+      <SafeAreaView className="flex-1 bg-slate-50 items-center justify-center">
+        <ActivityIndicator size="large" color="#0ea5e9" />
+        <Text className="text-slate-400 mt-4 text-sm">Loading settings...</Text>
+      </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView
-      className="flex-1"
-      style={{ backgroundColor: theme.colors.dark.background }}
-    >
-      <StatusBar
-        barStyle="light-content"
-        backgroundColor={theme.colors.dark.background}
-      />
+    <SafeAreaView className="flex-1 bg-slate-50">
+      <StatusBar barStyle="dark-content" backgroundColor="#f8fafc" />
 
-      {/* ===== HEADER ===== */}
-      <LinearGradient
-        colors={theme.colors.gradient.header}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 0.5 }}
-        className="px-4 pt-4 pb-4"
-      >
-        <View className="flex-row items-center">
-          <TouchableOpacity
-            onPress={() => router.back()}
-            className="w-10 h-10 rounded-full items-center justify-center"
-            style={{ backgroundColor: "rgba(255,255,255,0.1)" }}
-            activeOpacity={0.7}
-          >
-            <ArrowLeft size={22} color="#ffffff" />
-          </TouchableOpacity>
-          <Text className="flex-1 text-center text-lg font-bold text-white">
-            Settings
-          </Text>
-          <View className="w-10" />
-        </View>
-      </LinearGradient>
+      {/* ─── Header – matches chat screen ─────────────────────────── */}
+      <View className="px-4 py-3 border-b border-slate-200 bg-white flex-row items-center">
+        <TouchableOpacity
+          onPress={() => router.back()}
+          className="p-1 mr-3"
+          activeOpacity={0.7}
+        >
+          <ArrowLeft size={24} color="#0f172a" />
+        </TouchableOpacity>
+        <Text className="text-xl font-bold text-slate-900 flex-1">
+          Settings
+        </Text>
+      </View>
 
       <ScrollView
         className="flex-1 px-4 pt-4"
         showsVerticalScrollIndicator={false}
-        style={{ backgroundColor: theme.colors.dark.background }}
       >
-        {/* ===== PROFILE SECTION ===== */}
+        {/* ─── Profile Section ────────────────────────────────────── */}
         <View className="mb-6">
-          <Text
-            className="text-xs font-semibold uppercase tracking-wider mb-3"
-            style={{ color: theme.colors.dark.text.muted }}
-          >
+          <Text className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3">
             Profile
           </Text>
           <TouchableOpacity
             activeOpacity={0.8}
             onPress={openEditModal}
-            className="rounded-2xl p-4"
-            style={{
-              backgroundColor: theme.colors.dark.surface,
-              borderWidth: 1,
-              borderColor: theme.colors.dark.border,
-            }}
+            className="bg-white rounded-xl p-4 border border-slate-200"
           >
             <View className="flex-row items-center">
-              <LinearGradient
-                colors={theme.colors.gradient.button}
-                className="w-16 h-16 rounded-full items-center justify-center"
-                style={{ borderRadius: theme.borderRadius.full }}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-              >
+              <View className="w-16 h-16 rounded-full bg-sky-500 items-center justify-center">
                 <Text className="text-white text-xl font-bold">
-                  {profile?.display_name?.charAt(0)?.toUpperCase() || "U"}
+                  {profile?.display_name?.[0]?.toUpperCase() || "U"}
                 </Text>
-              </LinearGradient>
+              </View>
               <View className="flex-1 ml-3">
-                <Text
-                  className="text-base font-bold"
-                  style={{ color: theme.colors.dark.text.primary }}
-                >
+                <Text className="text-base font-bold text-slate-900">
                   {profile?.display_name || "N/A"}
                 </Text>
-                <Text
-                  className="text-sm"
-                  style={{ color: theme.colors.dark.text.secondary }}
-                >
-                  {profile?.email}
-                </Text>
+                <Text className="text-sm text-slate-500">{profile?.email}</Text>
                 <View className="flex-row items-center mt-1">
                   <View
-                    className="px-2 py-0.5 rounded-full"
-                    style={{
-                      backgroundColor:
-                        profile?.role === "driver"
-                          ? `${theme.colors.primary[500]}30`
-                          : `${theme.colors.status.busy}30`,
-                    }}
+                    className={`px-2 py-0.5 rounded-full ${
+                      profile?.role === "driver" ? "bg-sky-100" : "bg-slate-100"
+                    }`}
                   >
                     <Text
-                      className="text-xs capitalize"
-                      style={{
-                        color:
-                          profile?.role === "driver"
-                            ? theme.colors.primary[400]
-                            : theme.colors.status.busy,
-                      }}
+                      className={`text-xs capitalize ${
+                        profile?.role === "driver"
+                          ? "text-sky-600"
+                          : "text-slate-500"
+                      }`}
                     >
                       {profile?.role || "staff"}
                     </Text>
                   </View>
                   {profile?.is_active && (
                     <View className="flex-row items-center ml-2">
-                      <View
-                        className="w-1.5 h-1.5 rounded-full mr-1"
-                        style={{ backgroundColor: theme.colors.status.online }}
-                      />
-                      <Text
-                        className="text-xs"
-                        style={{ color: theme.colors.dark.text.muted }}
-                      >
-                        Active
-                      </Text>
+                      <View className="w-1.5 h-1.5 rounded-full bg-green-500 mr-1" />
+                      <Text className="text-xs text-slate-400">Active</Text>
                     </View>
                   )}
                 </View>
               </View>
-              <View
-                className="w-10 h-10 rounded-full items-center justify-center"
-                style={{ backgroundColor: `${theme.colors.primary[500]}20` }}
-              >
-                <Edit2 size={18} color={theme.colors.primary[400]} />
+              <View className="w-10 h-10 rounded-full bg-sky-50 items-center justify-center">
+                <Edit2 size={18} color="#0ea5e9" />
               </View>
             </View>
           </TouchableOpacity>
         </View>
 
-        {/* ===== JEEPNEY INFO ===== */}
-        {jeepneyInfo && (
+        {/* ─── Jeepney Info (driver only) ──────────────────────────── */}
+        {profile?.role === "driver" && jeepneyInfo && (
           <View className="mb-6">
-            <Text
-              className="text-xs font-semibold uppercase tracking-wider mb-3"
-              style={{ color: theme.colors.dark.text.muted }}
-            >
+            <Text className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3">
               Jeepney Information
             </Text>
-            <View
-              className="rounded-2xl p-4"
-              style={{
-                backgroundColor: theme.colors.dark.surface,
-                borderWidth: 1,
-                borderColor: theme.colors.dark.border,
-              }}
-            >
+            <View className="bg-white rounded-xl p-4 border border-slate-200">
               <View className="flex-row items-center">
-                <View
-                  className="w-12 h-12 rounded-full items-center justify-center"
-                  style={{ backgroundColor: `${theme.colors.primary[500]}20` }}
-                >
-                  <Bus size={24} color={theme.colors.primary[400]} />
+                <View className="w-12 h-12 rounded-full bg-sky-50 items-center justify-center">
+                  <Bus size={24} color="#0ea5e9" />
                 </View>
                 <View className="flex-1 ml-3">
-                  <Text
-                    className="text-base font-bold"
-                    style={{ color: theme.colors.dark.text.primary }}
-                  >
+                  <Text className="text-base font-bold text-slate-900">
                     {jeepneyInfo.plate_number}
                   </Text>
-                  <Text
-                    className="text-sm"
-                    style={{ color: theme.colors.dark.text.secondary }}
-                  >
+                  <Text className="text-sm text-slate-500">
                     Bracket {jeepneyInfo.bracket} • Capacity:{" "}
                     {jeepneyInfo.capacity}
                   </Text>
                   <View className="flex-row items-center mt-1">
                     <View
-                      className="px-2 py-0.5 rounded-full"
-                      style={{
-                        backgroundColor:
-                          jeepneyInfo.status === "active"
-                            ? `${theme.colors.status.online}30`
-                            : `${theme.colors.status.busy}30`,
-                      }}
+                      className={`px-2 py-0.5 rounded-full ${
+                        jeepneyInfo.status === "active"
+                          ? "bg-green-100"
+                          : "bg-red-100"
+                      }`}
                     >
                       <Text
-                        className="text-xs capitalize"
-                        style={{
-                          color:
-                            jeepneyInfo.status === "active"
-                              ? theme.colors.status.online
-                              : theme.colors.status.busy,
-                        }}
+                        className={`text-xs capitalize ${
+                          jeepneyInfo.status === "active"
+                            ? "text-green-600"
+                            : "text-red-600"
+                        }`}
                       >
                         {jeepneyInfo.status || "unknown"}
                       </Text>
@@ -395,305 +300,175 @@ export default function SettingsScreen() {
           </View>
         )}
 
-        {/* ===== APP SETTINGS ===== */}
+        {/* ─── App Settings ────────────────────────────────────────── */}
         <View className="mb-6">
-          <Text
-            className="text-xs font-semibold uppercase tracking-wider mb-3"
-            style={{ color: theme.colors.dark.text.muted }}
-          >
+          <Text className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3">
             App Settings
           </Text>
-          <View
-            className="rounded-2xl overflow-hidden"
-            style={{
-              backgroundColor: theme.colors.dark.surface,
-              borderWidth: 1,
-              borderColor: theme.colors.dark.border,
-            }}
-          >
+          <View className="bg-white rounded-xl overflow-hidden border border-slate-200">
             {/* Notifications */}
-            <View
-              className="flex-row items-center justify-between px-4 py-3.5"
-              style={{
-                borderBottomWidth: 1,
-                borderColor: theme.colors.dark.border,
-              }}
-            >
+            <View className="flex-row items-center justify-between px-4 py-3.5 border-b border-slate-100">
               <View className="flex-row items-center">
-                <Bell size={20} color={theme.colors.dark.text.muted} />
-                <Text
-                  className="ml-3 text-sm"
-                  style={{ color: theme.colors.dark.text.primary }}
-                >
+                <Bell size={20} color="#94a3b8" />
+                <Text className="ml-3 text-sm text-slate-700">
                   Push Notifications
                 </Text>
               </View>
               <Switch
                 value={notifications}
                 onValueChange={setNotifications}
-                trackColor={{
-                  false: theme.colors.dark.text.dim,
-                  true: theme.colors.primary[500],
-                }}
-                thumbColor={notifications ? "#FFFFFF" : "#9CA3AF"}
+                trackColor={{ false: "#e2e8f0", true: "#0ea5e9" }}
+                thumbColor={notifications ? "#ffffff" : "#94a3b8"}
               />
             </View>
 
             {/* Dark Mode */}
-            <View
-              className="flex-row items-center justify-between px-4 py-3.5"
-              style={{
-                borderBottomWidth: 1,
-                borderColor: theme.colors.dark.border,
-              }}
-            >
+            <View className="flex-row items-center justify-between px-4 py-3.5 border-b border-slate-100">
               <View className="flex-row items-center">
-                <Moon size={20} color={theme.colors.dark.text.muted} />
-                <Text
-                  className="ml-3 text-sm"
-                  style={{ color: theme.colors.dark.text.primary }}
-                >
-                  Dark Mode
-                </Text>
+                <Moon size={20} color="#94a3b8" />
+                <Text className="ml-3 text-sm text-slate-700">Dark Mode</Text>
               </View>
               <Switch
                 value={darkMode}
                 onValueChange={setDarkMode}
-                trackColor={{
-                  false: theme.colors.dark.text.dim,
-                  true: theme.colors.primary[500],
-                }}
-                thumbColor={darkMode ? "#FFFFFF" : "#9CA3AF"}
+                trackColor={{ false: "#e2e8f0", true: "#0ea5e9" }}
+                thumbColor={darkMode ? "#ffffff" : "#94a3b8"}
               />
             </View>
 
             {/* Sound Effects */}
-            <View
-              className="flex-row items-center justify-between px-4 py-3.5"
-              style={{
-                borderBottomWidth: 1,
-                borderColor: theme.colors.dark.border,
-              }}
-            >
+            <View className="flex-row items-center justify-between px-4 py-3.5 border-b border-slate-100">
               <View className="flex-row items-center">
-                <Volume2 size={20} color={theme.colors.dark.text.muted} />
-                <Text
-                  className="ml-3 text-sm"
-                  style={{ color: theme.colors.dark.text.primary }}
-                >
+                <Volume2 size={20} color="#94a3b8" />
+                <Text className="ml-3 text-sm text-slate-700">
                   Sound Effects
                 </Text>
               </View>
               <Switch
                 value={soundEnabled}
                 onValueChange={setSoundEnabled}
-                trackColor={{
-                  false: theme.colors.dark.text.dim,
-                  true: theme.colors.primary[500],
-                }}
-                thumbColor={soundEnabled ? "#FFFFFF" : "#9CA3AF"}
+                trackColor={{ false: "#e2e8f0", true: "#0ea5e9" }}
+                thumbColor={soundEnabled ? "#ffffff" : "#94a3b8"}
               />
             </View>
 
             {/* Auto Refresh */}
             <View className="flex-row items-center justify-between px-4 py-3.5">
               <View className="flex-row items-center">
-                <RefreshCw size={20} color={theme.colors.dark.text.muted} />
-                <Text
-                  className="ml-3 text-sm"
-                  style={{ color: theme.colors.dark.text.primary }}
-                >
+                <RefreshCw size={20} color="#94a3b8" />
+                <Text className="ml-3 text-sm text-slate-700">
                   Auto Refresh
                 </Text>
               </View>
               <Switch
                 value={autoRefresh}
                 onValueChange={setAutoRefresh}
-                trackColor={{
-                  false: theme.colors.dark.text.dim,
-                  true: theme.colors.primary[500],
-                }}
-                thumbColor={autoRefresh ? "#FFFFFF" : "#9CA3AF"}
+                trackColor={{ false: "#e2e8f0", true: "#0ea5e9" }}
+                thumbColor={autoRefresh ? "#ffffff" : "#94a3b8"}
               />
             </View>
           </View>
         </View>
 
-        {/* ===== LANGUAGE ===== */}
+        {/* ─── Language ────────────────────────────────────────────── */}
         <View className="mb-6">
-          <Text
-            className="text-xs font-semibold uppercase tracking-wider mb-3"
-            style={{ color: theme.colors.dark.text.muted }}
-          >
+          <Text className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3">
             Language & Region
           </Text>
           <TouchableOpacity
             activeOpacity={0.7}
             onPress={() => setLanguageModalVisible(true)}
-            className="rounded-2xl p-4 flex-row items-center justify-between"
-            style={{
-              backgroundColor: theme.colors.dark.surface,
-              borderWidth: 1,
-              borderColor: theme.colors.dark.border,
-            }}
+            className="bg-white rounded-xl p-4 flex-row items-center justify-between border border-slate-200"
           >
             <View className="flex-row items-center">
-              <Languages size={20} color={theme.colors.dark.text.muted} />
-              <Text
-                className="ml-3 text-sm"
-                style={{ color: theme.colors.dark.text.primary }}
-              >
-                Language
-              </Text>
+              <Languages size={20} color="#94a3b8" />
+              <Text className="ml-3 text-sm text-slate-700">Language</Text>
             </View>
             <View className="flex-row items-center">
-              <Text
-                className="text-sm mr-2"
-                style={{ color: theme.colors.dark.text.muted }}
-              >
-                {language}
-              </Text>
-              <ChevronRight size={18} color={theme.colors.dark.text.muted} />
+              <Text className="text-sm text-slate-500 mr-2">{language}</Text>
+              <ChevronRight size={18} color="#94a3b8" />
             </View>
           </TouchableOpacity>
         </View>
 
-        {/* ===== ABOUT ===== */}
+        {/* ─── About ────────────────────────────────────────────────── */}
         <View className="mb-6">
-          <Text
-            className="text-xs font-semibold uppercase tracking-wider mb-3"
-            style={{ color: theme.colors.dark.text.muted }}
-          >
+          <Text className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3">
             About
           </Text>
-          <View
-            className="rounded-2xl overflow-hidden"
-            style={{
-              backgroundColor: theme.colors.dark.surface,
-              borderWidth: 1,
-              borderColor: theme.colors.dark.border,
-            }}
-          >
-            <View
-              className="flex-row items-center justify-between px-4 py-3.5"
-              style={{
-                borderBottomWidth: 1,
-                borderColor: theme.colors.dark.border,
-              }}
-            >
+          <View className="bg-white rounded-xl overflow-hidden border border-slate-200">
+            <View className="flex-row items-center justify-between px-4 py-3.5 border-b border-slate-100">
               <View className="flex-row items-center">
-                <Info size={20} color={theme.colors.dark.text.muted} />
-                <Text
-                  className="ml-3 text-sm"
-                  style={{ color: theme.colors.dark.text.primary }}
-                >
-                  Version
-                </Text>
+                <Info size={20} color="#94a3b8" />
+                <Text className="ml-3 text-sm text-slate-700">Version</Text>
               </View>
-              <Text
-                className="text-sm"
-                style={{ color: theme.colors.dark.text.muted }}
-              >
-                1.0.0
-              </Text>
+              <Text className="text-sm text-slate-500">1.0.0</Text>
             </View>
             <TouchableOpacity
               activeOpacity={0.7}
               className="flex-row items-center justify-between px-4 py-3.5"
             >
               <View className="flex-row items-center">
-                <Shield size={20} color={theme.colors.dark.text.muted} />
-                <Text
-                  className="ml-3 text-sm"
-                  style={{ color: theme.colors.dark.text.primary }}
-                >
+                <Shield size={20} color="#94a3b8" />
+                <Text className="ml-3 text-sm text-slate-700">
                   Privacy Policy
                 </Text>
               </View>
-              <ChevronRight size={18} color={theme.colors.dark.text.muted} />
+              <ChevronRight size={18} color="#94a3b8" />
             </TouchableOpacity>
           </View>
         </View>
 
-        {/* ===== LOGOUT BUTTON ===== */}
+        {/* ─── Logout ────────────────────────────────────────────────── */}
         <TouchableOpacity
           activeOpacity={0.8}
-          className="rounded-2xl p-4 flex-row items-center justify-center mb-8"
-          style={{
-            backgroundColor: `${theme.colors.status.error}15`,
-            borderWidth: 1,
-            borderColor: `${theme.colors.status.error}30`,
-          }}
+          className="bg-red-50 rounded-xl p-4 flex-row items-center justify-center mb-8 border border-red-200"
           onPress={handleLogout}
         >
-          <LogOut size={20} color={theme.colors.status.error} />
-          <Text
-            className="font-semibold ml-2"
-            style={{ color: theme.colors.status.error }}
-          >
-            Logout
-          </Text>
+          <LogOut size={20} color="#ef4444" />
+          <Text className="text-red-500 font-semibold ml-2">Logout</Text>
         </TouchableOpacity>
       </ScrollView>
 
-      {/* ===== LANGUAGE MODAL ===== */}
+      {/* ─── Language Modal ────────────────────────────────────────── */}
       <Modal
         visible={languageModalVisible}
         animationType="slide"
-        transparent={true}
+        transparent
         onRequestClose={() => setLanguageModalVisible(false)}
       >
         <View className="flex-1 justify-end bg-black/50">
-          <View
-            className="rounded-t-3xl p-6"
-            style={{ backgroundColor: theme.colors.dark.surface }}
-          >
+          <View className="bg-white rounded-t-3xl p-6">
             <View className="flex-row justify-between items-center mb-4">
-              <Text
-                className="text-lg font-bold"
-                style={{ color: theme.colors.dark.text.primary }}
-              >
+              <Text className="text-lg font-bold text-slate-900">
                 Select Language
               </Text>
               <TouchableOpacity
-                className="w-8 h-8 rounded-full items-center justify-center"
-                style={{ backgroundColor: theme.colors.dark.surfaceLight }}
+                className="w-8 h-8 rounded-full bg-slate-100 items-center justify-center"
                 onPress={() => setLanguageModalVisible(false)}
               >
-                <X size={20} color={theme.colors.dark.text.muted} />
+                <X size={20} color="#94a3b8" />
               </TouchableOpacity>
             </View>
-
             {languages.map((lang) => (
               <TouchableOpacity
                 key={lang}
                 activeOpacity={0.7}
-                className="flex-row items-center justify-between py-3.5"
-                style={{
-                  borderBottomWidth: 1,
-                  borderColor: theme.colors.dark.border,
-                }}
+                className="flex-row items-center justify-between py-3.5 border-b border-slate-100"
                 onPress={() => {
                   setLanguage(lang);
                   setLanguageModalVisible(false);
                 }}
               >
                 <Text
-                  className="text-base"
-                  style={{
-                    color:
-                      language === lang
-                        ? theme.colors.primary[400]
-                        : theme.colors.dark.text.primary,
-                  }}
+                  className={`text-base ${
+                    language === lang ? "text-sky-600" : "text-slate-700"
+                  }`}
                 >
                   {lang}
                 </Text>
                 {language === lang && (
-                  <View
-                    className="w-5 h-5 rounded-full items-center justify-center"
-                    style={{ backgroundColor: theme.colors.primary[500] }}
-                  >
+                  <View className="w-5 h-5 rounded-full bg-sky-500 items-center justify-center">
                     <Text className="text-white text-xs">✓</Text>
                   </View>
                 )}
@@ -703,115 +478,79 @@ export default function SettingsScreen() {
         </View>
       </Modal>
 
-      {/* ===== EDIT PROFILE MODAL ===== */}
+      {/* ─── Edit Profile Modal ───────────────────────────────────── */}
       <Modal
         visible={editModalVisible}
         animationType="slide"
-        transparent={true}
+        transparent
         onRequestClose={() => setEditModalVisible(false)}
       >
         <View className="flex-1 justify-end bg-black/50">
-          <View
-            className="rounded-t-3xl p-6"
-            style={{ backgroundColor: theme.colors.dark.surface }}
-          >
+          <View className="bg-white rounded-t-3xl p-6">
             <View className="flex-row justify-between items-center mb-6">
-              <Text
-                className="text-xl font-bold"
-                style={{ color: theme.colors.dark.text.primary }}
-              >
+              <Text className="text-xl font-bold text-slate-900">
                 Edit Profile
               </Text>
               <TouchableOpacity
-                className="w-8 h-8 rounded-full items-center justify-center"
-                style={{ backgroundColor: theme.colors.dark.surfaceLight }}
+                className="w-8 h-8 rounded-full bg-slate-100 items-center justify-center"
                 onPress={() => setEditModalVisible(false)}
               >
-                <X size={20} color={theme.colors.dark.text.muted} />
+                <X size={20} color="#94a3b8" />
               </TouchableOpacity>
             </View>
 
             {/* Name */}
             <View className="mb-4">
-              <Text
-                className="text-sm font-medium mb-1.5"
-                style={{ color: theme.colors.dark.text.secondary }}
-              >
+              <Text className="text-sm font-medium text-slate-600 mb-1.5">
                 Full Name
               </Text>
-              <View
-                className="flex-row items-center rounded-xl px-4"
-                style={{
-                  backgroundColor: theme.colors.dark.surfaceLight,
-                  borderWidth: 1,
-                  borderColor: theme.colors.dark.border,
-                }}
-              >
-                <User size={18} color={theme.colors.dark.text.muted} />
+              <View className="flex-row items-center bg-slate-50 rounded-xl px-4 border border-slate-200">
+                <User size={18} color="#94a3b8" />
                 <TextInput
-                  className="flex-1 py-3 ml-2 text-base"
-                  style={{ color: theme.colors.dark.text.primary }}
+                  className="flex-1 py-3 ml-2 text-base text-slate-900"
                   value={editName}
                   onChangeText={setEditName}
                   placeholder="Enter your name"
-                  placeholderTextColor={theme.colors.dark.text.muted}
+                  placeholderTextColor="#94a3b8"
                 />
               </View>
             </View>
 
             {/* Phone */}
             <View className="mb-6">
-              <Text
-                className="text-sm font-medium mb-1.5"
-                style={{ color: theme.colors.dark.text.secondary }}
-              >
+              <Text className="text-sm font-medium text-slate-600 mb-1.5">
                 Phone Number
               </Text>
-              <View
-                className="flex-row items-center rounded-xl px-4"
-                style={{
-                  backgroundColor: theme.colors.dark.surfaceLight,
-                  borderWidth: 1,
-                  borderColor: theme.colors.dark.border,
-                }}
-              >
-                <Phone size={18} color={theme.colors.dark.text.muted} />
+              <View className="flex-row items-center bg-slate-50 rounded-xl px-4 border border-slate-200">
+                <Phone size={18} color="#94a3b8" />
                 <TextInput
-                  className="flex-1 py-3 ml-2 text-base"
-                  style={{ color: theme.colors.dark.text.primary }}
+                  className="flex-1 py-3 ml-2 text-base text-slate-900"
                   value={editPhone}
                   onChangeText={setEditPhone}
                   placeholder="Enter phone number"
-                  placeholderTextColor={theme.colors.dark.text.muted}
+                  placeholderTextColor="#94a3b8"
                   keyboardType="phone-pad"
                 />
               </View>
             </View>
 
             {/* Update Button */}
-            <LinearGradient
-              colors={theme.colors.gradient.button}
-              className="rounded-xl overflow-hidden"
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
+            <TouchableOpacity
+              className="bg-sky-500 rounded-xl py-3.5 flex-row items-center justify-center"
+              onPress={handleUpdateProfile}
+              disabled={saving}
             >
-              <TouchableOpacity
-                className="py-3.5 flex-row items-center justify-center"
-                onPress={handleUpdateProfile}
-                disabled={saving}
-              >
-                {saving ? (
-                  <ActivityIndicator color="white" size="small" />
-                ) : (
-                  <>
-                    <Save size={20} color="white" />
-                    <Text className="text-white font-semibold ml-2">
-                      Update Profile
-                    </Text>
-                  </>
-                )}
-              </TouchableOpacity>
-            </LinearGradient>
+              {saving ? (
+                <ActivityIndicator color="white" size="small" />
+              ) : (
+                <>
+                  <Save size={20} color="white" />
+                  <Text className="text-white font-semibold ml-2">
+                    Update Profile
+                  </Text>
+                </>
+              )}
+            </TouchableOpacity>
           </View>
         </View>
       </Modal>

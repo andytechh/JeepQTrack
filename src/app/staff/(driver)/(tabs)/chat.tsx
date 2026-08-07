@@ -1,6 +1,5 @@
-// app/staff/(driver)/chat.tsx
 import { useFocusEffect } from "expo-router";
-import { SendHorizontal } from "lucide-react-native";
+import { Check, SendHorizontal, X } from "lucide-react-native";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -33,6 +32,10 @@ export default function StaffGroupChatScreen() {
     sendMessage,
     loadOlderMessages,
     markAsRead,
+    editMessage,
+    deleteMessage,
+    addReaction,
+    removeReaction,
   } = useOptimizedChat();
 
   const [inputText, setInputText] = useState("");
@@ -40,29 +43,32 @@ export default function StaffGroupChatScreen() {
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const flatListRef = useRef<FlatList>(null);
   const isNearLatestRef = useRef(true);
+  const inputRef = useRef<TextInput>(null);
 
-  // ─── Presence state ──────────────────────────────────────────────
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
+
+  // Presence
   const [onlineCount, setOnlineCount] = useState(0);
   const [totalMembers, setTotalMembers] = useState(0);
   const presenceChannelRef = useRef<any>(null);
 
-  // ─── Keyboard ──────────────────────────────────────────────────────
+  // Keyboard
   useEffect(() => {
     const showSub = Keyboard.addListener("keyboardDidShow", (e) => {
       const inputBarHeight = 70;
       const adjusted = e.endCoordinates.height - inputBarHeight;
       setKeyboardHeight(adjusted > 0 ? adjusted : 0);
     });
-    const hideSub = Keyboard.addListener("keyboardDidHide", () => {
-      setKeyboardHeight(0);
-    });
+    const hideSub = Keyboard.addListener("keyboardDidHide", () =>
+      setKeyboardHeight(0),
+    );
     return () => {
       showSub.remove();
       hideSub.remove();
     };
   }, []);
 
-  // ─── Fetch total members (static) ──────────────────────────────
+  // Fetch total members
   useEffect(() => {
     const fetchTotalMembers = async () => {
       try {
@@ -70,30 +76,26 @@ export default function StaffGroupChatScreen() {
           .from("users")
           .select("*", { count: "exact", head: true })
           .in("role", ["dispatcher", "driver", "staff"]);
-        if (!error && count !== null) {
-          setTotalMembers(count);
-        }
+        if (!error && count !== null) setTotalMembers(count);
       } catch (e) {
-        console.error("Failed to fetch member count:", e);
+        /* ignore */
       }
     };
     fetchTotalMembers();
   }, []);
 
-  // ─── Presence setup ──────────────────────────────────────────────
+  // Presence
   useEffect(() => {
     if (!user?.uid) return;
-
     const channel = supabase.channel(PRESENCE_CHANNEL, {
       config: { presence: { key: user.uid } },
     });
-
     channel
       .on("presence", { event: "sync" }, () => {
         const state = channel.presenceState();
         const onlineUsers = Object.keys(state).filter((uid) => {
-          const presenceData = state[uid] as any[];
-          return presenceData?.some((p) => p.status === "online");
+          const data = state[uid] as any[];
+          return data?.some((p) => p.status === "online");
         });
         setOnlineCount(onlineUsers.length);
       })
@@ -107,9 +109,7 @@ export default function StaffGroupChatScreen() {
           });
         }
       });
-
     presenceChannelRef.current = channel;
-
     return () => {
       if (channel) {
         channel.untrack();
@@ -118,18 +118,16 @@ export default function StaffGroupChatScreen() {
     };
   }, [user?.uid]);
 
-  // ─── Update presence status on app state changes ──────────────────
   useEffect(() => {
     const handleAppStateChange = (nextState: string) => {
       if (presenceChannelRef.current && user?.uid) {
         presenceChannelRef.current.track({
           user_id: user.uid,
-          status: "online", // keep online even in background
+          status: "online",
           last_seen: new Date().toISOString(),
         });
       }
     };
-
     const subscription = AppState.addEventListener(
       "change",
       handleAppStateChange,
@@ -137,14 +135,14 @@ export default function StaffGroupChatScreen() {
     return () => subscription.remove();
   }, [user?.uid]);
 
-  // ─── Mark as read on focus ──────────────────────────────────────
+  // Mark as read
   useFocusEffect(
     useCallback(() => {
       if (unreadCount > 0) markAsRead();
     }, [unreadCount, markAsRead]),
   );
 
-  // ─── Scroll helpers ──────────────────────────────────────────────
+  // Scroll
   const handleScroll = useCallback(({ nativeEvent }: any) => {
     const { contentOffset } = nativeEvent;
     isNearLatestRef.current = contentOffset.y < NEAR_LATEST_THRESHOLD;
@@ -156,8 +154,36 @@ export default function StaffGroupChatScreen() {
     }
   }, [messages.length]);
 
-  // ─── Send ──────────────────────────────────────────────────────────
+  // Edit handlers
+  const handleEditMessage = useCallback(
+    (messageId: string, currentText: string) => {
+      setEditingMessageId(messageId);
+      setInputText(currentText);
+      setTimeout(() => inputRef.current?.focus(), 100);
+    },
+    [],
+  );
+
+  const cancelEditing = useCallback(() => {
+    setEditingMessageId(null);
+    setInputText("");
+  }, []);
+
+  const handleUpdateMessage = useCallback(async () => {
+    if (!editingMessageId || !inputText.trim()) return;
+    try {
+      await editMessage(editingMessageId, inputText.trim());
+      cancelEditing();
+    } catch (error) {
+      console.error("Update failed:", error);
+    }
+  }, [editingMessageId, inputText, editMessage, cancelEditing]);
+
   const handleSend = useCallback(async () => {
+    if (editingMessageId) {
+      await handleUpdateMessage();
+      return;
+    }
     const trimmed = inputText.trim();
     if (!trimmed || sending) return;
     try {
@@ -171,11 +197,11 @@ export default function StaffGroupChatScreen() {
         );
       }
     } catch (error) {
-      console.error("Failed to send message:", error);
+      console.error("Send error:", error);
     }
-  }, [inputText, sending, sendMessage]);
+  }, [inputText, sending, sendMessage, editingMessageId, handleUpdateMessage]);
 
-  // ─── Pagination ──────────────────────────────────────────────────
+  // Pagination
   const handleLoadMore = useCallback(async () => {
     if (!hasMore || isLoadingMore) return;
     setIsLoadingMore(true);
@@ -183,11 +209,11 @@ export default function StaffGroupChatScreen() {
     setIsLoadingMore(false);
   }, [hasMore, isLoadingMore, loadOlderMessages]);
 
-  // ─── Data ──────────────────────────────────────────────────────────
+  // Data
   const displayMessages = useMemo(() => [...messages].reverse(), [messages]);
 
   const renderMessage = useCallback(
-    ({ item }: { item: (typeof messages)[number] }) => {
+    ({ item }: { item: (typeof messages)[0] }) => {
       const isOwn = item.sender_id === user?.uid;
       const readByOthers =
         isOwn && item.read_by?.filter((id) => id !== user?.uid).length > 0;
@@ -202,10 +228,18 @@ export default function StaffGroupChatScreen() {
           senderRole={item.sender?.role ?? "staff"}
           senderAvatar={item.sender?.avatar_url}
           read={readByOthers}
+          edited={!!item.edited_at}
+          deleted={!!item.deleted_at}
+          reactions={item.reactions || {}}
+          onEdit={handleEditMessage}
+          onDelete={deleteMessage}
+          onAddReaction={addReaction}
+          onRemoveReaction={removeReaction}
+          currentUserId={user?.uid}
         />
       );
     },
-    [user?.uid],
+    [user?.uid, deleteMessage, handleEditMessage, addReaction, removeReaction],
   );
 
   const UnreadBadge = () => {
@@ -229,7 +263,6 @@ export default function StaffGroupChatScreen() {
 
   return (
     <SafeAreaView className="flex-1 bg-slate-50">
-      {/* ─── Header ────────────────────────────────────────────────── */}
       <View className="px-4 py-3 border-b border-slate-200 bg-white">
         <View className="flex-row items-center justify-between">
           <Text className="text-xl font-bold text-slate-900">Staff Chat</Text>
@@ -243,7 +276,6 @@ export default function StaffGroupChatScreen() {
         </View>
       </View>
 
-      {/* ─── Chat list ────────────────────────────────────────────── */}
       <FlatList
         ref={flatListRef}
         data={displayMessages}
@@ -278,33 +310,46 @@ export default function StaffGroupChatScreen() {
         }
       />
 
-      {/* ─── Input bar ────────────────────────────────────────────── */}
-      <View className="px-3 py-2 border-t border-slate-200 bg-white flex-row items-end">
-        <TextInput
-          className="flex-1 bg-slate-100 rounded-full px-4 py-2 text-slate-900 max-h-24"
-          placeholder="Type a message..."
-          placeholderTextColor="#94a3b8"
-          value={inputText}
-          onChangeText={setInputText}
-          multiline
-          blurOnSubmit={false}
-          onSubmitEditing={handleSend}
-          returnKeyType="send"
-        />
-        <TouchableOpacity
-          onPress={handleSend}
-          disabled={!inputText.trim() || sending}
-          className="ml-2 w-10 h-10 rounded-full bg-sky-500 items-center justify-center disabled:opacity-50"
-        >
-          {sending ? (
-            <ActivityIndicator size="small" color="white" />
-          ) : (
-            <SendHorizontal size={20} color="white" />
-          )}
-        </TouchableOpacity>
+      <View className="border-t border-slate-200 bg-white">
+        {editingMessageId && (
+          <View className="flex-row items-center justify-between px-3 py-1.5 bg-blue-50 border-b border-blue-100">
+            <Text className="text-sm text-sky-600">Editing message</Text>
+            <TouchableOpacity onPress={cancelEditing} className="p-1">
+              <X size={18} color="#64748b" />
+            </TouchableOpacity>
+          </View>
+        )}
+        <View className="px-3 py-2 flex-row items-end">
+          <TextInput
+            ref={inputRef}
+            className="flex-1 bg-slate-100 rounded-full px-4 py-2 text-slate-900 max-h-24"
+            placeholder={
+              editingMessageId ? "Edit your message..." : "Type a message..."
+            }
+            placeholderTextColor="#94a3b8"
+            value={inputText}
+            onChangeText={setInputText}
+            multiline
+            blurOnSubmit={false}
+            onSubmitEditing={handleSend}
+            returnKeyType="send"
+          />
+          <TouchableOpacity
+            onPress={handleSend}
+            disabled={!inputText.trim() || sending}
+            className={`ml-2 w-10 h-10 rounded-full items-center justify-center ${!inputText.trim() || sending ? "bg-slate-200" : editingMessageId ? "bg-emerald-500" : "bg-sky-500"}`}
+          >
+            {sending ? (
+              <ActivityIndicator size="small" color="white" />
+            ) : editingMessageId ? (
+              <Check size={20} color="white" />
+            ) : (
+              <SendHorizontal size={20} color="white" />
+            )}
+          </TouchableOpacity>
+        </View>
       </View>
 
-      {/* ─── Keyboard spacer ────────────────────────────────────── */}
       {keyboardHeight > 0 && <View style={{ height: keyboardHeight + 15 }} />}
     </SafeAreaView>
   );

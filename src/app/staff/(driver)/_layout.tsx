@@ -178,7 +178,7 @@ export default function DriverLayout() {
   }
 
   return (
-    <View className="flex-1 bg-[#0a1628] pt-6">
+    <View className="flex-1 bg-[#0a1628] pt-0">
       {/* ─── HEADER ────────────────────────────────────────────────── */}
       <ModernHeader
         avatarText={user?.displayName || "Driver"}

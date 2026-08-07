@@ -1,28 +1,25 @@
 import { Tabs } from "expo-router";
 import {
+  Bus,
   LayoutDashboard,
   ListStart,
-  MapPin,
   MessageCircle,
   Settings,
 } from "lucide-react-native";
+import { CustomTabBar } from "../../../../src/shared/components/ui/CustomTabBar";
+import { useChatStore } from "../../../../src/shared/store/chatStore";
 
 export default function DispatcherTabsLayout() {
+  const { unreadCount } = useChatStore();
+
+  const badge =
+    unreadCount > 0 ? (unreadCount > 99 ? "99+" : unreadCount) : undefined;
+
   return (
     <Tabs
+      tabBar={(props) => <CustomTabBar {...(props as any)} />}
       screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: "#0ea5e9",
-        tabBarInactiveTintColor: "#64748b",
-        tabBarStyle: {
-          backgroundColor: "#0C2C55",
-          borderTopWidth: 2,
-          borderTopColor: "rgba(255,255,255,0.05)",
-          height: 70,
-          paddingBottom: 8,
-          paddingTop: 4,
-        },
-        tabBarLabelStyle: { fontSize: 11, fontWeight: "500" },
       }}
     >
       <Tabs.Screen
@@ -46,8 +43,8 @@ export default function DispatcherTabsLayout() {
       <Tabs.Screen
         name="map"
         options={{
-          title: "Map",
-          tabBarIcon: ({ color, size }) => <MapPin size={size} color={color} />,
+          title: "Tracking",
+          tabBarIcon: ({ color, size }) => <Bus size={size} color={color} />,
         }}
       />
       <Tabs.Screen
@@ -57,6 +54,7 @@ export default function DispatcherTabsLayout() {
           tabBarIcon: ({ color, size }) => (
             <MessageCircle size={size} color={color} />
           ),
+          tabBarBadge: badge,
         }}
       />
       <Tabs.Screen

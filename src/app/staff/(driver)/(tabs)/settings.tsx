@@ -33,6 +33,8 @@ import {
   View,
 } from "react-native";
 import { supabase } from "../../../../src/shared/config/supabase";
+import { useTheme } from "../../../../src/shared/context/ThemeContext";
+import { useSettings } from "../../../../src/shared/hooks/useSettings";
 import { AuthService } from "../../../../src/shared/services/AuthService";
 import { ChatService } from "../../../../src/shared/services/ChatService";
 import { useAuthStore } from "../../../../src/shared/store/authStore";
@@ -58,6 +60,9 @@ interface JeepneyInfo {
 
 export default function SettingsScreen() {
   const { user, logout } = useAuthStore();
+  const { settings, updateSettings, resetSettings } = useSettings();
+
+  const { isDark, toggleTheme } = useTheme();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [profile, setProfile] = useState<UserProfile | null>(null);
@@ -68,12 +73,7 @@ export default function SettingsScreen() {
   const [editName, setEditName] = useState("");
   const [editPhone, setEditPhone] = useState("");
 
-  // Settings state
-  const [darkMode, setDarkMode] = useState(false);
-  const [notifications, setNotifications] = useState(true);
-  const [soundEnabled, setSoundEnabled] = useState(true);
-  const [autoRefresh, setAutoRefresh] = useState(true);
-  const [language, setLanguage] = useState("English");
+  // Language modal
   const [languageModalVisible, setLanguageModalVisible] = useState(false);
 
   const languages = ["English", "Tagalog", "Bicolano", "Cebuano"];
@@ -93,7 +93,6 @@ export default function SettingsScreen() {
       if (userError) throw userError;
       setProfile(userData);
 
-      // Only fetch jeepney info if driver
       if (userData?.role === "driver" && userData?.jeepney_id) {
         const { data: jeepneyData, error: jeepneyError } = await supabase
           .from("jeepneys")
@@ -173,46 +172,114 @@ export default function SettingsScreen() {
     );
   };
 
+  const handleToggleNotifications = (value: boolean) => {
+    updateSettings({ notifications: value });
+  };
+
+  const handleToggleSound = (value: boolean) => {
+    updateSettings({ soundEnabled: value });
+  };
+
+  const handleToggleAutoRefresh = (value: boolean) => {
+    updateSettings({ autoRefresh: value });
+  };
+
+  const handleLanguageSelect = (lang: string) => {
+    updateSettings({ language: lang });
+  };
+
+  const handleResetSettings = () => {
+    Alert.alert(
+      "Reset Settings",
+      "Are you sure you want to reset all settings to defaults?",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Reset",
+          style: "destructive",
+          onPress: async () => {
+            await resetSettings();
+            Alert.alert("Success", "Settings reset to defaults");
+          },
+        },
+      ],
+    );
+  };
+
   if (loading) {
     return (
-      <SafeAreaView className="flex-1 bg-slate-50 items-center justify-center">
+      <SafeAreaView
+        className={`flex-1 items-center justify-center ${
+          isDark ? "bg-slate-900" : "bg-slate-50"
+        }`}
+      >
         <ActivityIndicator size="large" color="#0ea5e9" />
-        <Text className="text-slate-400 mt-4 text-sm">Loading settings...</Text>
+        <Text
+          className={`mt-4 text-sm ${
+            isDark ? "text-slate-400" : "text-slate-400"
+          }`}
+        >
+          Loading settings...
+        </Text>
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView className="flex-1 bg-slate-50">
-      <StatusBar barStyle="dark-content" backgroundColor="#f8fafc" />
+    <SafeAreaView
+      className={`flex-1 ${isDark ? "bg-slate-900" : "bg-slate-50"}`}
+    >
+      <StatusBar
+        barStyle={isDark ? "light-content" : "dark-content"}
+        backgroundColor={isDark ? "#0f172a" : "#f8fafc"}
+      />
 
-      {/* ─── Header – matches chat screen ─────────────────────────── */}
-      <View className="px-4 py-3 border-b border-slate-200 bg-white flex-row items-center">
+      {/* ─── Header ────────────────────────────────────────────────── */}
+      <View
+        className={`flex-row items-center px-4 py-3 border-b ${
+          isDark ? "bg-slate-800 border-slate-700" : "bg-white border-slate-200"
+        }`}
+      >
         <TouchableOpacity
           onPress={() => router.back()}
           className="p-1 mr-3"
           activeOpacity={0.7}
         >
-          <ArrowLeft size={24} color="#0f172a" />
+          <ArrowLeft size={24} color={isDark ? "#e2e8f0" : "#0f172a"} />
         </TouchableOpacity>
-        <Text className="text-xl font-bold text-slate-900 flex-1">
+        <Text
+          className={`flex-1 text-xl font-bold ${
+            isDark ? "text-white" : "text-slate-900"
+          }`}
+        >
           Settings
         </Text>
+        <TouchableOpacity onPress={handleResetSettings} className="p-1">
+          <RefreshCw size={20} color={isDark ? "#94a3b8" : "#94a3b8"} />
+        </TouchableOpacity>
       </View>
 
       <ScrollView
         className="flex-1 px-4 pt-4"
         showsVerticalScrollIndicator={false}
       >
-        {/* ─── Profile Section ────────────────────────────────────── */}
+        {/* ─── Profile ────────────────────────────────────────────── */}
         <View className="mb-6">
-          <Text className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3">
+          <Text
+            className={`text-xs font-semibold uppercase tracking-wider mb-3 ${
+              isDark ? "text-slate-400" : "text-slate-400"
+            }`}
+          >
             Profile
           </Text>
           <TouchableOpacity
             activeOpacity={0.8}
             onPress={openEditModal}
-            className="bg-white rounded-xl p-4 border border-slate-200"
+            className={`rounded-xl p-4 border ${
+              isDark
+                ? "bg-slate-800 border-slate-700"
+                : "bg-white border-slate-200"
+            } shadow-sm`}
           >
             <View className="flex-row items-center">
               <View className="w-16 h-16 rounded-full bg-sky-500 items-center justify-center">
@@ -221,21 +288,41 @@ export default function SettingsScreen() {
                 </Text>
               </View>
               <View className="flex-1 ml-3">
-                <Text className="text-base font-bold text-slate-900">
+                <Text
+                  className={`text-base font-bold ${
+                    isDark ? "text-white" : "text-slate-900"
+                  }`}
+                >
                   {profile?.display_name || "N/A"}
                 </Text>
-                <Text className="text-sm text-slate-500">{profile?.email}</Text>
+                <Text
+                  className={`text-sm ${
+                    isDark ? "text-slate-400" : "text-slate-500"
+                  }`}
+                >
+                  {profile?.email}
+                </Text>
                 <View className="flex-row items-center mt-1">
                   <View
                     className={`px-2 py-0.5 rounded-full ${
-                      profile?.role === "driver" ? "bg-sky-100" : "bg-slate-100"
+                      profile?.role === "driver"
+                        ? isDark
+                          ? "bg-sky-900"
+                          : "bg-sky-100"
+                        : isDark
+                          ? "bg-slate-700"
+                          : "bg-slate-100"
                     }`}
                   >
                     <Text
                       className={`text-xs capitalize ${
                         profile?.role === "driver"
-                          ? "text-sky-600"
-                          : "text-slate-500"
+                          ? isDark
+                            ? "text-sky-300"
+                            : "text-sky-600"
+                          : isDark
+                            ? "text-slate-300"
+                            : "text-slate-500"
                       }`}
                     >
                       {profile?.role || "staff"}
@@ -244,34 +331,66 @@ export default function SettingsScreen() {
                   {profile?.is_active && (
                     <View className="flex-row items-center ml-2">
                       <View className="w-1.5 h-1.5 rounded-full bg-green-500 mr-1" />
-                      <Text className="text-xs text-slate-400">Active</Text>
+                      <Text
+                        className={`text-xs ${
+                          isDark ? "text-slate-400" : "text-slate-400"
+                        }`}
+                      >
+                        Active
+                      </Text>
                     </View>
                   )}
                 </View>
               </View>
-              <View className="w-10 h-10 rounded-full bg-sky-50 items-center justify-center">
+              <View
+                className={`w-10 h-10 rounded-full items-center justify-center ${
+                  isDark ? "bg-slate-700" : "bg-sky-50"
+                }`}
+              >
                 <Edit2 size={18} color="#0ea5e9" />
               </View>
             </View>
           </TouchableOpacity>
         </View>
 
-        {/* ─── Jeepney Info (driver only) ──────────────────────────── */}
+        {/* ─── Jeepney Info (driver only) ────────────────────────── */}
         {profile?.role === "driver" && jeepneyInfo && (
           <View className="mb-6">
-            <Text className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3">
+            <Text
+              className={`text-xs font-semibold uppercase tracking-wider mb-3 ${
+                isDark ? "text-slate-400" : "text-slate-400"
+              }`}
+            >
               Jeepney Information
             </Text>
-            <View className="bg-white rounded-xl p-4 border border-slate-200">
+            <View
+              className={`rounded-xl p-4 border ${
+                isDark
+                  ? "bg-slate-800 border-slate-700"
+                  : "bg-white border-slate-200"
+              } shadow-sm`}
+            >
               <View className="flex-row items-center">
-                <View className="w-12 h-12 rounded-full bg-sky-50 items-center justify-center">
+                <View
+                  className={`w-12 h-12 rounded-full items-center justify-center ${
+                    isDark ? "bg-slate-700" : "bg-sky-50"
+                  }`}
+                >
                   <Bus size={24} color="#0ea5e9" />
                 </View>
                 <View className="flex-1 ml-3">
-                  <Text className="text-base font-bold text-slate-900">
+                  <Text
+                    className={`text-base font-bold ${
+                      isDark ? "text-white" : "text-slate-900"
+                    }`}
+                  >
                     {jeepneyInfo.plate_number}
                   </Text>
-                  <Text className="text-sm text-slate-500">
+                  <Text
+                    className={`text-sm ${
+                      isDark ? "text-slate-400" : "text-slate-500"
+                    }`}
+                  >
                     Bracket {jeepneyInfo.bracket} • Capacity:{" "}
                     {jeepneyInfo.capacity}
                   </Text>
@@ -279,15 +398,23 @@ export default function SettingsScreen() {
                     <View
                       className={`px-2 py-0.5 rounded-full ${
                         jeepneyInfo.status === "active"
-                          ? "bg-green-100"
-                          : "bg-red-100"
+                          ? isDark
+                            ? "bg-green-900"
+                            : "bg-green-100"
+                          : isDark
+                            ? "bg-red-900"
+                            : "bg-red-100"
                       }`}
                     >
                       <Text
                         className={`text-xs capitalize ${
                           jeepneyInfo.status === "active"
-                            ? "text-green-600"
-                            : "text-red-600"
+                            ? isDark
+                              ? "text-green-300"
+                              : "text-green-600"
+                            : isDark
+                              ? "text-red-300"
+                              : "text-red-600"
                         }`}
                       >
                         {jeepneyInfo.status || "unknown"}
@@ -302,69 +429,143 @@ export default function SettingsScreen() {
 
         {/* ─── App Settings ────────────────────────────────────────── */}
         <View className="mb-6">
-          <Text className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3">
+          <Text
+            className={`text-xs font-semibold uppercase tracking-wider mb-3 ${
+              isDark ? "text-slate-400" : "text-slate-400"
+            }`}
+          >
             App Settings
           </Text>
-          <View className="bg-white rounded-xl overflow-hidden border border-slate-200">
+          <View
+            className={`rounded-xl overflow-hidden border ${
+              isDark
+                ? "bg-slate-800 border-slate-700"
+                : "bg-white border-slate-200"
+            }`}
+          >
             {/* Notifications */}
-            <View className="flex-row items-center justify-between px-4 py-3.5 border-b border-slate-100">
+            <View
+              className={`flex-row items-center justify-between px-4 py-3.5 ${
+                isDark ? "border-slate-700" : "border-slate-100"
+              } border-b`}
+            >
               <View className="flex-row items-center">
-                <Bell size={20} color="#94a3b8" />
-                <Text className="ml-3 text-sm text-slate-700">
+                <Bell size={20} color={isDark ? "#94a3b8" : "#94a3b8"} />
+                <Text
+                  className={`ml-3 text-sm ${
+                    isDark ? "text-slate-200" : "text-slate-700"
+                  }`}
+                >
                   Push Notifications
                 </Text>
               </View>
               <Switch
-                value={notifications}
-                onValueChange={setNotifications}
-                trackColor={{ false: "#e2e8f0", true: "#0ea5e9" }}
-                thumbColor={notifications ? "#ffffff" : "#94a3b8"}
+                value={settings.notifications}
+                onValueChange={handleToggleNotifications}
+                trackColor={{
+                  false: isDark ? "#475569" : "#e2e8f0",
+                  true: "#0ea5e9",
+                }}
+                thumbColor={
+                  settings.notifications
+                    ? "#ffffff"
+                    : isDark
+                      ? "#94a3b8"
+                      : "#94a3b8"
+                }
               />
             </View>
 
             {/* Dark Mode */}
-            <View className="flex-row items-center justify-between px-4 py-3.5 border-b border-slate-100">
+            <View
+              className={`flex-row items-center justify-between px-4 py-3.5 ${
+                isDark ? "border-slate-700" : "border-slate-100"
+              } border-b`}
+            >
               <View className="flex-row items-center">
-                <Moon size={20} color="#94a3b8" />
-                <Text className="ml-3 text-sm text-slate-700">Dark Mode</Text>
+                <Moon size={20} color={isDark ? "#94a3b8" : "#94a3b8"} />
+                <Text
+                  className={`ml-3 text-sm ${
+                    isDark ? "text-slate-200" : "text-slate-700"
+                  }`}
+                >
+                  Dark Mode
+                </Text>
               </View>
               <Switch
-                value={darkMode}
-                onValueChange={setDarkMode}
-                trackColor={{ false: "#e2e8f0", true: "#0ea5e9" }}
-                thumbColor={darkMode ? "#ffffff" : "#94a3b8"}
+                value={isDark}
+                onValueChange={() => toggleTheme()}
+                trackColor={{
+                  false: isDark ? "#475569" : "#e2e8f0",
+                  true: "#0ea5e9",
+                }}
+                thumbColor={isDark ? "#ffffff" : "#94a3b8"}
               />
             </View>
 
             {/* Sound Effects */}
-            <View className="flex-row items-center justify-between px-4 py-3.5 border-b border-slate-100">
+            <View
+              className={`flex-row items-center justify-between px-4 py-3.5 ${
+                isDark ? "border-slate-700" : "border-slate-100"
+              } border-b`}
+            >
               <View className="flex-row items-center">
-                <Volume2 size={20} color="#94a3b8" />
-                <Text className="ml-3 text-sm text-slate-700">
+                <Volume2 size={20} color={isDark ? "#94a3b8" : "#94a3b8"} />
+                <Text
+                  className={`ml-3 text-sm ${
+                    isDark ? "text-slate-200" : "text-slate-700"
+                  }`}
+                >
                   Sound Effects
                 </Text>
               </View>
               <Switch
-                value={soundEnabled}
-                onValueChange={setSoundEnabled}
-                trackColor={{ false: "#e2e8f0", true: "#0ea5e9" }}
-                thumbColor={soundEnabled ? "#ffffff" : "#94a3b8"}
+                value={settings.soundEnabled}
+                onValueChange={handleToggleSound}
+                trackColor={{
+                  false: isDark ? "#475569" : "#e2e8f0",
+                  true: "#0ea5e9",
+                }}
+                thumbColor={
+                  settings.soundEnabled
+                    ? "#ffffff"
+                    : isDark
+                      ? "#94a3b8"
+                      : "#94a3b8"
+                }
               />
             </View>
 
             {/* Auto Refresh */}
-            <View className="flex-row items-center justify-between px-4 py-3.5">
+            <View
+              className={`flex-row items-center justify-between px-4 py-3.5 ${
+                isDark ? "border-slate-700" : "border-slate-100"
+              }`}
+            >
               <View className="flex-row items-center">
-                <RefreshCw size={20} color="#94a3b8" />
-                <Text className="ml-3 text-sm text-slate-700">
+                <RefreshCw size={20} color={isDark ? "#94a3b8" : "#94a3b8"} />
+                <Text
+                  className={`ml-3 text-sm ${
+                    isDark ? "text-slate-200" : "text-slate-700"
+                  }`}
+                >
                   Auto Refresh
                 </Text>
               </View>
               <Switch
-                value={autoRefresh}
-                onValueChange={setAutoRefresh}
-                trackColor={{ false: "#e2e8f0", true: "#0ea5e9" }}
-                thumbColor={autoRefresh ? "#ffffff" : "#94a3b8"}
+                value={settings.autoRefresh}
+                onValueChange={handleToggleAutoRefresh}
+                trackColor={{
+                  false: isDark ? "#475569" : "#e2e8f0",
+                  true: "#0ea5e9",
+                }}
+                thumbColor={
+                  settings.autoRefresh
+                    ? "#ffffff"
+                    : isDark
+                      ? "#94a3b8"
+                      : "#94a3b8"
+                }
               />
             </View>
           </View>
@@ -372,49 +573,99 @@ export default function SettingsScreen() {
 
         {/* ─── Language ────────────────────────────────────────────── */}
         <View className="mb-6">
-          <Text className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3">
+          <Text
+            className={`text-xs font-semibold uppercase tracking-wider mb-3 ${
+              isDark ? "text-slate-400" : "text-slate-400"
+            }`}
+          >
             Language & Region
           </Text>
           <TouchableOpacity
             activeOpacity={0.7}
             onPress={() => setLanguageModalVisible(true)}
-            className="bg-white rounded-xl p-4 flex-row items-center justify-between border border-slate-200"
+            className={`rounded-xl p-4 flex-row items-center justify-between border ${
+              isDark
+                ? "bg-slate-800 border-slate-700"
+                : "bg-white border-slate-200"
+            } shadow-sm`}
           >
             <View className="flex-row items-center">
-              <Languages size={20} color="#94a3b8" />
-              <Text className="ml-3 text-sm text-slate-700">Language</Text>
+              <Languages size={20} color={isDark ? "#94a3b8" : "#94a3b8"} />
+              <Text
+                className={`ml-3 text-sm ${
+                  isDark ? "text-slate-200" : "text-slate-700"
+                }`}
+              >
+                Language
+              </Text>
             </View>
             <View className="flex-row items-center">
-              <Text className="text-sm text-slate-500 mr-2">{language}</Text>
-              <ChevronRight size={18} color="#94a3b8" />
+              <Text
+                className={`text-sm mr-2 ${
+                  isDark ? "text-slate-400" : "text-slate-500"
+                }`}
+              >
+                {settings.language}
+              </Text>
+              <ChevronRight size={18} color={isDark ? "#94a3b8" : "#94a3b8"} />
             </View>
           </TouchableOpacity>
         </View>
 
         {/* ─── About ────────────────────────────────────────────────── */}
         <View className="mb-6">
-          <Text className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3">
+          <Text
+            className={`text-xs font-semibold uppercase tracking-wider mb-3 ${
+              isDark ? "text-slate-400" : "text-slate-400"
+            }`}
+          >
             About
           </Text>
-          <View className="bg-white rounded-xl overflow-hidden border border-slate-200">
-            <View className="flex-row items-center justify-between px-4 py-3.5 border-b border-slate-100">
+          <View
+            className={`rounded-xl overflow-hidden border ${
+              isDark
+                ? "bg-slate-800 border-slate-700"
+                : "bg-white border-slate-200"
+            }`}
+          >
+            <View
+              className={`flex-row items-center justify-between px-4 py-3.5 ${
+                isDark ? "border-slate-700" : "border-slate-100"
+              } border-b`}
+            >
               <View className="flex-row items-center">
-                <Info size={20} color="#94a3b8" />
-                <Text className="ml-3 text-sm text-slate-700">Version</Text>
+                <Info size={20} color={isDark ? "#94a3b8" : "#94a3b8"} />
+                <Text
+                  className={`ml-3 text-sm ${
+                    isDark ? "text-slate-200" : "text-slate-700"
+                  }`}
+                >
+                  Version
+                </Text>
               </View>
-              <Text className="text-sm text-slate-500">1.0.0</Text>
+              <Text
+                className={`text-sm ${
+                  isDark ? "text-slate-400" : "text-slate-500"
+                }`}
+              >
+                1.0.0
+              </Text>
             </View>
             <TouchableOpacity
               activeOpacity={0.7}
               className="flex-row items-center justify-between px-4 py-3.5"
             >
               <View className="flex-row items-center">
-                <Shield size={20} color="#94a3b8" />
-                <Text className="ml-3 text-sm text-slate-700">
+                <Shield size={20} color={isDark ? "#94a3b8" : "#94a3b8"} />
+                <Text
+                  className={`ml-3 text-sm ${
+                    isDark ? "text-slate-200" : "text-slate-700"
+                  }`}
+                >
                   Privacy Policy
                 </Text>
               </View>
-              <ChevronRight size={18} color="#94a3b8" />
+              <ChevronRight size={18} color={isDark ? "#94a3b8" : "#94a3b8"} />
             </TouchableOpacity>
           </View>
         </View>
@@ -422,11 +673,19 @@ export default function SettingsScreen() {
         {/* ─── Logout ────────────────────────────────────────────────── */}
         <TouchableOpacity
           activeOpacity={0.8}
-          className="bg-red-50 rounded-xl p-4 flex-row items-center justify-center mb-8 border border-red-200"
+          className={`rounded-xl p-4 flex-row items-center justify-center mb-8 border ${
+            isDark ? "bg-red-900/20 border-red-800" : "bg-red-50 border-red-200"
+          }`}
           onPress={handleLogout}
         >
-          <LogOut size={20} color="#ef4444" />
-          <Text className="text-red-500 font-semibold ml-2">Logout</Text>
+          <LogOut size={20} color={isDark ? "#f87171" : "#ef4444"} />
+          <Text
+            className={`font-semibold ml-2 ${
+              isDark ? "text-red-400" : "text-red-500"
+            }`}
+          >
+            Logout
+          </Text>
         </TouchableOpacity>
       </ScrollView>
 
@@ -438,36 +697,52 @@ export default function SettingsScreen() {
         onRequestClose={() => setLanguageModalVisible(false)}
       >
         <View className="flex-1 justify-end bg-black/50">
-          <View className="bg-white rounded-t-3xl p-6">
+          <View
+            className={`rounded-t-3xl p-6 ${
+              isDark ? "bg-slate-800" : "bg-white"
+            }`}
+          >
             <View className="flex-row justify-between items-center mb-4">
-              <Text className="text-lg font-bold text-slate-900">
+              <Text
+                className={`text-lg font-bold ${
+                  isDark ? "text-white" : "text-slate-900"
+                }`}
+              >
                 Select Language
               </Text>
               <TouchableOpacity
-                className="w-8 h-8 rounded-full bg-slate-100 items-center justify-center"
+                className={`w-8 h-8 rounded-full items-center justify-center ${
+                  isDark ? "bg-slate-700" : "bg-slate-100"
+                }`}
                 onPress={() => setLanguageModalVisible(false)}
               >
-                <X size={20} color="#94a3b8" />
+                <X size={20} color={isDark ? "#94a3b8" : "#94a3b8"} />
               </TouchableOpacity>
             </View>
             {languages.map((lang) => (
               <TouchableOpacity
                 key={lang}
                 activeOpacity={0.7}
-                className="flex-row items-center justify-between py-3.5 border-b border-slate-100"
+                className={`flex-row items-center justify-between py-3.5 ${
+                  isDark ? "border-slate-700" : "border-slate-100"
+                } border-b`}
                 onPress={() => {
-                  setLanguage(lang);
+                  handleLanguageSelect(lang);
                   setLanguageModalVisible(false);
                 }}
               >
                 <Text
                   className={`text-base ${
-                    language === lang ? "text-sky-600" : "text-slate-700"
+                    settings.language === lang
+                      ? "text-sky-500"
+                      : isDark
+                        ? "text-slate-200"
+                        : "text-slate-700"
                   }`}
                 >
                   {lang}
                 </Text>
-                {language === lang && (
+                {settings.language === lang && (
                   <View className="w-5 h-5 rounded-full bg-sky-500 items-center justify-center">
                     <Text className="text-white text-xs">✓</Text>
                   </View>
@@ -486,55 +761,86 @@ export default function SettingsScreen() {
         onRequestClose={() => setEditModalVisible(false)}
       >
         <View className="flex-1 justify-end bg-black/50">
-          <View className="bg-white rounded-t-3xl p-6">
+          <View
+            className={`rounded-t-3xl p-6 ${
+              isDark ? "bg-slate-800" : "bg-white"
+            }`}
+          >
             <View className="flex-row justify-between items-center mb-6">
-              <Text className="text-xl font-bold text-slate-900">
+              <Text
+                className={`text-xl font-bold ${
+                  isDark ? "text-white" : "text-slate-900"
+                }`}
+              >
                 Edit Profile
               </Text>
               <TouchableOpacity
-                className="w-8 h-8 rounded-full bg-slate-100 items-center justify-center"
+                className={`w-8 h-8 rounded-full items-center justify-center ${
+                  isDark ? "bg-slate-700" : "bg-slate-100"
+                }`}
                 onPress={() => setEditModalVisible(false)}
               >
-                <X size={20} color="#94a3b8" />
+                <X size={20} color={isDark ? "#94a3b8" : "#94a3b8"} />
               </TouchableOpacity>
             </View>
 
-            {/* Name */}
             <View className="mb-4">
-              <Text className="text-sm font-medium text-slate-600 mb-1.5">
+              <Text
+                className={`text-sm font-medium mb-1.5 ${
+                  isDark ? "text-slate-300" : "text-slate-600"
+                }`}
+              >
                 Full Name
               </Text>
-              <View className="flex-row items-center bg-slate-50 rounded-xl px-4 border border-slate-200">
-                <User size={18} color="#94a3b8" />
+              <View
+                className={`flex-row items-center rounded-xl px-4 border ${
+                  isDark
+                    ? "bg-slate-700 border-slate-600"
+                    : "bg-slate-50 border-slate-200"
+                }`}
+              >
+                <User size={18} color={isDark ? "#94a3b8" : "#94a3b8"} />
                 <TextInput
-                  className="flex-1 py-3 ml-2 text-base text-slate-900"
+                  className={`flex-1 py-3 ml-2 text-base ${
+                    isDark ? "text-white" : "text-slate-900"
+                  }`}
                   value={editName}
                   onChangeText={setEditName}
                   placeholder="Enter your name"
-                  placeholderTextColor="#94a3b8"
+                  placeholderTextColor={isDark ? "#64748b" : "#94a3b8"}
                 />
               </View>
             </View>
 
-            {/* Phone */}
             <View className="mb-6">
-              <Text className="text-sm font-medium text-slate-600 mb-1.5">
+              <Text
+                className={`text-sm font-medium mb-1.5 ${
+                  isDark ? "text-slate-300" : "text-slate-600"
+                }`}
+              >
                 Phone Number
               </Text>
-              <View className="flex-row items-center bg-slate-50 rounded-xl px-4 border border-slate-200">
-                <Phone size={18} color="#94a3b8" />
+              <View
+                className={`flex-row items-center rounded-xl px-4 border ${
+                  isDark
+                    ? "bg-slate-700 border-slate-600"
+                    : "bg-slate-50 border-slate-200"
+                }`}
+              >
+                <Phone size={18} color={isDark ? "#94a3b8" : "#94a3b8"} />
                 <TextInput
-                  className="flex-1 py-3 ml-2 text-base text-slate-900"
+                  className={`flex-1 py-3 ml-2 text-base ${
+                    isDark ? "text-white" : "text-slate-900"
+                  }`}
                   value={editPhone}
                   onChangeText={setEditPhone}
                   placeholder="Enter phone number"
-                  placeholderTextColor="#94a3b8"
+                  placeholderTextColor={isDark ? "#64748b" : "#94a3b8"}
                   keyboardType="phone-pad"
                 />
               </View>
             </View>
 
-            {/* Update Button */}
             <TouchableOpacity
               className="bg-sky-500 rounded-xl py-3.5 flex-row items-center justify-center"
               onPress={handleUpdateProfile}

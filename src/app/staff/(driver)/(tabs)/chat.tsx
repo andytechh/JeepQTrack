@@ -1,3 +1,4 @@
+// app/staff/(driver)/chat.tsx
 import { useFocusEffect } from "expo-router";
 import { Check, SendHorizontal, X } from "lucide-react-native";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -15,6 +16,7 @@ import {
 } from "react-native";
 import { OptimizedMessage } from "../../../../src/shared/components/chat/OptimizedMessage";
 import { supabase } from "../../../../src/shared/config/supabase";
+import { useTheme } from "../../../../src/shared/context/ThemeContext";
 import { useOptimizedChat } from "../../../../src/shared/hooks/useOptimizedChat";
 import { useAuthStore } from "../../../../src/shared/store/authStore";
 
@@ -23,6 +25,8 @@ const PRESENCE_CHANNEL = "staff-presence";
 
 export default function StaffGroupChatScreen() {
   const { user } = useAuthStore();
+  const { isDark } = useTheme(); // 👈 dark mode
+
   const {
     messages,
     loading,
@@ -236,10 +240,18 @@ export default function StaffGroupChatScreen() {
           onAddReaction={addReaction}
           onRemoveReaction={removeReaction}
           currentUserId={user?.uid}
+          isDark={isDark} // 👈 pass dark mode
         />
       );
     },
-    [user?.uid, deleteMessage, handleEditMessage, addReaction, removeReaction],
+    [
+      user?.uid,
+      deleteMessage,
+      handleEditMessage,
+      addReaction,
+      removeReaction,
+      isDark,
+    ],
   );
 
   const UnreadBadge = () => {
@@ -255,27 +267,46 @@ export default function StaffGroupChatScreen() {
 
   if (loading) {
     return (
-      <SafeAreaView className="flex-1 bg-slate-50 items-center justify-center">
+      <SafeAreaView
+        className={`flex-1 items-center justify-center ${isDark ? "bg-slate-900" : "bg-slate-50"}`}
+      >
         <ActivityIndicator size="large" color="#0ea5e9" />
+        <Text
+          className={`mt-4 text-sm ${isDark ? "text-slate-400" : "text-slate-400"}`}
+        >
+          Loading messages...
+        </Text>
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView className="flex-1 bg-slate-50">
-      <View className="px-4 py-3 border-b border-slate-200 bg-white">
+    <SafeAreaView
+      className={`flex-1 ${isDark ? "bg-slate-900" : "bg-slate-50"}`}
+    >
+      {/* Header */}
+      <View
+        className={`px-4 py-3 border-b ${isDark ? "bg-slate-800 border-slate-700" : "bg-white border-slate-200"}`}
+      >
         <View className="flex-row items-center justify-between">
-          <Text className="text-xl font-bold text-slate-900">Staff Chat</Text>
+          <Text
+            className={`text-xl font-bold ${isDark ? "text-white" : "text-slate-900"}`}
+          >
+            Staff Chat
+          </Text>
           <UnreadBadge />
         </View>
         <View className="flex-row items-center mt-0.5">
           <View className="w-2 h-2 rounded-full bg-green-500 mr-1.5" />
-          <Text className="text-xs text-slate-600">
+          <Text
+            className={`text-xs ${isDark ? "text-slate-300" : "text-slate-600"}`}
+          >
             {onlineCount} online · {totalMembers} members
           </Text>
         </View>
       </View>
 
+      {/* Chat list */}
       <FlatList
         ref={flatListRef}
         data={displayMessages}
@@ -305,28 +336,41 @@ export default function StaffGroupChatScreen() {
         }
         ListEmptyComponent={
           <View className="flex-1 items-center justify-center py-20">
-            <Text className="text-slate-400">No messages yet. Say hello!</Text>
+            <Text className={isDark ? "text-slate-400" : "text-slate-400"}>
+              No messages yet. Say hello!
+            </Text>
           </View>
         }
       />
 
-      <View className="border-t border-slate-200 bg-white">
+      {/* Input area */}
+      <View
+        className={`border-t ${isDark ? "bg-slate-800 border-slate-700" : "bg-white border-slate-200"}`}
+      >
         {editingMessageId && (
-          <View className="flex-row items-center justify-between px-3 py-1.5 bg-blue-50 border-b border-blue-100">
-            <Text className="text-sm text-sky-600">Editing message</Text>
+          <View
+            className={`flex-row items-center justify-between px-3 py-1.5 ${isDark ? "bg-slate-700 border-slate-600" : "bg-blue-50 border-blue-100"} border-b`}
+          >
+            <Text
+              className={`text-sm ${isDark ? "text-sky-300" : "text-sky-600"}`}
+            >
+              Editing message
+            </Text>
             <TouchableOpacity onPress={cancelEditing} className="p-1">
-              <X size={18} color="#64748b" />
+              <X size={18} color={isDark ? "#94a3b8" : "#64748b"} />
             </TouchableOpacity>
           </View>
         )}
         <View className="px-3 py-2 flex-row items-end">
           <TextInput
             ref={inputRef}
-            className="flex-1 bg-slate-100 rounded-full px-4 py-2 text-slate-900 max-h-24"
+            className={`flex-1 rounded-full px-4 py-2 text-base max-h-24 ${
+              isDark ? "bg-slate-700 text-white" : "bg-slate-100 text-slate-900"
+            }`}
             placeholder={
               editingMessageId ? "Edit your message..." : "Type a message..."
             }
-            placeholderTextColor="#94a3b8"
+            placeholderTextColor={isDark ? "#64748b" : "#94a3b8"}
             value={inputText}
             onChangeText={setInputText}
             multiline
@@ -337,7 +381,15 @@ export default function StaffGroupChatScreen() {
           <TouchableOpacity
             onPress={handleSend}
             disabled={!inputText.trim() || sending}
-            className={`ml-2 w-10 h-10 rounded-full items-center justify-center ${!inputText.trim() || sending ? "bg-slate-200" : editingMessageId ? "bg-emerald-500" : "bg-sky-500"}`}
+            className={`ml-2 w-10 h-10 rounded-full items-center justify-center ${
+              !inputText.trim() || sending
+                ? isDark
+                  ? "bg-slate-700"
+                  : "bg-slate-200"
+                : editingMessageId
+                  ? "bg-emerald-500"
+                  : "bg-sky-500"
+            }`}
           >
             {sending ? (
               <ActivityIndicator size="small" color="white" />
@@ -350,6 +402,7 @@ export default function StaffGroupChatScreen() {
         </View>
       </View>
 
+      {/* Keyboard spacer */}
       {keyboardHeight > 0 && <View style={{ height: keyboardHeight + 15 }} />}
     </SafeAreaView>
   );

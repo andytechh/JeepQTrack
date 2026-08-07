@@ -1,6 +1,6 @@
+// src/shared/components/ui/StatusPill.tsx
 import React from "react";
 import { Text, View } from "react-native";
-import { theme } from "../../constants/theme";
 
 interface StatusPillProps {
   status:
@@ -10,41 +10,58 @@ interface StatusPillProps {
     | "pending"
     | "in_progress"
     | "online"
-    | "offline";
+    | "offline"
+    | "waiting"
+    | "loading"
+    | "en_route"
+    | "arrived"
+    | "dispatched"
+    | "inactive";
   dot?: boolean;
+  isDark?: boolean;
 }
 
 export const StatusPill: React.FC<StatusPillProps> = ({
   status,
   dot = true,
+  isDark = false,
 }) => {
-  const getColor = () => {
+  const getStatusColor = (): string => {
     switch (status) {
       case "active":
       case "online":
       case "completed":
-        return theme.colors.status.online;
+      case "arrived":
+        return "#22c55e"; // green-500
       case "in_progress":
       case "pending":
-        return theme.colors.status.busy;
+      case "waiting":
+      case "loading":
+        return "#eab308"; // yellow-500
+      case "en_route":
+        return "#3b82f6"; // blue-500
       case "cancelled":
       case "offline":
-        return theme.colors.status.offline;
+      case "inactive":
+      case "dispatched":
+        return "#ef4444"; // red-500
       default:
-        return theme.colors.status.offline;
+        return "#94a3b8"; // slate-400
     }
   };
 
-  const color = getColor();
+  const color = getStatusColor();
+  const bgColor = isDark ? `${color}30` : `${color}20`;
+
   return (
     <View
       style={{
         flexDirection: "row",
         alignItems: "center",
-        backgroundColor: `${color}20`,
-        paddingHorizontal: theme.spacing.sm,
-        paddingVertical: theme.spacing.xs,
-        borderRadius: theme.borderRadius.sm,
+        backgroundColor: bgColor,
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+        borderRadius: 999,
       }}
     >
       {dot && (
@@ -52,15 +69,15 @@ export const StatusPill: React.FC<StatusPillProps> = ({
           style={{
             width: 6,
             height: 6,
-            borderRadius: theme.borderRadius.full,
+            borderRadius: 999,
             backgroundColor: color,
-            marginRight: theme.spacing.xs,
+            marginRight: 6,
           }}
         />
       )}
       <Text
         style={{
-          fontSize: theme.typography.sizes.sm,
+          fontSize: 12,
           color,
           fontWeight: "500",
           textTransform: "capitalize",

@@ -1,5 +1,4 @@
 // app/staff/(driver)/gps-tracking.tsx
-import { LinearGradient } from "expo-linear-gradient";
 import { router, useFocusEffect } from "expo-router";
 import {
   AlertCircle,
@@ -23,13 +22,11 @@ import {
 } from "react-native";
 
 import { MapView } from "@/src/shared/components/map/MapView";
-import { Button } from "@/src/shared/components/ui/Button";
-import { Card } from "@/src/shared/components/ui/Card";
 import { StatusPill } from "@/src/shared/components/ui/StatusPill";
 import { supabase } from "@/src/shared/config/supabase";
-import { lightTheme, theme } from "@/src/shared/constants/theme";
 import { JeepneyMarker } from "@/src/shared/hooks/useGPSMap";
 import { useAuthStore } from "@/src/shared/store/authStore";
+import { useTheme } from "../../../../src/shared/context/ThemeContext";
 import {
   fetchRouteInfo,
   RouteInfo,
@@ -59,6 +56,7 @@ const haversineDistance = (
 // ─── MAIN COMPONENT ──────────────────────────────────────────────────
 export default function DriverGPSTrackingScreen() {
   const { user } = useAuthStore();
+  const { isDark } = useTheme();
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -343,166 +341,91 @@ export default function DriverGPSTrackingScreen() {
     }
   }, [selectedJeepney, tracking]);
 
+  // ─── STYLES ──────────────────────────────────────────────────────
+  const bgColor = isDark ? "bg-slate-900" : "bg-slate-50";
+  const surfaceBg = isDark ? "bg-slate-800" : "bg-white";
+  const surfaceSecondary = isDark ? "bg-slate-700" : "bg-slate-100";
+  const borderColor = isDark ? "border-slate-700" : "border-slate-200";
+  const textPrimary = isDark ? "text-white" : "text-slate-900";
+  const textSecondary = isDark ? "text-slate-300" : "text-slate-600";
+  const textMuted = isDark ? "text-slate-400" : "text-slate-500";
+  const textDim = isDark ? "text-slate-500" : "text-slate-400";
+
   // ─── LOADING / ERROR ─────────────────────────────────────────────
   if (loading) {
     return (
-      <View
-        style={{
-          flex: 1,
-          justifyContent: "center",
-          alignItems: "center",
-          backgroundColor: lightTheme.background,
-        }}
-      >
-        <ActivityIndicator size="large" color={theme.colors.primary[500]} />
-        <Text style={{ marginTop: 12, color: lightTheme.text.muted }}>
-          Loading jeepneys...
-        </Text>
-      </View>
+      <SafeAreaView className={`flex-1 ${bgColor} items-center justify-center`}>
+        <ActivityIndicator size="large" color="#0ea5e9" />
+        <Text className={`mt-3 ${textMuted}`}>Loading jeepneys...</Text>
+      </SafeAreaView>
     );
   }
 
   if (error) {
     return (
-      <View
-        style={{
-          flex: 1,
-          justifyContent: "center",
-          alignItems: "center",
-          backgroundColor: lightTheme.background,
-          padding: 20,
-        }}
+      <SafeAreaView
+        className={`flex-1 ${bgColor} items-center justify-center p-5`}
       >
-        <AlertCircle size={48} color={theme.colors.status.error} />
-        <Text
-          style={{
-            fontSize: 16,
-            fontWeight: "600",
-            marginTop: 12,
-            color: theme.colors.status.error,
-          }}
-        >
-          {error}
-        </Text>
+        <AlertCircle size={48} color="#ef4444" />
+        <Text className="text-red-500 text-lg font-semibold mt-3">{error}</Text>
         <TouchableOpacity
           onPress={handleRefresh}
-          style={{
-            marginTop: 16,
-            backgroundColor: theme.colors.primary[500],
-            paddingHorizontal: 24,
-            paddingVertical: 10,
-            borderRadius: 12,
-          }}
+          className="mt-4 bg-sky-500 px-6 py-3 rounded-xl"
         >
-          <Text style={{ color: "white", fontWeight: "600" }}>Retry</Text>
+          <Text className="text-white font-semibold">Retry</Text>
         </TouchableOpacity>
-      </View>
+      </SafeAreaView>
     );
   }
 
   // ─── MAIN RENDER ──────────────────────────────────────────────────
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: lightTheme.background }}>
+    <SafeAreaView className={`flex-1 ${bgColor}`}>
       {/* Header */}
-      <LinearGradient
-        colors={[lightTheme.background, lightTheme.surface]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 0.8 }}
-        style={{
-          paddingTop: 12,
-          paddingHorizontal: 16,
-          paddingBottom: 12,
-          borderBottomWidth: 1,
-          borderBottomColor: lightTheme.border,
-        }}
+      <View
+        className={`flex-row items-center px-4 py-3 border-b ${borderColor} ${surfaceBg}`}
       >
-        <View style={{ flexDirection: "row", alignItems: "center" }}>
-          <TouchableOpacity
-            onPress={() => router.back()}
-            style={{
-              padding: 8,
-              borderRadius: 20,
-              backgroundColor: lightTheme.surfaceSecondary,
-            }}
-          >
-            <ArrowLeft size={22} color={lightTheme.text.primary} />
-          </TouchableOpacity>
-          <Text
-            style={{
-              flex: 1,
-              textAlign: "center",
-              fontSize: 18,
-              fontWeight: "700",
-              color: lightTheme.text.primary,
-            }}
-          >
-            Live Tracking
-          </Text>
-          <TouchableOpacity
-            onPress={handleRefresh}
-            disabled={refreshing}
-            style={{
-              padding: 6,
-              borderRadius: 20,
-              backgroundColor: lightTheme.surfaceSecondary,
-              marginRight: 6,
-            }}
-          >
-            <RefreshCw
-              size={20}
-              color={
-                refreshing ? lightTheme.text.muted : lightTheme.text.primary
-              }
-            />
-          </TouchableOpacity>
+        <TouchableOpacity onPress={() => router.back()} className="mr-3 p-1">
+          <ArrowLeft size={24} color={isDark ? "#94a3b8" : "#0f172a"} />
+        </TouchableOpacity>
+        <Text className={`flex-1 text-center text-lg font-bold ${textPrimary}`}>
+          Live Tracking
+        </Text>
+        <TouchableOpacity
+          onPress={handleRefresh}
+          disabled={refreshing}
+          className={`p-1.5 rounded-full ${surfaceSecondary} mr-1`}
+        >
+          <RefreshCw
+            size={20}
+            color={isDark ? "#94a3b8" : "#0f172a"}
+            className={refreshing ? "opacity-50" : ""}
+          />
+        </TouchableOpacity>
+        <View
+          className={`flex-row items-center px-3 py-1 rounded-full border ${
+            markers.length > 0
+              ? "bg-green-500/10 border-green-500/30"
+              : "bg-red-500/10 border-red-500/30"
+          }`}
+        >
           <View
-            style={{
-              flexDirection: "row",
-              alignItems: "center",
-              gap: 5,
-              backgroundColor:
-                markers.length > 0
-                  ? `${theme.colors.status.online}15`
-                  : `${theme.colors.status.error}15`,
-              borderRadius: 20,
-              paddingVertical: 4,
-              paddingHorizontal: 10,
-              borderWidth: 1,
-              borderColor:
-                markers.length > 0
-                  ? `${theme.colors.status.online}30`
-                  : `${theme.colors.status.error}30`,
-            }}
+            className={`w-1.5 h-1.5 rounded-full ${
+              markers.length > 0 ? "bg-green-500" : "bg-red-500"
+            } mr-1.5`}
+          />
+          <Text
+            className={`text-[10px] font-semibold ${
+              markers.length > 0 ? "text-green-500" : "text-red-500"
+            }`}
           >
-            <View
-              style={{
-                width: 6,
-                height: 6,
-                borderRadius: 3,
-                backgroundColor:
-                  markers.length > 0
-                    ? theme.colors.status.online
-                    : theme.colors.status.error,
-              }}
-            />
-            <Text
-              style={{
-                color:
-                  markers.length > 0
-                    ? theme.colors.status.online
-                    : theme.colors.status.error,
-                fontSize: 10,
-                fontWeight: "600",
-              }}
-            >
-              {markers.length > 0 ? `${markers.length} ONLINE` : "NO JEEPNEYS"}
-            </Text>
-          </View>
+            {markers.length > 0 ? `${markers.length} ONLINE` : "NO JEEPNEYS"}
+          </Text>
         </View>
-      </LinearGradient>
+      </View>
 
       {/* Map */}
-      <View style={{ flex: 1 }}>
+      <View className="flex-1">
         <MapView
           markers={markers}
           onMarkerPress={handleMarkerPress}
@@ -513,255 +436,122 @@ export default function DriverGPSTrackingScreen() {
 
       {/* Bottom panel */}
       <ScrollView
-        style={{ maxHeight: 340, backgroundColor: lightTheme.surface }}
+        className={`${surfaceBg} max-h-[340px]`}
         contentContainerStyle={{ paddingBottom: 16 }}
         showsVerticalScrollIndicator={false}
       >
-        <Card
-          style={{
-            marginHorizontal: 0,
-            borderBottomLeftRadius: 0,
-            borderBottomRightRadius: 0,
-            paddingTop: 4,
-            paddingHorizontal: 16,
-          }}
-        >
+        <View className="px-4 pt-2">
           {/* Drag handle */}
-          <View style={{ alignItems: "center", marginBottom: 12 }}>
-            <View
-              style={{
-                width: 40,
-                height: 4,
-                borderRadius: 2,
-                backgroundColor: lightTheme.border,
-              }}
-            />
+          <View className="items-center mb-3">
+            <View className={`w-10 h-1 rounded-full ${borderColor}`} />
           </View>
 
           {/* Location & status */}
-          <View
-            style={{
-              flexDirection: "row",
-              justifyContent: "space-between",
-              marginBottom: 12,
-            }}
-          >
+          <View className="flex-row justify-between mb-3">
             <View>
               <Text
-                style={{
-                  fontSize: 11,
-                  fontWeight: "600",
-                  textTransform: "uppercase",
-                  color: lightTheme.text.muted,
-                }}
+                className={`text-[11px] font-semibold uppercase ${textMuted}`}
               >
                 Current location
               </Text>
-              <Text
-                style={{
-                  fontSize: 16,
-                  fontWeight: "600",
-                  color: lightTheme.text.primary,
-                }}
-              >
+              <Text className={`text-base font-semibold ${textPrimary}`}>
                 {selectedJeepney?.lat && selectedJeepney?.lng
                   ? `${selectedJeepney.lat.toFixed(4)}, ${selectedJeepney.lng.toFixed(4)}`
                   : "No jeepney selected"}
               </Text>
-              <Text style={{ fontSize: 12, color: lightTheme.text.muted }}>
+              <Text className={`text-xs ${textMuted}`}>
                 {selectedJeepney?.plateNumber
                   ? `${selectedJeepney.plateNumber} · ${selectedJeepney.driverName || "Unknown"}`
                   : "Tap a marker to select"}
               </Text>
               {selectedJeepney && (
-                <Text
-                  style={{
-                    fontSize: 12,
-                    color: lightTheme.text.secondary,
-                    marginTop: 2,
-                  }}
-                >
+                <Text className={`text-xs ${textSecondary} mt-0.5`}>
                   👤 Occupancy: {selectedJeepney.occupancy || 0} /{" "}
                   {selectedJeepney.capacity || 24}
                 </Text>
               )}
             </View>
-            <StatusPill status={tracking ? "online" : "offline"} dot />
+            <StatusPill
+              status={tracking ? "online" : "offline"}
+              dot
+              isDark={isDark}
+            />
           </View>
 
           {/* Stats grid */}
-          <View style={{ flexDirection: "row", gap: 12, marginBottom: 12 }}>
-            <View
-              style={{
-                flex: 1,
-                backgroundColor: lightTheme.surfaceSecondary,
-                padding: 12,
-                borderRadius: 12,
-              }}
-            >
-              <View
-                style={{ flexDirection: "row", alignItems: "center", gap: 4 }}
-              >
-                <Gauge size={14} color={lightTheme.text.muted} />
-                <Text style={{ fontSize: 11, color: lightTheme.text.muted }}>
-                  Speed
-                </Text>
+          <View className="flex-row gap-3 mb-3">
+            <View className={`flex-1 p-3 rounded-xl ${surfaceSecondary}`}>
+              <View className="flex-row items-center gap-1">
+                <Gauge size={14} color={isDark ? "#94a3b8" : "#94a3b8"} />
+                <Text className={`text-[11px] ${textMuted}`}>Speed</Text>
               </View>
-              <Text
-                style={{
-                  fontSize: 18,
-                  fontWeight: "700",
-                  color: lightTheme.text.primary,
-                }}
-              >
+              <Text className={`text-lg font-bold ${textPrimary}`}>
                 {tracking && speed !== null ? `${Math.round(speed)} km/h` : "—"}
               </Text>
             </View>
-            <View
-              style={{
-                flex: 1,
-                backgroundColor: lightTheme.surfaceSecondary,
-                padding: 12,
-                borderRadius: 12,
-              }}
-            >
-              <View
-                style={{ flexDirection: "row", alignItems: "center", gap: 4 }}
-              >
-                <Route size={14} color={lightTheme.text.muted} />
-                <Text style={{ fontSize: 11, color: lightTheme.text.muted }}>
-                  Distance
-                </Text>
+            <View className={`flex-1 p-3 rounded-xl ${surfaceSecondary}`}>
+              <View className="flex-row items-center gap-1">
+                <Route size={14} color={isDark ? "#94a3b8" : "#94a3b8"} />
+                <Text className={`text-[11px] ${textMuted}`}>Distance</Text>
               </View>
-              <Text
-                style={{
-                  fontSize: 18,
-                  fontWeight: "700",
-                  color: lightTheme.text.primary,
-                }}
-              >
+              <Text className={`text-lg font-bold ${textPrimary}`}>
                 {tracking && distance !== null
                   ? `${distance.toFixed(1)} km`
                   : "—"}
               </Text>
             </View>
-            <View
-              style={{
-                flex: 1,
-                backgroundColor: lightTheme.surfaceSecondary,
-                padding: 12,
-                borderRadius: 12,
-              }}
-            >
-              <View
-                style={{ flexDirection: "row", alignItems: "center", gap: 4 }}
-              >
-                <Navigation size={14} color={lightTheme.text.muted} />
-                <Text style={{ fontSize: 11, color: lightTheme.text.muted }}>
-                  ETA
-                </Text>
+            <View className={`flex-1 p-3 rounded-xl ${surfaceSecondary}`}>
+              <View className="flex-row items-center gap-1">
+                <Navigation size={14} color={isDark ? "#94a3b8" : "#94a3b8"} />
+                <Text className={`text-[11px] ${textMuted}`}>ETA</Text>
               </View>
-              <Text
-                style={{
-                  fontSize: 18,
-                  fontWeight: "700",
-                  color: lightTheme.text.primary,
-                }}
-              >
+              <Text className={`text-lg font-bold ${textPrimary}`}>
                 {tracking && eta !== null ? `${eta} min` : "—"}
               </Text>
             </View>
           </View>
 
-          <View
-            style={{
-              height: 1,
-              backgroundColor: lightTheme.border,
-              marginBottom: 12,
-            }}
-          />
+          <View className={`h-px ${borderColor} mb-3`} />
 
           {/* Trip info */}
-          <View
-            style={{
-              flexDirection: "row",
-              justifyContent: "space-between",
-              marginBottom: 12,
-            }}
-          >
-            <Text style={{ color: lightTheme.text.muted }}>Trip</Text>
-            <Text style={{ fontWeight: "500", color: lightTheme.text.primary }}>
+          <View className="flex-row justify-between mb-3">
+            <Text className={textMuted}>Trip</Text>
+            <Text className={`font-medium ${textPrimary}`}>
               {selectedJeepney?.plateNumber || "Select"} · Donsol → Daraga
             </Text>
           </View>
 
-          {/* ─── BUTTONS IN ROW ──────────────────────────────────────── */}
+          {/* Buttons */}
           <View className="flex-row gap-3">
-            <Button
-              variant={tracking ? "danger" : "primary"}
-              size="lg"
-              style={{
-                flex: 1,
-                borderRadius: 16,
-                paddingVertical: 14,
-                alignItems: "center",
-                justifyContent: "center",
-              }}
+            <TouchableOpacity
+              className={`flex-1 py-3.5 rounded-2xl flex-row items-center justify-center ${
+                tracking ? "bg-red-500" : "bg-sky-500"
+              } ${!selectedJeepney ? "opacity-50" : ""}`}
               onPress={toggleTracking}
               disabled={!selectedJeepney}
             >
-              <View style={{ flexDirection: "row", alignItems: "center" }}>
-                {tracking ? (
-                  <Square size={20} color="white" style={{ marginRight: 8 }} />
-                ) : (
-                  <Navigation
-                    size={20}
-                    color="white"
-                    style={{ marginRight: 8 }}
-                  />
-                )}
-                <Text
-                  style={{ color: "white", fontSize: 14, fontWeight: "600" }}
-                >
-                  {tracking ? "Stop" : "Start"}
-                </Text>
-              </View>
-            </Button>
+              {tracking ? (
+                <Square size={20} color="white" />
+              ) : (
+                <Navigation size={20} color="white" />
+              )}
+              <Text className="text-white font-semibold text-sm ml-2">
+                {tracking ? "Stop" : "Start"}
+              </Text>
+            </TouchableOpacity>
 
-            <Button
-              variant="secondary"
-              size="lg"
-              style={{
-                flex: 1,
-                borderRadius: 16,
-                borderWidth: 1,
-                borderColor: lightTheme.border,
-                paddingVertical: 14,
-                alignItems: "center",
-                justifyContent: "center",
-              }}
+            <TouchableOpacity
+              className={`flex-1 py-3.5 rounded-2xl flex-row items-center justify-center border ${borderColor} ${surfaceSecondary}`}
               onPress={() => setShared(!shared)}
               disabled={!selectedJeepney}
             >
-              <View style={{ flexDirection: "row", alignItems: "center" }}>
-                <Send
-                  size={20}
-                  color={theme.colors.primary[500]}
-                  style={{ marginRight: 8 }}
-                />
-                <Text
-                  style={{
-                    color: theme.colors.primary[500],
-                    fontSize: 14,
-                    fontWeight: "600",
-                  }}
-                >
-                  {shared ? "Shared" : "Share"}
-                </Text>
-              </View>
-            </Button>
+              <Send size={20} color="#0ea5e9" />
+              <Text className="text-sky-500 font-semibold text-sm ml-2">
+                {shared ? "Shared" : "Share"}
+              </Text>
+            </TouchableOpacity>
           </View>
-        </Card>
+        </View>
       </ScrollView>
     </SafeAreaView>
   );

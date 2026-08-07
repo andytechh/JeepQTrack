@@ -1,6 +1,7 @@
+// app/_layout.tsx
 import Constants from "expo-constants";
 import * as Notifications from "expo-notifications";
-import { Slot, router, useSegments } from "expo-router";
+import { Slot, router, useSegments } from "expo-router"; // ✅ removed expo-router ThemeProvider
 import { StatusBar } from "expo-status-bar";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AppState, Platform } from "react-native";
@@ -8,6 +9,7 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import Toast from "react-native-toast-message";
 import "../../global.css";
 import { supabase } from "../src/shared/config/supabase";
+import { ThemeProvider as AppThemeProvider } from "../src/shared/context/ThemeContext"; // ✅ local ThemeProvider
 import { useGlobalChatListener } from "../src/shared/hooks/useGlobalChatListener";
 import { AuthService } from "../src/shared/services/AuthService";
 import { useAuthStore } from "../src/shared/store/authStore";
@@ -158,6 +160,7 @@ export default function RootLayout() {
   useEffect(() => {
     clearStore();
   }, []);
+
   // ─── REGISTER PUSH TOKEN ───────────────────────────────────────────
   const registerPushToken = useCallback(async () => {
     try {
@@ -461,8 +464,10 @@ export default function RootLayout() {
   return (
     <SafeAreaProvider>
       <StatusBar style="auto" />
-      <Slot />
-      <Toast />
+      <AppThemeProvider>
+        <Slot />
+        <Toast />
+      </AppThemeProvider>
     </SafeAreaProvider>
   );
 }

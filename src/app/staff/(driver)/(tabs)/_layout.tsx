@@ -1,3 +1,4 @@
+// app/staff/(driver)/_layout.tsx
 import { Tabs } from "expo-router";
 import {
   LayoutDashboard,
@@ -6,31 +7,20 @@ import {
   MessageCircle,
   Settings,
 } from "lucide-react-native";
-import { Text, View } from "react-native";
+import { CustomTabBar } from "../../../../src/shared/components/ui/CustomTabBar";
 import { useChatStore } from "../../../../src/shared/store/chatStore";
 
 export default function DriverTabsLayout() {
   const { unreadCount } = useChatStore();
 
+  const badge =
+    unreadCount > 0 ? (unreadCount > 99 ? "99+" : unreadCount) : undefined;
+
   return (
     <Tabs
+      tabBar={(props) => <CustomTabBar {...(props as any)} />}
       screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: "#0ea5e9",
-        tabBarInactiveTintColor: "#64748b",
-        tabBarStyle: {
-          backgroundColor: "#0C2C55",
-          borderTopWidth: 2,
-          borderTopColor: "rgba(255,255,255,0.05)",
-          height: 75,
-          paddingBottom: 8,
-          paddingTop: 4,
-          paddingLeft: 4,
-        },
-        tabBarLabelStyle: {
-          fontSize: 11,
-          fontWeight: "500",
-        },
       }}
     >
       <Tabs.Screen
@@ -63,38 +53,9 @@ export default function DriverTabsLayout() {
         options={{
           title: "Chat",
           tabBarIcon: ({ color, size }) => (
-            <View>
-              <MessageCircle size={size} color={color} />
-              {unreadCount > 0 && (
-                <View
-                  style={{
-                    position: "absolute",
-                    top: -6,
-                    right: -8,
-                    backgroundColor: "#ef4444",
-                    borderRadius: 10,
-                    minWidth: 18,
-                    height: 18,
-                    justifyContent: "center",
-                    alignItems: "center",
-                    paddingHorizontal: 4,
-                    borderWidth: 2,
-                    borderColor: "#0C2C55",
-                  }}
-                >
-                  <Text
-                    style={{
-                      color: "white",
-                      fontSize: 10,
-                      fontWeight: "700",
-                    }}
-                  >
-                    {unreadCount > 99 ? "99+" : unreadCount}
-                  </Text>
-                </View>
-              )}
-            </View>
+            <MessageCircle size={size} color={color} />
           ),
+          tabBarBadge: badge,
         }}
       />
       <Tabs.Screen

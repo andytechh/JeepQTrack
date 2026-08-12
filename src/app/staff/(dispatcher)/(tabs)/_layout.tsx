@@ -1,8 +1,9 @@
+// app/staff/(dispatcher)/(tabs)/_layout.tsx
 import { Tabs } from "expo-router";
 import {
-  Bus,
   LayoutDashboard,
   ListStart,
+  MapPin,
   MessageCircle,
   Settings,
 } from "lucide-react-native";
@@ -11,16 +12,13 @@ import { useChatStore } from "../../../../src/shared/store/chatStore";
 
 export default function DispatcherTabsLayout() {
   const { unreadCount } = useChatStore();
-
   const badge =
     unreadCount > 0 ? (unreadCount > 99 ? "99+" : unreadCount) : undefined;
 
   return (
     <Tabs
       tabBar={(props) => <CustomTabBar {...(props as any)} />}
-      screenOptions={{
-        headerShown: false,
-      }}
+      screenOptions={{ headerShown: false }}
     >
       <Tabs.Screen
         name="index"
@@ -32,19 +30,19 @@ export default function DispatcherTabsLayout() {
         }}
       />
       <Tabs.Screen
+        name="map"
+        options={{
+          title: "Map",
+          tabBarIcon: ({ color, size }) => <MapPin size={size} color={color} />,
+        }}
+      />
+      <Tabs.Screen
         name="queue"
         options={{
           title: "Queue",
           tabBarIcon: ({ color, size }) => (
             <ListStart size={size} color={color} />
           ),
-        }}
-      />
-      <Tabs.Screen
-        name="map"
-        options={{
-          title: "Tracking",
-          tabBarIcon: ({ color, size }) => <Bus size={size} color={color} />,
         }}
       />
       <Tabs.Screen

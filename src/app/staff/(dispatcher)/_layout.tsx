@@ -1,7 +1,7 @@
 // app/staff/(dispatcher)/_layout.tsx
 import { router, Stack } from "expo-router";
 import { LogOut, User } from "lucide-react-native";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -19,29 +19,57 @@ import { NotificationService } from "../../../src/shared/services/NotificationSe
 import { useAuthStore } from "../../../src/shared/store/authStore";
 
 export default function DispatcherLayout() {
-  const { user, isLoading, logout, hydrate } = useAuthStore();
+  const { user, logout } = useAuthStore();
   const [notificationCount, setNotificationCount] = useState(0);
   const [notifications, setNotifications] = useState<any[]>([]);
   const [showNotifications, setShowNotifications] = useState(false);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
-  const [timedOut, setTimedOut] = useState(false);
+  const [hydrated, setHydrated] = useState(false);
+  const [loadingNotifications, setLoadingNotifications] = useState(false);
 
-  // Force hydrate and add timeout fallback
+  // Wait for store to hydrate
   useEffect(() => {
-    hydrate?.(); // Call hydrate if available
-
-    // Timeout fallback - if still loading after 5 seconds, show content anyway
+    if (user) {
+      setHydrated(true);
+      return;
+    }
+    const unsubscribe = useAuthStore.subscribe((state) => {
+      if (state.user) setHydrated(true);
+    });
     const timer = setTimeout(() => {
-      if (isLoading) {
-        console.log("⚠️ Auth loading timed out, forcing render");
-        setTimedOut(true);
+      if (!hydrated) {
+        console.log("⚠️ Auth hydration timeout, forcing render");
+        setHydrated(true);
       }
-    }, 5000);
-
-    return () => clearTimeout(timer);
+    }, 3000);
+    return () => {
+      unsubscribe();
+      clearTimeout(timer);
+    };
   }, []);
 
-  const fetchNotificationCount = async () => {
+  // ─── FETCH NOTIFICATIONS ──────────────────────────────────────────
+  const fetchNotifications = useCallback(async () => {
+    if (!user?.uid) return;
+    try {
+      setLoadingNotifications(true);
+      const { data, error } = await supabase
+        .from("notifications")
+        .select("*")
+        .eq("user_id", user.uid)
+        .order("created_at", { ascending: false })
+        .limit(50);
+
+      if (error) throw error;
+      setNotifications(data || []);
+    } catch (error) {
+      console.error("Failed to fetch notifications:", error);
+    } finally {
+      setLoadingNotifications(false);
+    }
+  }, [user?.uid]);
+
+  const fetchNotificationCount = useCallback(async () => {
     if (!user?.uid) return;
     try {
       const count = await NotificationService.getUnreadCount(user.uid);
@@ -49,13 +77,16 @@ export default function DispatcherLayout() {
     } catch (error) {
       console.log("Notification count error:", error);
     }
-  };
+  }, [user?.uid]);
 
+  // ─── SUBSCRIPTION ──────────────────────────────────────────────────
   useEffect(() => {
     if (!user?.uid) return;
+
     fetchNotificationCount();
+
     const channel = supabase
-      .channel(`disp_${user.uid}`)
+      .channel(`disp_notif_${user.uid}`)
       .on(
         "postgres_changes",
         {
@@ -64,16 +95,63 @@ export default function DispatcherLayout() {
           table: "notifications",
           filter: `user_id=eq.${user.uid}`,
         },
-        () => fetchNotificationCount(),
+        () => {
+          fetchNotificationCount();
+          if (showNotifications) fetchNotifications();
+        },
       )
       .subscribe();
+
     return () => {
       channel?.unsubscribe();
     };
+  }, [
+    user?.uid,
+    fetchNotificationCount,
+    fetchNotifications,
+    showNotifications,
+  ]);
+
+  // ─── MARK AS READ ──────────────────────────────────────────────────
+  const markNotificationAsRead = useCallback(async (notificationId: string) => {
+    try {
+      await supabase
+        .from("notifications")
+        .update({ read: true })
+        .eq("id", notificationId);
+      // Update local state
+      setNotifications((prev) =>
+        prev.map((n) => (n.id === notificationId ? { ...n, read: true } : n)),
+      );
+      // Decrement count
+      setNotificationCount((prev) => Math.max(0, prev - 1));
+    } catch (error) {
+      console.error("Failed to mark notification as read:", error);
+    }
+  }, []);
+
+  const markAllAsRead = useCallback(async () => {
+    try {
+      await supabase
+        .from("notifications")
+        .update({ read: true })
+        .eq("user_id", user?.uid)
+        .eq("read", false);
+      setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+      setNotificationCount(0);
+    } catch (error) {
+      console.error("Failed to mark all as read:", error);
+    }
   }, [user?.uid]);
 
-  // Only show loading if actually loading AND not timed out
-  if (isLoading && !timedOut && !user) {
+  // ─── OPEN NOTIFICATIONS MODAL ─────────────────────────────────────
+  const handleOpenNotifications = useCallback(() => {
+    setShowNotifications(true);
+    fetchNotifications();
+  }, [fetchNotifications]);
+
+  // ─── RENDER ──────────────────────────────────────────────────────
+  if (!hydrated && !user) {
     return (
       <View className="flex-1 items-center justify-center bg-[#0a1628]">
         <ActivityIndicator size="large" color="#0ea5e9" />
@@ -82,8 +160,7 @@ export default function DispatcherLayout() {
     );
   }
 
-  // If no user at all, show login redirect
-  if (!user && !isLoading) {
+  if (!user && hydrated) {
     return (
       <View className="flex-1 items-center justify-center bg-[#0a1628] p-4">
         <Text className="text-white/60 text-center">No user found</Text>
@@ -99,20 +176,18 @@ export default function DispatcherLayout() {
 
   return (
     <View className="flex-1 bg-[#0a1628]">
-      {/* Header */}
       <ModernHeader
         avatarText={user?.displayName || "Dispatcher"}
         notificationCount={notificationCount}
-        onNotificationPress={() => setShowNotifications(true)}
+        onNotificationPress={handleOpenNotifications}
         onAvatarPress={() => setShowProfileMenu(true)}
       />
 
-      {/* Tabs */}
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="(tabs)" />
       </Stack>
 
-      {/* Notifications Modal */}
+      {/* ─── NOTIFICATIONS MODAL ──────────────────────────────────── */}
       <Modal
         visible={showNotifications}
         animationType="slide"
@@ -125,30 +200,56 @@ export default function DispatcherLayout() {
               <Text className="text-white text-lg font-bold">
                 Notifications
               </Text>
-              <TouchableOpacity onPress={() => setShowNotifications(false)}>
-                <Text className="text-sky-400">Close</Text>
-              </TouchableOpacity>
+              <View className="flex-row items-center gap-3">
+                {notificationCount > 0 && (
+                  <TouchableOpacity onPress={markAllAsRead}>
+                    <Text className="text-sky-400 text-sm">Mark all read</Text>
+                  </TouchableOpacity>
+                )}
+                <TouchableOpacity onPress={() => setShowNotifications(false)}>
+                  <Text className="text-sky-400">Close</Text>
+                </TouchableOpacity>
+              </View>
             </View>
-            <FlatList
-              data={notifications}
-              keyExtractor={(item) => item.id}
-              ListEmptyComponent={
-                <Text className="text-gray-500 text-center py-8">
-                  No notifications
-                </Text>
-              }
-              renderItem={({ item }) => (
-                <View className="p-3 bg-white/5 rounded-xl mb-2">
-                  <Text className="text-white font-semibold">{item.title}</Text>
-                  <Text className="text-gray-400 text-sm">{item.message}</Text>
-                </View>
-              )}
-            />
+
+            {loadingNotifications ? (
+              <ActivityIndicator
+                size="large"
+                color="#0ea5e9"
+                className="mt-8"
+              />
+            ) : (
+              <FlatList
+                data={notifications}
+                keyExtractor={(item) => item.id}
+                ListEmptyComponent={
+                  <Text className="text-gray-500 text-center py-8">
+                    No notifications
+                  </Text>
+                }
+                renderItem={({ item }) => (
+                  <TouchableOpacity
+                    className={`p-3 rounded-xl mb-2 ${item.read ? "bg-white/5" : "bg-sky-500/20 border border-sky-500/30"}`}
+                    onPress={() => markNotificationAsRead(item.id)}
+                  >
+                    <Text className="text-white font-semibold">
+                      {item.title}
+                    </Text>
+                    <Text className="text-gray-400 text-sm">
+                      {item.message}
+                    </Text>
+                    <Text className="text-gray-500 text-[10px] mt-1">
+                      {new Date(item.created_at).toLocaleString()}
+                    </Text>
+                  </TouchableOpacity>
+                )}
+              />
+            )}
           </View>
         </View>
       </Modal>
 
-      {/* Profile Modal */}
+      {/* ─── PROFILE MODAL ────────────────────────────────────────── */}
       <Modal
         visible={showProfileMenu}
         transparent

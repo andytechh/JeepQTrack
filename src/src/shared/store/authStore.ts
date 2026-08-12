@@ -2,6 +2,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
+import { supabase } from "../config/supabase";
 import { User } from "../types";
 
 interface AuthState {
@@ -13,11 +14,12 @@ interface AuthState {
   setIsLoading: (value: boolean) => void;
   logout: () => void;
   hydrate: () => void;
+  refreshUser: () => Promise<void>; // 👈 new method
 }
 
 export const useAuthStore = create<AuthState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       user: null,
       isAuthenticated: false,
       isLoading: true,
@@ -47,6 +49,39 @@ export const useAuthStore = create<AuthState>()(
           isLoading: false,
           isAuthenticated: !!state.user,
         }));
+      },
+
+      refreshUser: async () => {
+        const currentUser = get().user;
+        if (!currentUser?.uid) return;
+
+        try {
+          const { data, error } = await supabase
+            .from("users")
+            .select(
+              "id, email, display_name, phone_number, role, jeepney_id, is_active, preferred_terminal",
+            )
+            .eq("id", currentUser.uid)
+            .single();
+
+          if (error) throw error;
+
+          if (data) {
+            const updatedUser: User = {
+              uid: data.id,
+              email: data.email,
+              displayName: data.display_name,
+              phoneNumber: data.phone_number,
+              role: data.role,
+              jeepneyId: data.jeepney_id,
+              isActive: data.is_active,
+              terminalId: data.preferred_terminal ?? 1,
+            };
+            set({ user: updatedUser });
+          }
+        } catch (err) {
+          console.error("Failed to refresh user:", err);
+        }
       },
     }),
     {

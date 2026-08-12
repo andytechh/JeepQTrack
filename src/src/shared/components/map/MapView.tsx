@@ -1,22 +1,59 @@
-// src/shared/components/map/MapView.tsx
 import React from "react";
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 import { WebView } from "react-native-webview";
+
 import { JeepneyMarker, useGPSMap } from "../../hooks/useGPSMap";
+
 import MapControls from "./MapControls";
 import { getMapHTML } from "./mapHTML";
 
+export interface JeepneyETA {
+  jeepneyId: string;
+
+  currentLat: number;
+  currentLng: number;
+
+  destinationName: string;
+
+  progressPercent: number;
+
+  totalRouteDistanceKm: number;
+
+  remainingDistanceKm: number;
+
+  traveledDistanceKm: number;
+
+  currentSpeedKmh: number;
+
+  travelMinutes: number;
+
+  additionalMinutes: number;
+
+  remainingMinutes: number;
+
+  estimatedArrivalTime: string;
+
+  currentTime: string;
+}
+
 interface MapViewProps {
   markers: JeepneyMarker[];
+
   onMarkerPress?: (jeepneyId: string) => void;
+
+  onJeepneyETA?: (eta: JeepneyETA) => void;
+
   showControls?: boolean;
+
   enableRealtime?: boolean;
+
   style?: any;
 }
 
 export const MapView: React.FC<MapViewProps> = ({
   markers,
   onMarkerPress,
+  onJeepneyETA,
   showControls = true,
   enableRealtime = true,
   style,
@@ -29,36 +66,113 @@ export const MapView: React.FC<MapViewProps> = ({
     zoomOut,
     recenter,
     refreshRoute,
-  } = useGPSMap({ markers, enableRealtime, onMarkerPress });
+  } = useGPSMap({
+    markers,
+    enableRealtime,
+    onMarkerPress,
+  });
+
+  /**
+   * ============================================================
+   * WEBVIEW MESSAGE HANDLER
+   * ============================================================
+   */
+  const handleWebViewMessage = React.useCallback(
+    (event: any) => {
+      try {
+        const data = JSON.parse(event.nativeEvent.data);
+
+        console.log("🗺️ MAP EVENT:", data.type, data);
+
+        /**
+         * ====================================================
+         * ETA UPDATE
+         * ====================================================
+         */
+        if (data.type === "etaUpdate" && onJeepneyETA) {
+          onJeepneyETA({
+            jeepneyId: data.jeepneyId,
+
+            currentLat: Number(data.currentLat),
+
+            currentLng: Number(data.currentLng),
+
+            destinationName: data.destinationName ?? "Destination",
+
+            progressPercent: Number(data.progressPercent ?? 0),
+
+            totalRouteDistanceKm: Number(data.totalRouteDistanceKm ?? 0),
+
+            remainingDistanceKm: Number(data.remainingDistanceKm ?? 0),
+
+            traveledDistanceKm: Number(data.traveledDistanceKm ?? 0),
+
+            currentSpeedKmh: Number(data.currentSpeedKmh ?? 0),
+
+            travelMinutes: Number(data.travelMinutes ?? 0),
+
+            additionalMinutes: Number(data.additionalMinutes ?? 20),
+
+            remainingMinutes: Number(data.remainingMinutes ?? 0),
+
+            estimatedArrivalTime: data.estimatedArrivalTime ?? "--",
+
+            currentTime: data.currentTime ?? new Date().toISOString(),
+          });
+        }
+      } catch (error) {
+        console.warn("⚠️ Failed to process map message:", error);
+      }
+
+      /**
+       * Let useGPSMap process its own events.
+       */
+      handleMessage(event);
+    },
+    [handleMessage, onJeepneyETA],
+  );
 
   return (
     <View style={[styles.container, style]}>
       <WebView
         ref={webViewRef}
-        source={{ html: getMapHTML() }}
-        onMessage={handleMessage}
+        source={{
+          html: getMapHTML(),
+        }}
+        onMessage={handleWebViewMessage}
         style={styles.webview}
-        javaScriptEnabled
-        domStorageEnabled
+        javaScriptEnabled={true}
+        domStorageEnabled={true}
         originWhitelist={["*"]}
-        startInLoadingState
+        startInLoadingState={true}
+        cacheEnabled={true}
         renderLoading={() => (
           <View style={styles.loading}>
-            <ActivityIndicator size="large" color="#0ea5e9" />
-            <Text style={styles.loadingText}>Loading map...</Text>
+            <ActivityIndicator size="large" color="#0EA5E9" />
+
+            <Text style={styles.loadingText}>
+              Loading Donsol–Daraga route...
+            </Text>
           </View>
         )}
       />
+
       {showControls && (
         <MapControls
           onZoomIn={zoomIn}
           onZoomOut={zoomOut}
           onRecenter={() => {
             const first = markers[0];
-            if (first) recenter(first.lat, first.lng);
-            else recenter(13.0, 123.65);
+
+            if (first) {
+              recenter(first.lat, first.lng);
+            } else {
+              recenter(13.025, 123.65);
+            }
           }}
-          onShowTerminals={() => recenter(13.0, 123.65)}
+          onShowTerminals={() => {
+            recenter(13.025, 123.65);
+          }}
           onRefreshRoute={refreshRoute}
         />
       )}
@@ -67,13 +181,33 @@ export const MapView: React.FC<MapViewProps> = ({
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1 },
-  webview: { flex: 1 },
+  container: {
+    flex: 1,
+    minHeight: 1,
+  },
+
+  webview: {
+    flex: 1,
+    backgroundColor: "#E0F2FE",
+  },
+
   loading: {
     ...StyleSheet.absoluteFill,
+
     justifyContent: "center",
+
     alignItems: "center",
-    backgroundColor: "#f8fafc",
+
+    backgroundColor: "#F0F9FF",
   },
-  loadingText: { marginTop: 12, color: "#94a3b8" },
+
+  loadingText: {
+    marginTop: 12,
+
+    color: "#64748B",
+
+    fontSize: 13,
+
+    fontWeight: "600",
+  },
 });

@@ -6,6 +6,7 @@ export interface User {
   role: "driver" | "dispatcher" | "admin" | "commuter";
   jeepneyId: string | null;
   isActive: boolean;
+  terminalId?: number;
 }
 
 export interface LoginCredentials {

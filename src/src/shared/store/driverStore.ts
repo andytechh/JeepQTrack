@@ -1,7 +1,7 @@
 // src/shared/store/driverStore.ts
 import { create } from "zustand";
 import { supabase } from "../config/supabase";
-import { NotificationService } from "../services/NotificationService";
+import { insertNotification } from "../services/NotificationService"; // ensure this export exists
 import { useAuthStore } from "./authStore";
 
 // ─── TYPES ──────────────────────────────────────────────────────────
@@ -81,6 +81,10 @@ export const useDriverStore = create<DriverState>((set, get) => {
   let doorChannel: any = null;
   let queueChannel: any = null;
   let tripChannel: any = null;
+
+  // ─── NOTIFICATION DEBOUNCE ──────────────────────────────────────
+  let lastNotifiedStatus: string | null = null;
+  let notifyTimeout: NodeJS.Timeout | null = null;
 
   // ─── INITIAL STATE ──────────────────────────────────────────────
   const initialState = {
@@ -326,7 +330,7 @@ export const useDriverStore = create<DriverState>((set, get) => {
 
         if (staff) {
           for (const s of staff) {
-            await NotificationService.sendNotificationToUser(
+            await insertNotification(
               s.id,
               "🚨 EMERGENCY ALERT",
               `Driver ${user.displayName} (${jeepney.plate_number}) needs assistance at ${jeepney.current_latitude}, ${jeepney.current_longitude}`,
@@ -355,12 +359,13 @@ export const useDriverStore = create<DriverState>((set, get) => {
       const { user } = useAuthStore.getState();
       if (!user?.jeepneyId || !user?.uid) return;
 
-      // Cleanup existing subscriptions
+      // Cleanup existing subscriptions to avoid duplicates
       get().cleanupSubscriptions();
 
       const jeepneyId = user.jeepneyId;
+      const userId = user.uid;
 
-      // 1. Jeepney updates
+      // 1. Jeepney updates (with debounced notifications)
       jeepneyChannel = supabase
         .channel(`jeepney_${jeepneyId}`)
         .on(
@@ -371,19 +376,28 @@ export const useDriverStore = create<DriverState>((set, get) => {
             table: "jeepneys",
             filter: `id=eq.${jeepneyId}`,
           },
-          (payload) => {
+          async (payload) => {
             const updated = payload.new as Jeepney;
             set({ jeepney: updated });
 
-            // Show notification for status changes
+            // Only notify if status actually changed
             if (payload.new.status !== payload.old.status) {
-              NotificationService.sendNotificationToUser(
-                user.uid,
-                "Status Updated",
-                `Jeepney ${updated.plate_number} is now ${updated.status}`,
-                "status",
-                { jeepneyId, status: updated.status },
-              );
+              const newStatus = payload.new.status;
+              // Avoid duplicate notifications for the same status
+              if (lastNotifiedStatus !== newStatus) {
+                lastNotifiedStatus = newStatus;
+                // Debounce: clear any pending notification
+                if (notifyTimeout) clearTimeout(notifyTimeout);
+                notifyTimeout = setTimeout(async () => {
+                  await insertNotification(
+                    userId,
+                    "Status Updated",
+                    `Jeepney ${updated.plate_number} is now ${newStatus}`,
+                    "status",
+                    { jeepneyId, status: newStatus },
+                  );
+                }, 300); // wait 300ms before sending
+              }
             }
           },
         )
@@ -457,6 +471,14 @@ export const useDriverStore = create<DriverState>((set, get) => {
 
     // ─── CLEANUP SUBSCRIPTIONS ──────────────────────────────────
     cleanupSubscriptions: () => {
+      // Clear any pending notification timeout
+      if (notifyTimeout) {
+        clearTimeout(notifyTimeout);
+        notifyTimeout = null;
+      }
+      // Reset last notified status
+      lastNotifiedStatus = null;
+
       if (jeepneyChannel) {
         jeepneyChannel.unsubscribe();
         jeepneyChannel = null;

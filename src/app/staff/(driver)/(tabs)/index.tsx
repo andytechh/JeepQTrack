@@ -31,6 +31,12 @@ import { useTheme } from "../../../../src/shared/context/ThemeContext";
 import { useAuthStore } from "../../../../src/shared/store/authStore";
 import { useDriverStore } from "../../../../src/shared/store/driverStore";
 
+// ─── CONSTANTS ──────────────────────────────────────────────────────
+const TERMINAL_NAMES: Record<number, string> = {
+  1: "Donsol",
+  2: "Daraga",
+};
+
 // ─── QUICK ACTIONS ──────────────────────────────────────────────────
 const quickActions = [
   {
@@ -38,6 +44,7 @@ const quickActions = [
     route: "/staff/(driver)/gps-tracking",
     icon: Play,
     primary: true,
+    action: "start_trip",
   },
   {
     label: "View queue",
@@ -96,6 +103,12 @@ export default function DriverDashboard() {
     ? Math.round((totalPassengers / capacity) * 100)
     : 0;
 
+  // ─── DERIVE ROUTE ─────────────────────────────────────────────────
+  const terminalId = jeepney?.terminal_id || 1;
+  const origin = TERMINAL_NAMES[terminalId] || "Unknown";
+  const destination = TERMINAL_NAMES[terminalId === 1 ? 2 : 1] || "Unknown";
+  const routeDisplay = `${origin} → ${destination}`;
+
   // ─── HELPERS ──────────────────────────────────────────────────────
   const getStatusActions = (status?: string) => {
     const statusMap: Record<
@@ -132,10 +145,10 @@ export default function DriverDashboard() {
 
   const handleStatusUpdate = () => {
     if (!jeepney) return;
-    const { nextStatus } = statusActions;
+    const nextStatus = statusActions.next;
     Alert.alert(
       "Update Status",
-      `Change status from "${jeepney.status}" to "${nextStatus}"?`,
+      `Change status from "${jeepney.status}" to "${statusActions.label}"?`,
       [
         { text: "Cancel", style: "cancel" },
         {
@@ -143,7 +156,10 @@ export default function DriverDashboard() {
           onPress: async () => {
             const success = await updateJeepneyStatus(nextStatus);
             if (success) {
-              Alert.alert("Success", `Status updated to ${nextStatus}`);
+              Alert.alert(
+                "Success",
+                `Status updated to ${statusActions.label}`,
+              );
               await fetchDashboard();
             } else {
               Alert.alert("Error", "Failed to update status");
@@ -221,6 +237,8 @@ export default function DriverDashboard() {
       case "chat":
         router.push("/staff/(driver)/chat");
         break;
+      default:
+        break;
     }
   };
 
@@ -293,7 +311,7 @@ export default function DriverDashboard() {
         >
           <View className="flex-col gap-2">
             <Text style={{ color: "#fff", opacity: 0.8, fontSize: 12 }}>
-              {jeepney.route || "No route assigned"}
+              {routeDisplay}
             </Text>
             <View className="flex-row items-center justify-between">
               <Text style={{ color: "#fff", fontSize: 18, fontWeight: "700" }}>
@@ -370,14 +388,14 @@ export default function DriverDashboard() {
             <StatCard
               label="Queue"
               value={queueInfo?.position || 0}
-              delta="Waiting"
+              delta={queueInfo ? `In queue` : "Not queued"}
               isDark={isDark}
             />
             <StatCard
               label="Rating"
-              value="4.8"
-              delta="⭐ 4.8 (24 reviews)"
-              isRating
+              value="—"
+              delta="Coming soon"
+              isRating={false}
               isDark={isDark}
             />
           </View>
@@ -394,7 +412,13 @@ export default function DriverDashboard() {
               return (
                 <Button
                   key={action.label}
-                  onPress={() => router.push(action.route as any)}
+                  onPress={() => {
+                    if (action.action === "start_trip") {
+                      handleQuickAction("start_trip");
+                    } else {
+                      router.push(action.route as any);
+                    }
+                  }}
                   variant={action.primary ? "primary" : "secondary"}
                   size="lg"
                   style={{
@@ -540,7 +564,7 @@ export default function DriverDashboard() {
               </Text>
               <Text className={`text-xs ${textSecondary}`}>
                 Expect higher demand between 5:00 PM and 7:00 PM on{" "}
-                {jeepney.route}.
+                {routeDisplay}.
               </Text>
             </View>
           </View>

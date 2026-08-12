@@ -2,12 +2,13 @@
 import { Clock, MapPin, Users } from "lucide-react-native";
 import React from "react";
 import { StyleSheet, Text, View } from "react-native";
+import { useTheme } from "../../context/ThemeContext";
 import type { JeepneyQueueItem } from "../../hooks/useJeepneyQueue";
-import { StatusPill } from "./StatusPill"; // adjust path if needed
+import { StatusPill } from "./StatusPill";
 
 const TERMINAL_ABBR: Record<number, string> = { 1: "Donsol", 2: "Daraga" };
 
-// Map your queue statuses to the ones StatusPill expects
+// Map statuses to StatusPill variants
 const mapStatusToPill = (
   status: string,
 ):
@@ -35,35 +36,46 @@ export function JeepneyCard({
   item: JeepneyQueueItem;
   isCurrent?: boolean;
 }) {
+  const { isDark } = useTheme();
+
   const waitMinutes = item.queue_position * 30;
 
   return (
-    <View style={[styles.card, isCurrent && styles.currentCard]}>
+    <View
+      style={[
+        styles.card,
+        isCurrent && styles.currentCard,
+        isDark && styles.cardDark,
+        isCurrent && isDark && styles.currentCardDark,
+      ]}
+    >
       <View style={styles.header}>
-        <View style={styles.plateBadge}>
+        <View style={[styles.plateBadge, isDark && styles.plateBadgeDark]}>
           <Text style={styles.plateBadgeText}>
             {item.plate_number?.slice(0, 3) || "???"}
           </Text>
         </View>
 
         <View style={{ flex: 1 }}>
-          <Text style={styles.plate}>{item.plate_number}</Text>
-          <Text style={styles.meta}>
+          <Text style={[styles.plate, isDark && styles.textLight]}>
+            {item.plate_number}
+          </Text>
+          <Text style={[styles.meta, isDark && styles.textMutedDark]}>
             {item.driver_name || "No driver"} · Bracket {item.bracket}
           </Text>
         </View>
 
-        {/* Use the mapped status, hide the dot for a cleaner look */}
         <StatusPill status={mapStatusToPill(item.status)} dot={false} />
       </View>
 
       <View style={styles.stats}>
         <Stat
-          icon={<Users size={14} color="#64748b" />}
+          icon={<Users size={14} color={isDark ? "#94a3b8" : "#64748b"} />}
           label={`${item.current_occupancy}/${item.capacity}`}
+          isDark={isDark}
         />
         <Stat
-          icon={<Clock size={14} color="#64748b" />}
+          icon={<Clock size={14} color={isDark ? "#94a3b8" : "#64748b"} />}
           label={
             item.status === "loading"
               ? item.loading_ends_at
@@ -71,21 +83,33 @@ export function JeepneyCard({
                 : "Loading..."
               : `~${waitMinutes} min`
           }
+          isDark={isDark}
         />
         <Stat
-          icon={<MapPin size={14} color="#64748b" />}
+          icon={<MapPin size={14} color={isDark ? "#94a3b8" : "#64748b"} />}
           label={TERMINAL_ABBR[item.terminal_id] ?? "?"}
+          isDark={isDark}
         />
       </View>
     </View>
   );
 }
 
-function Stat({ icon, label }: { icon: React.ReactNode; label: string }) {
+function Stat({
+  icon,
+  label,
+  isDark,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  isDark: boolean;
+}) {
   return (
     <View style={styles.stat}>
       {icon}
-      <Text style={styles.statText}>{label}</Text>
+      <Text style={[styles.statText, isDark && styles.textMutedDark]}>
+        {label}
+      </Text>
     </View>
   );
 }
@@ -96,28 +120,80 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 16,
     marginBottom: 10,
-    borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderWidth: 1.5,
+    borderColor: "#0ea5e9",
+    shadowColor: "#0ea5e9",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 6,
+    elevation: 4,
+  },
+  cardDark: {
+    backgroundColor: "#1e293b",
+    borderColor: "#0ea5e9",
+    shadowOpacity: 0.25,
   },
   currentCard: {
-    borderColor: "#22c55e",
-    borderWidth: 2,
-    backgroundColor: "#f0fdf4",
+    borderWidth: 2.5,
+    borderColor: "#0ea5e9",
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    elevation: 6,
   },
-  header: { flexDirection: "row", alignItems: "center", marginBottom: 12 },
+  currentCardDark: {
+    borderColor: "#22c55e",
+    shadowColor: "#22c55e",
+    shadowOpacity: 0.4,
+  },
+  header: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 12,
+  },
   plateBadge: {
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: "#f1f5f9",
+    backgroundColor: "#0ea5e9", // sky blue
     alignItems: "center",
     justifyContent: "center",
     marginRight: 12,
   },
-  plateBadgeText: { fontSize: 14, fontWeight: "bold", color: "#0f172a" },
-  plate: { fontSize: 16, fontWeight: "600", color: "#0f172a" },
-  meta: { fontSize: 13, color: "#475569", marginTop: 2 },
-  stats: { flexDirection: "row", gap: 16 },
-  stat: { flexDirection: "row", alignItems: "center", gap: 4 },
-  statText: { fontSize: 13, color: "#475569" },
+  plateBadgeDark: {
+    backgroundColor: "#1e40af", // darker blue for dark mode
+  },
+  plateBadgeText: {
+    fontSize: 14,
+    fontWeight: "bold",
+    color: "#ffffff", // white text
+  },
+  plate: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#0f172a",
+  },
+  meta: {
+    fontSize: 13,
+    color: "#475569",
+    marginTop: 2,
+  },
+  stats: {
+    flexDirection: "row",
+    gap: 16,
+  },
+  stat: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  statText: {
+    fontSize: 13,
+    color: "#475569",
+  },
+  textLight: {
+    color: "#f1f5f9",
+  },
+  textMutedDark: {
+    color: "#94a3b8",
+  },
 });

@@ -1,21 +1,24 @@
-// app/staff/(dispatcher)/index.tsx
+// app/staff/(dispatcher)/(tabs)/index.tsx
 import { router } from "expo-router";
 import {
   AlertTriangle,
   Bus,
   Clock,
   ListStart,
+  MapPin,
   MessageCircle,
   TrendingUp,
   Users,
-  X,
+  X
 } from "lucide-react-native";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
   FlatList,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   RefreshControl,
   ScrollView,
   Text,
@@ -30,7 +33,34 @@ import { supabase } from "../../../../src/shared/config/supabase";
 import { theme } from "../../../../src/shared/constants/theme";
 import { useTheme } from "../../../../src/shared/context/ThemeContext";
 import { useAuthStore } from "../../../../src/shared/store/authStore";
-import { useDispatcherStore } from "../../../../src/shared/store/dispatcherStore";
+
+// ─── TYPES ──────────────────────────────────────────────────────────
+interface JeepneyWithOccupancy {
+  id: string;
+  plate_number: string;
+  bracket: number;
+  capacity: number;
+  status: string;
+  current_occupancy: number;
+  queue_position: number | null;
+  terminal_id: number;
+  driver_name: string | null;
+  driver_id: string | null;
+  front_count?: number;
+  rear_count?: number;
+}
+
+interface TripLog {
+  id: string;
+  jeepney_id: string;
+  jeepney_plate: string;
+  driver_name: string;
+  route: string;
+  status: "completed" | "in_progress" | "cancelled";
+  passengers: number;
+  started_at: string;
+  ended_at: string | null;
+}
 
 // ─── STATUS COLOR MAP ──────────────────────────────────────────────
 const statusColorMap: Record<string, string> = {
@@ -83,7 +113,7 @@ function StatCard({
   const colorSet = colors[color];
 
   return (
-    <Card style={{ width: "48%", padding: 14 }}>
+    <Card style={{ width: "48%", padding: 12 }}>
       <View className="flex-row items-center justify-between">
         <Text
           className={`text-xs font-medium ${isDark ? "text-slate-400" : "text-slate-500"}`}
@@ -103,52 +133,182 @@ function StatCard({
   );
 }
 
+// ─── NEXT TO NOTIFY ─────────────────────────────────────────────────
+function NextToNotifyCard({
+  jeepney,
+  onNotify,
+  notifying,
+}: {
+  jeepney: JeepneyWithOccupancy | null;
+  onNotify: () => void;
+  notifying: boolean;
+}) {
+  const { isDark } = useTheme();
+
+  if (!jeepney) {
+    return (
+      <Card style={{ marginBottom: theme.spacing.lg }}>
+        <Text
+          className={`text-center py-4 ${isDark ? "text-slate-400" : "text-slate-400"}`}
+        >
+          No jeepneys currently in queue.
+        </Text>
+      </Card>
+    );
+  }
+
+  const terminalName = jeepney.terminal_id === 1 ? "Donsol" : "Daraga";
+  const occupancy = (jeepney.front_count || 0) + (jeepney.rear_count || 0);
+
+  return (
+    <Card
+      style={{
+        marginBottom: theme.spacing.lg,
+        borderWidth: 2,
+        borderColor: theme.colors.primary[500],
+      }}
+    >
+      <Text
+        className={`text-xs font-bold tracking-wide mb-2 ${isDark ? "text-sky-400" : "text-sky-600"}`}
+      >
+        NEXT TO DISPATCH
+      </Text>
+      <View className="flex-row items-center justify-between mb-3">
+        <View>
+          <Text
+            className={`text-2xl font-bold ${isDark ? "text-white" : "text-slate-900"}`}
+          >
+            {jeepney.plate_number}
+          </Text>
+          <Text
+            className={`text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}
+          >
+            {jeepney.driver_name || "No driver assigned"}
+          </Text>
+        </View>
+        <StatusPill status={jeepney.status as any} dot isDark={isDark} />
+      </View>
+
+      <View className="flex-row gap-4 mb-4">
+        <View>
+          <Text
+            className={`text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}
+          >
+            Terminal
+          </Text>
+          <Text
+            className={`text-sm font-semibold ${isDark ? "text-white" : "text-slate-900"}`}
+          >
+            {terminalName}
+          </Text>
+        </View>
+        <View>
+          <Text
+            className={`text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}
+          >
+            Queue
+          </Text>
+          <Text
+            className={`text-sm font-semibold ${isDark ? "text-white" : "text-slate-900"}`}
+          >
+            #{jeepney.queue_position ?? "N/A"}
+          </Text>
+        </View>
+        <View>
+          <Text
+            className={`text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}
+          >
+            Occupancy
+          </Text>
+          <Text
+            className={`text-sm font-semibold ${isDark ? "text-white" : "text-slate-900"}`}
+          >
+            {occupancy}/{jeepney.capacity}
+          </Text>
+        </View>
+      </View>
+
+      <TouchableOpacity
+        className="bg-amber-500 py-3.5 rounded-xl items-center flex-row justify-center gap-2"
+        onPress={onNotify}
+        disabled={notifying}
+      >
+        {notifying ? (
+          <ActivityIndicator color="#fff" size="small" />
+        ) : (
+          <>
+            <AlertTriangle size={18} color="white" />
+            <Text className="text-white font-semibold">Notify Driver</Text>
+          </>
+        )}
+      </TouchableOpacity>
+    </Card>
+  );
+}
+
 // ─── JEEPNEY LIST ITEM ─────────────────────────────────────────────
 function JeepneyListItem({
   item,
+  onPress,
   onAlert,
 }: {
-  item: any;
-  onAlert: (jeepney: any) => void;
+  item: JeepneyWithOccupancy;
+  onPress: () => void;
+  onAlert: (jeepney: JeepneyWithOccupancy) => void;
 }) {
   const { isDark } = useTheme();
-  const loadPercent = Math.round(
-    (item.current_occupancy / item.capacity) * 100,
-  );
+  const occupancy = (item.front_count || 0) + (item.rear_count || 0);
+  const loadPercent = Math.round((occupancy / item.capacity) * 100);
   const borderColor = statusColorMap[item.status] || "border-slate-400";
+  const terminalName = item.terminal_id === 1 ? "📍 Donsol" : "📍 Daraga";
 
   return (
-    <Card className="mb-3 p-0 overflow-hidden">
-      <View className="flex-row">
+    <Card className="mb-2 p-0 overflow-hidden">
+      <TouchableOpacity
+        activeOpacity={0.7}
+        onPress={onPress}
+        className="flex-row"
+      >
         <View
           className={`w-1.5 ${borderColor}`}
           style={{ backgroundColor: borderColor.replace("border-", "") }}
         />
 
-        <View className="flex-1 flex-row items-center justify-between p-4">
+        <View className="flex-1 flex-row items-center justify-between p-3">
           <View className="flex-1">
             <View className="flex-row items-center gap-2">
               <Text
-                className={`font-semibold text-base ${isDark ? "text-white" : "text-slate-900"}`}
+                className={`font-semibold text-sm ${isDark ? "text-white" : "text-slate-900"}`}
               >
                 {item.plate_number}
               </Text>
-              <StatusPill status={item.status} dot isDark={isDark} />
+              <StatusPill
+                status={item.status as any}
+                dot
+                isDark={isDark}
+                size="small"
+              />
             </View>
             <Text
-              className={`text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}
+              className={`text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}
             >
-              {item.driver_name || "No driver assigned"}
+              {item.driver_name || "No driver"}
             </Text>
-            <View className="flex-row items-center gap-3 mt-0.5">
+            <View className="flex-row items-center gap-2 mt-0.5 flex-wrap">
               <Text
-                className={`text-xs ${isDark ? "text-slate-500" : "text-slate-400"}`}
+                className={`text-[10px] ${isDark ? "text-slate-500" : "text-slate-400"}`}
               >
-                {item.current_occupancy}/{item.capacity} passengers
+                {terminalName}
               </Text>
               <View className="w-1 h-1 rounded-full bg-slate-400" />
               <Text
-                className={`text-xs ${isDark ? "text-slate-500" : "text-slate-400"}`}
+                className={`text-[10px] ${isDark ? "text-slate-500" : "text-slate-400"}`}
+              >
+                {occupancy}/{item.capacity} passengers
+              </Text>
+              <View className="w-1 h-1 rounded-full bg-slate-400" />
+              <Text
+                className={`text-[10px] ${isDark ? "text-slate-500" : "text-slate-400"}`}
               >
                 {loadPercent}% full
               </Text>
@@ -156,7 +316,7 @@ function JeepneyListItem({
                 <>
                   <View className="w-1 h-1 rounded-full bg-slate-400" />
                   <Text
-                    className={`text-xs ${isDark ? "text-slate-500" : "text-slate-400"}`}
+                    className={`text-[10px] ${isDark ? "text-slate-500" : "text-slate-400"}`}
                   >
                     #{item.queue_position} in queue
                   </Text>
@@ -166,19 +326,19 @@ function JeepneyListItem({
           </View>
 
           <TouchableOpacity
-            className="w-10 h-10 rounded-full items-center justify-center bg-amber-500/10"
+            className="w-8 h-8 rounded-full items-center justify-center bg-amber-500/10"
             onPress={() => onAlert(item)}
           >
-            <AlertTriangle size={18} color="#f59e0b" />
+            <AlertTriangle size={16} color="#f59e0b" />
           </TouchableOpacity>
         </View>
-      </View>
+      </TouchableOpacity>
     </Card>
   );
 }
 
 // ─── TRIP LOG ITEM ──────────────────────────────────────────────────
-function TripLogItem({ item }: { item: any }) {
+function TripLogItem({ item }: { item: TripLog }) {
   const { isDark } = useTheme();
   const statusColors = {
     completed: {
@@ -198,13 +358,13 @@ function TripLogItem({ item }: { item: any }) {
 
   return (
     <View
-      className={`px-4 py-3 border-b ${isDark ? "border-slate-700" : "border-slate-100"}`}
+      className={`px-4 py-2.5 border-b ${isDark ? "border-slate-700" : "border-slate-100"}`}
     >
       <View className="flex-row items-center justify-between">
         <View className="flex-1">
           <View className="flex-row items-center gap-2">
             <Text
-              className={`font-medium ${isDark ? "text-white" : "text-slate-900"}`}
+              className={`font-medium text-sm ${isDark ? "text-white" : "text-slate-900"}`}
             >
               {item.jeepney_plate}
             </Text>
@@ -217,19 +377,19 @@ function TripLogItem({ item }: { item: any }) {
             </View>
           </View>
           <Text
-            className={`text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}
+            className={`text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}
           >
             {item.driver_name} · {item.route}
           </Text>
           <View className="flex-row items-center gap-2 mt-0.5">
             <Text
-              className={`text-xs ${isDark ? "text-slate-500" : "text-slate-400"}`}
+              className={`text-[10px] ${isDark ? "text-slate-500" : "text-slate-400"}`}
             >
               {new Date(item.started_at).toLocaleTimeString()}
             </Text>
             <View className="w-1 h-1 rounded-full bg-slate-400" />
             <Text
-              className={`text-xs ${isDark ? "text-slate-500" : "text-slate-400"}`}
+              className={`text-[10px] ${isDark ? "text-slate-500" : "text-slate-400"}`}
             >
               {item.passengers} passengers
             </Text>
@@ -248,7 +408,7 @@ function AlertModal({
   onSendAlert,
 }: {
   visible: boolean;
-  jeepneys: any[];
+  jeepneys: JeepneyWithOccupancy[];
   onClose: () => void;
   onSendAlert: (jeepneyId: string, message: string) => void;
 }) {
@@ -272,85 +432,99 @@ function AlertModal({
       animationType="slide"
       onRequestClose={onClose}
     >
-      <View className="flex-1 bg-black/50 justify-end">
-        <View
-          className={`${isDark ? "bg-slate-800" : "bg-white"} rounded-t-3xl p-6 max-h-[80%]`}
+      <TouchableOpacity
+        className="flex-1 bg-black/50 justify-end"
+        activeOpacity={1}
+        onPress={onClose}
+      >
+        <KeyboardAvoidingView
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          className="w-full"
         >
-          <View className="flex-row justify-between items-center mb-4">
-            <Text
-              className={`text-lg font-bold ${isDark ? "text-white" : "text-slate-900"}`}
-            >
-              Send Alert
-            </Text>
-            <TouchableOpacity onPress={onClose} className="p-1">
-              <X size={24} color={isDark ? "#94a3b8" : "#64748b"} />
-            </TouchableOpacity>
-          </View>
-
-          <Text
-            className={`text-sm mb-2 ${isDark ? "text-slate-400" : "text-slate-500"}`}
-          >
-            Select a jeepney to alert:
-          </Text>
-
-          <FlatList
-            data={jeepneys}
-            keyExtractor={(item) => item.id}
-            className="max-h-40"
-            renderItem={({ item }) => (
-              <TouchableOpacity
-                className={`flex-row items-center justify-between py-3 px-2 border-b ${isDark ? "border-slate-700" : "border-slate-100"}`}
-                onPress={() => setSelectedId(item.id)}
-              >
-                <View>
-                  <Text
-                    className={`font-medium ${isDark ? "text-white" : "text-slate-900"}`}
-                  >
-                    {item.plate_number}
-                  </Text>
-                  <Text
-                    className={`text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}
-                  >
-                    {item.driver_name || "No driver"} · {item.status}
-                  </Text>
-                </View>
-                {selectedId === item.id && (
-                  <View className="w-5 h-5 rounded-full bg-sky-500 items-center justify-center">
-                    <Text className="text-white text-xs">✓</Text>
-                  </View>
-                )}
-              </TouchableOpacity>
-            )}
-          />
-
-          <View
-            className={`mt-4 p-3 rounded-xl ${isDark ? "bg-slate-700" : "bg-slate-50"} border ${isDark ? "border-slate-600" : "border-slate-200"}`}
-          >
-            <TextInput
-              className={`text-base ${isDark ? "text-white" : "text-slate-900"}`}
-              placeholder="Alert message..."
-              placeholderTextColor={isDark ? "#64748b" : "#94a3b8"}
-              value={alertMessage}
-              onChangeText={setAlertMessage}
-              multiline
-              numberOfLines={3}
-            />
-          </View>
-
           <TouchableOpacity
-            className={`mt-4 py-3.5 rounded-xl flex-row items-center justify-center ${
-              selectedId && alertMessage.trim()
-                ? "bg-amber-500"
-                : "bg-slate-300"
-            }`}
-            onPress={handleSend}
-            disabled={!selectedId || !alertMessage.trim()}
+            activeOpacity={1}
+            onPress={(e) => e.stopPropagation()}
+            className={`${isDark ? "bg-slate-800" : "bg-white"} rounded-t-3xl p-6 max-h-[80%]`}
           >
-            <AlertTriangle size={20} color="white" />
-            <Text className="text-white font-semibold ml-2">Send Alert</Text>
+            <View className="flex-row justify-between items-center mb-4">
+              <Text
+                className={`text-lg font-bold ${isDark ? "text-white" : "text-slate-900"}`}
+              >
+                Send Alert
+              </Text>
+              <TouchableOpacity onPress={onClose} className="p-1">
+                <X size={24} color={isDark ? "#94a3b8" : "#64748b"} />
+              </TouchableOpacity>
+            </View>
+
+            <Text
+              className={`text-sm mb-2 ${isDark ? "text-slate-400" : "text-slate-500"}`}
+            >
+              Select a jeepney to alert:
+            </Text>
+
+            <FlatList
+              data={jeepneys}
+              keyExtractor={(item) => item.id}
+              className="max-h-40"
+              keyboardShouldPersistTaps="handled"
+              renderItem={({ item }) => (
+                <TouchableOpacity
+                  className={`flex-row items-center justify-between py-3 px-2 border-b ${isDark ? "border-slate-700" : "border-slate-100"}`}
+                  onPress={() => setSelectedId(item.id)}
+                >
+                  <View>
+                    <Text
+                      className={`font-medium text-sm ${isDark ? "text-white" : "text-slate-900"}`}
+                    >
+                      {item.plate_number}
+                    </Text>
+                    <Text
+                      className={`text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}
+                    >
+                      {item.driver_name || "No driver"} · {item.status}
+                    </Text>
+                  </View>
+                  {selectedId === item.id && (
+                    <View className="w-5 h-5 rounded-full bg-sky-500 items-center justify-center">
+                      <Text className="text-white text-xs">✓</Text>
+                    </View>
+                  )}
+                </TouchableOpacity>
+              )}
+            />
+
+            <View
+              className={`mt-4 p-3 rounded-xl ${isDark ? "bg-slate-700" : "bg-slate-50"} border ${isDark ? "border-slate-600" : "border-slate-200"}`}
+            >
+              <TextInput
+                className={`text-base ${isDark ? "text-white" : "text-slate-900"}`}
+                placeholder="Alert message..."
+                placeholderTextColor={isDark ? "#64748b" : "#94a3b8"}
+                value={alertMessage}
+                onChangeText={setAlertMessage}
+                multiline
+                numberOfLines={3}
+                returnKeyType="send"
+                onSubmitEditing={handleSend}
+              />
+            </View>
+
+            <TouchableOpacity
+              className={`mt-4 py-3.5 rounded-xl flex-row items-center justify-center ${
+                selectedId && alertMessage.trim()
+                  ? "bg-amber-500"
+                  : "bg-slate-300"
+              }`}
+              onPress={handleSend}
+              disabled={!selectedId || !alertMessage.trim()}
+            >
+              <AlertTriangle size={20} color="white" />
+              <Text className="text-white font-semibold ml-2">Send Alert</Text>
+            </TouchableOpacity>
           </TouchableOpacity>
-        </View>
-      </View>
+        </KeyboardAvoidingView>
+      </TouchableOpacity>
     </Modal>
   );
 }
@@ -358,27 +532,110 @@ function AlertModal({
 // ─── MAIN COMPONENT ──────────────────────────────────────────────────
 export default function DispatcherDashboard() {
   const { isDark } = useTheme();
-  const { user } = useAuthStore();
-  const {
-    jeepneys,
-    tripLogs,
-    stats,
-    loading,
-    refreshing,
-    error,
-    fetchData,
-    refresh,
-    setRefreshing,
-  } = useDispatcherStore();
+  const { user, refreshUser } = useAuthStore();
+  const terminalId = user?.terminalId ?? 1;
 
+  const [jeepneys, setJeepneys] = useState<JeepneyWithOccupancy[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [tripLogs, setTripLogs] = useState<TripLog[]>([]);
   const [alertModalVisible, setAlertModalVisible] = useState(false);
+  const [notifying, setNotifying] = useState(false);
 
-  // ─── FETCH ON MOUNT ──────────────────────────────────────────────
-  useEffect(() => {
-    if (user?.uid) {
-      fetchData();
+  // ─── FETCH JEEPNEYS WITH OCCUPANCY ──────────────────────────────
+  const fetchJeepneys = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+
+      const { data: jeepneyData, error: jeepneyError } = await supabase
+        .from("jeepneys")
+        .select("*")
+        .eq("terminal_id", terminalId)
+        .order("queue_position", { ascending: true, nullsFirst: false });
+
+      if (jeepneyError) throw jeepneyError;
+
+      if (!jeepneyData || jeepneyData.length === 0) {
+        setJeepneys([]);
+        setLoading(false);
+        return;
+      }
+
+      const jeepneyIds = jeepneyData.map((j: any) => j.id);
+      const { data: doorData } = await supabase
+        .from("door_counts")
+        .select("jeep_id, front_count, rear_count, updated_at")
+        .in("jeep_id", jeepneyIds)
+        .order("updated_at", { ascending: false });
+
+      const latestDoorMap = new Map<string, any>();
+      if (doorData) {
+        doorData.forEach((d) => {
+          if (!latestDoorMap.has(d.jeep_id)) {
+            latestDoorMap.set(d.jeep_id, d);
+          }
+        });
+      }
+
+      const merged: JeepneyWithOccupancy[] = jeepneyData.map((j: any) => {
+        const door = latestDoorMap.get(j.id);
+        return {
+          ...j,
+          front_count: door?.front_count || 0,
+          rear_count: door?.rear_count || 0,
+        };
+      });
+
+      setJeepneys(merged);
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
     }
-  }, [user?.uid, fetchData]);
+  }, [terminalId]);
+
+  // ─── FETCH TRIP LOGS ────────────────────────────────────────────
+  const fetchTripLogs = useCallback(async () => {
+    try {
+      const { data: tripsData, error } = await supabase
+        .from("trips")
+        .select(
+          `
+          id,
+          jeepney_id,
+          route,
+          status,
+          total_passengers as passengers,
+          departure_time as started_at,
+          arrival_time as ended_at,
+          jeepneys:jeepney_id (plate_number, driver_name)
+        `,
+        )
+        .order("departure_time", { ascending: false })
+        .limit(10);
+
+      if (error) throw error;
+
+      const logs: TripLog[] = (tripsData || []).map((t: any) => ({
+        id: t.id,
+        jeepney_id: t.jeepney_id,
+        jeepney_plate: t.jeepneys?.plate_number || "Unknown",
+        driver_name: t.jeepneys?.driver_name || "Unknown",
+        route: t.route || "Donsol ↔ Daraga",
+        status: t.status || "completed",
+        passengers: t.passengers || 0,
+        started_at: t.started_at,
+        ended_at: t.ended_at,
+      }));
+      setTripLogs(logs);
+    } catch (err: any) {
+      console.warn("Trip logs error:", err.message);
+      setTripLogs([]);
+    }
+  }, []);
 
   // ─── SEND ALERT ──────────────────────────────────────────────────
   const handleSendAlert = useCallback(
@@ -391,7 +648,6 @@ export default function DispatcherDashboard() {
           sent_at: new Date().toISOString(),
           status: "sent",
         });
-
         if (error) throw error;
         Alert.alert("Alert Sent", "Alert sent to jeepney successfully.");
       } catch (err: any) {
@@ -402,10 +658,92 @@ export default function DispatcherDashboard() {
     [user?.uid],
   );
 
-  // ─── REFRESH ──────────────────────────────────────────────────────
-  const handleRefresh = useCallback(() => {
-    refresh();
-  }, [refresh]);
+  // ─── NOTIFY DRIVER ──────────────────────────────────────────────
+  const handleNotifyDriver = useCallback(async () => {
+    if (!nextToDispatch) return;
+    Alert.alert(
+      "Notify Driver",
+      `Send notification to ${nextToDispatch.plate_number} (Driver: ${nextToDispatch.driver_name || "N/A"})?`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Send",
+          onPress: async () => {
+            setNotifying(true);
+            await handleSendAlert(
+              nextToDispatch.id,
+              "Please prepare for departure. You are next in queue.",
+            );
+            setNotifying(false);
+          },
+        },
+      ],
+    );
+  }, [nextToDispatch, handleSendAlert]);
+
+  // ─── COMPUTE NEXT TO DISPATCH ──────────────────────────────────
+  const nextToDispatch = useMemo(() => {
+    const queued = jeepneys
+      .filter((j) => j.queue_position !== null && j.status !== "inactive")
+      .sort((a, b) => (a.queue_position || 999) - (b.queue_position || 999));
+    return queued[0] || null;
+  }, [jeepneys]);
+
+  // ─── COMPUTE STATS ──────────────────────────────────────────────
+  const stats = useMemo(() => {
+    const total = jeepneys.length;
+    const online = jeepneys.filter((j) =>
+      ["active", "en_route", "loading"].includes(j.status),
+    ).length;
+    const waiting = jeepneys.filter((j) => j.status === "waiting").length;
+    const queueLength = jeepneys.filter(
+      (j) => j.queue_position !== null,
+    ).length;
+    const activeTrips = jeepneys.filter((j) =>
+      ["en_route", "arrived"].includes(j.status),
+    ).length;
+    return {
+      totalJeepneys: total,
+      onlineJeepneys: online,
+      waitingDrivers: waiting,
+      queueLength,
+      activeTrips,
+    };
+  }, [jeepneys]);
+
+  // ─── REFRESH (includes terminal refresh) ──────────────────────
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await refreshUser(); // 👈 pulls fresh preferred_terminal
+    await Promise.all([fetchJeepneys(), fetchTripLogs()]);
+    setRefreshing(false);
+  }, [refreshUser, fetchJeepneys, fetchTripLogs]);
+
+  // ─── SUBSCRIPTIONS ──────────────────────────────────────────────
+  useEffect(() => {
+    refreshUser().then(() => {
+      fetchJeepneys();
+      fetchTripLogs();
+    });
+
+    const channel = supabase
+      .channel("dispatcher-dashboard")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "jeepneys" },
+        () => fetchJeepneys(),
+      )
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "door_counts" },
+        () => fetchJeepneys(),
+      )
+      .subscribe();
+
+    return () => {
+      channel?.unsubscribe();
+    };
+  }, [refreshUser, fetchJeepneys, fetchTripLogs]);
 
   // ─── RENDER STATES ──────────────────────────────────────────────
   if (loading && jeepneys.length === 0) {
@@ -413,9 +751,9 @@ export default function DispatcherDashboard() {
       <View
         className={`flex-1 items-center justify-center ${isDark ? "bg-slate-900" : "bg-slate-50"}`}
       >
-        <ActivityIndicator size="large" color="#0ea5e9" />
+        <ActivityIndicator size="large" color={theme.colors.primary[500]} />
         <Text
-          className={`mt-3 ${isDark ? "text-slate-400" : "text-slate-500"}`}
+          className={`mt-4 ${isDark ? "text-slate-400" : "text-slate-500"}`}
         >
           Loading dashboard...
         </Text>
@@ -431,7 +769,7 @@ export default function DispatcherDashboard() {
         <Text className="text-red-500 text-lg text-center">{error}</Text>
         <TouchableOpacity
           className="mt-4 bg-sky-500 px-6 py-3 rounded-xl"
-          onPress={fetchData}
+          onPress={fetchJeepneys}
         >
           <Text className="text-white font-semibold">Retry</Text>
         </TouchableOpacity>
@@ -446,8 +784,8 @@ export default function DispatcherDashboard() {
         <RefreshControl
           refreshing={refreshing}
           onRefresh={handleRefresh}
-          tintColor="#0ea5e9"
-          colors={["#0ea5e9"]}
+          tintColor={theme.colors.primary[500]}
+          colors={[theme.colors.primary[500]]}
         />
       }
       showsVerticalScrollIndicator={false}
@@ -468,14 +806,21 @@ export default function DispatcherDashboard() {
         <Text
           className={`text-xs ${isDark ? "text-slate-400" : "text-slate-400"}`}
         >
-          Daraga Terminal
+          {terminalId === 1 ? "Donsol" : "Daraga"} Terminal
         </Text>
       </View>
+
+      {/* ─── NEXT TO NOTIFY ───────────────────────────────────────── */}
+      <NextToNotifyCard
+        jeepney={nextToDispatch}
+        onNotify={handleNotifyDriver}
+        notifying={notifying}
+      />
 
       {/* ─── STATS GRID ──────────────────────────────────────────── */}
       <View className="flex-row flex-wrap justify-between gap-3 mb-5">
         <StatCard
-          label="Total Jeepneys"
+          label="Total"
           value={stats.totalJeepneys}
           icon={Bus}
           color="sky"
@@ -516,6 +861,12 @@ export default function DispatcherDashboard() {
               primary: true,
             },
             {
+              label: "Live Map",
+              route: "/staff/(dispatcher)/map",
+              icon: MapPin,
+              primary: false,
+            },
+            {
               label: "Send Alert",
               icon: AlertTriangle,
               primary: false,
@@ -531,7 +882,6 @@ export default function DispatcherDashboard() {
             const Icon = action.icon;
             const onPress =
               action.action || (() => router.push(action.route as any));
-
             return (
               <TouchableOpacity
                 key={action.label}
@@ -543,16 +893,20 @@ export default function DispatcherDashboard() {
                       : "bg-white"
                 } border ${isDark ? "border-slate-700" : "border-slate-200"}`}
                 onPress={onPress}
+                style={{
+                  shadowColor: action.primary ? "#0ea5e9" : "#000",
+                  shadowOffset: { width: 0, height: 2 },
+                  shadowOpacity: action.primary ? 0.3 : 0.05,
+                  shadowRadius: 4,
+                  elevation: 2,
+                }}
               >
-                <Icon size={20} color={action.primary ? "#fff" : "#0ea5e9"} />
+                <Icon
+                  size={20}
+                  color={action.primary ? "#fff" : theme.colors.primary[500]}
+                />
                 <Text
-                  className={`text-sm font-semibold mt-2 ${
-                    action.primary
-                      ? "text-white"
-                      : isDark
-                        ? "text-white"
-                        : "text-slate-900"
-                  }`}
+                  className={`text-sm font-semibold mt-2 ${action.primary ? "text-white" : isDark ? "text-white" : "text-slate-900"}`}
                 >
                   {action.label}
                 </Text>
@@ -580,7 +934,7 @@ export default function DispatcherDashboard() {
           <Text
             className={`text-center py-4 ${isDark ? "text-slate-400" : "text-slate-400"}`}
           >
-            No jeepneys available
+            No jeepneys at your terminal
           </Text>
         ) : (
           <FlatList
@@ -588,6 +942,9 @@ export default function DispatcherDashboard() {
             renderItem={({ item }) => (
               <JeepneyListItem
                 item={item}
+                onPress={() =>
+                  router.push(`/staff/(dispatcher)/jeepney/${item.id}` as any)
+                }
                 onAlert={() => setAlertModalVisible(true)}
               />
             )}

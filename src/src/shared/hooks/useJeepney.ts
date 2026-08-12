@@ -1,5 +1,6 @@
-// src/shared/hooks/useJeepneys.ts
+// src/shared/hooks/useJeepney.ts
 import { supabase } from "@/src/shared/config/supabase";
+import type { RealtimeChannel } from "@supabase/supabase-js";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 export interface Jeepney {
@@ -18,16 +19,16 @@ export function useJeepneys() {
   const [data, setData] = useState<Jeepney[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const channelRef = useRef<any>(null);
+  const channelRef = useRef<RealtimeChannel | null>(null);
+  const fetchJeepneysRef = useRef<() => Promise<void>>();
 
   const fetchJeepneys = useCallback(async () => {
     try {
       setLoading(true);
+      setError(null);
       const { data: jeepneys, error: jeepneyError } = await supabase
         .from("jeepneys")
-        .select(
-          "id, plate_number, driver_name, status, current_occupancy, capacity, terminal_id, queue_position, bracket",
-        )
+        .select("*")
         .order("bracket", { ascending: true })
         .order("queue_position", { ascending: true, nullsLast: true });
 
@@ -40,21 +41,49 @@ export function useJeepneys() {
     }
   }, []);
 
+  // Store latest fetch function in ref
   useEffect(() => {
-    fetchJeepneys();
+    fetchJeepneysRef.current = fetchJeepneys;
+  }, [fetchJeepneys]);
+
+  // ─── Set up realtime subscription once ──────────────────────────
+  useEffect(() => {
+    // Clean up any existing subscription
+    if (channelRef.current) {
+      channelRef.current.unsubscribe();
+      channelRef.current = null;
+    }
+
     const channel = supabase
       .channel("jeepneys-all")
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "jeepneys" },
-        () => fetchJeepneys(),
+        () => {
+          console.log("🔄 Jeepney change detected, refetching...");
+          if (fetchJeepneysRef.current) {
+            fetchJeepneysRef.current();
+          }
+        },
       )
-      .subscribe();
+      .subscribe((status) => {
+        console.log("📡 Jeepney subscription status:", status);
+      });
+
     channelRef.current = channel;
+
     return () => {
-      channel?.unsubscribe();
+      if (channelRef.current) {
+        channelRef.current.unsubscribe();
+        channelRef.current = null;
+      }
     };
-  }, [fetchJeepneys]);
+  }, []); // Empty dependency array ensures this runs once on mount
+
+  // ─── Initial fetch ──────────────────────────────────────────────
+  useEffect(() => {
+    fetchJeepneys();
+  }, []);
 
   return { data, loading, error, refetch: fetchJeepneys };
 }

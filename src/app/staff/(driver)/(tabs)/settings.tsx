@@ -75,8 +75,10 @@ export default function SettingsScreen() {
 
   // Language modal
   const [languageModalVisible, setLanguageModalVisible] = useState(false);
-
   const languages = ["English", "Tagalog", "Bicolano", "Cebuano"];
+
+  // Logout modal
+  const [logoutModalVisible, setLogoutModalVisible] = useState(false);
 
   useEffect(() => {
     fetchProfileData();
@@ -151,25 +153,16 @@ export default function SettingsScreen() {
     setEditModalVisible(true);
   };
 
-  const handleLogout = async () => {
-    Alert.alert(
-      "Logout",
-      "Are you sure you want to logout?",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Logout",
-          style: "destructive",
-          onPress: async () => {
-            await AuthService.signOut();
-            logout();
-            router.replace("/staff/login");
-            ChatService.clearCache();
-          },
-        },
-      ],
-      { cancelable: true },
-    );
+  const handleLogout = () => {
+    setLogoutModalVisible(true);
+  };
+
+  const confirmLogout = async () => {
+    await AuthService.signOut();
+    logout();
+    router.replace("/staff/login");
+    ChatService.clearCache();
+    setLogoutModalVisible(false);
   };
 
   const handleToggleNotifications = (value: boolean) => {
@@ -857,6 +850,73 @@ export default function SettingsScreen() {
                 </>
               )}
             </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* ─── Logout Confirmation Modal ───────────────────────────── */}
+      <Modal
+        visible={logoutModalVisible}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setLogoutModalVisible(false)}
+      >
+        <View className="flex-1 justify-end bg-black/50">
+          <View
+            className={`rounded-t-3xl p-6 ${
+              isDark ? "bg-slate-800" : "bg-white"
+            }`}
+          >
+            <View className="items-center mb-6">
+              <View
+                className={`w-16 h-16 rounded-full items-center justify-center mb-3 ${
+                  isDark ? "bg-red-900/30" : "bg-red-50"
+                }`}
+              >
+                <LogOut size={32} color={isDark ? "#f87171" : "#ef4444"} />
+              </View>
+              <Text
+                className={`text-xl font-bold ${
+                  isDark ? "text-white" : "text-slate-900"
+                }`}
+              >
+                Logout
+              </Text>
+              <Text
+                className={`text-sm mt-1 ${
+                  isDark ? "text-slate-400" : "text-slate-500"
+                }`}
+              >
+                Are you sure you want to logout?
+              </Text>
+            </View>
+
+            <View className="flex-row gap-3">
+              <TouchableOpacity
+                className={`flex-1 py-3.5 rounded-xl border ${
+                  isDark
+                    ? "border-slate-600 bg-slate-700"
+                    : "border-slate-200 bg-slate-100"
+                }`}
+                onPress={() => setLogoutModalVisible(false)}
+              >
+                <Text
+                  className={`text-center font-semibold ${
+                    isDark ? "text-slate-200" : "text-slate-700"
+                  }`}
+                >
+                  Cancel
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                className="flex-1 py-3.5 rounded-xl bg-red-500 flex-row items-center justify-center"
+                onPress={confirmLogout}
+              >
+                <LogOut size={18} color="white" />
+                <Text className="text-white font-semibold ml-2">Logout</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </Modal>

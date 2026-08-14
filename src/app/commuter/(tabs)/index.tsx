@@ -25,6 +25,8 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import OceanBackground from "../../../src/shared/components/clay/OceanBackground";
 import { colors } from "../../../src/shared/constants/theme";
 import { useCommuterDashboard } from "../../../src/shared/hooks/useCommuterDashboard";
+import { useCurrentUserId } from "../../../src/shared/hooks/useCurrentUserId";
+import { useNotifications } from "../../../src/shared/hooks/useNotification";
 
 /* ============================================================
    HELPERS
@@ -462,8 +464,6 @@ export default function CommuterDashboardScreen() {
     nextJeepney,
     queueCount,
     activities,
-    notifications,
-    unreadNotificationCount,
     loading,
     refreshing,
     error,
@@ -471,6 +471,22 @@ export default function CommuterDashboardScreen() {
     refresh,
     terminalNames,
   } = useCommuterDashboard();
+
+  /* ==========================================================
+     NOTIFICATIONS
+
+     Called directly here — same hook, same pattern as
+     CommuterNotificationsScreen — instead of going through
+     useCommuterDashboard's own (broken) notification wiring.
+     This guarantees the bell badge and the notifications
+     screen always agree, since they're now reading from the
+     exact same code path.
+  ========================================================== */
+
+  const notificationsUserId = useCurrentUserId();
+
+  const { notifications, unreadCount: unreadNotificationCount } =
+    useNotifications(notificationsUserId);
 
   /* ==========================================================
      TERMINAL COUNTS

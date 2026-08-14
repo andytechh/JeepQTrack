@@ -2,6 +2,7 @@
 
 import { supabase } from "@/src/shared/config/supabase";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useNotifications } from "./useNotification";
 
 /* ============================================================
    TYPES
@@ -76,14 +77,6 @@ export interface QueueActivity {
   timestamp: string;
 }
 
-export interface DashboardNotification {
-  id: string;
-  title: string;
-  message: string;
-  read: boolean;
-  created_at: string;
-}
-
 /* ============================================================
    RETURN TYPE
 ============================================================ */
@@ -103,7 +96,7 @@ export interface UseCommuterDashboardReturn {
 
   activities: QueueActivity[];
 
-  notifications: DashboardNotification[];
+  notifications: ReturnType<typeof useNotifications>["notifications"];
 
   unreadNotificationCount: number;
 
@@ -233,10 +226,6 @@ export function useCommuterDashboard(): UseCommuterDashboardReturn {
 
   const [activities, setActivities] = useState<QueueActivity[]>([]);
 
-  const [notifications, setNotifications] = useState<DashboardNotification[]>(
-    [],
-  );
-
   const [loading, setLoading] = useState(true);
 
   const [refreshing, setRefreshing] = useState(false);
@@ -244,6 +233,55 @@ export function useCommuterDashboard(): UseCommuterDashboardReturn {
   const [error, setError] = useState<string | null>(null);
 
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+
+  /* ==========================================================
+     CURRENT USER ID
+
+     Notifications now come entirely from useNotifications,
+     which needs a userId to key its own realtime channel and
+     query. We track it locally here (and keep it in sync with
+     auth state) instead of re-fetching it ad hoc.
+  ========================================================== */
+
+  const [userId, setUserId] = useState<string | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+
+    getAuthenticatedUserId().then((id) => {
+      if (mounted) {
+        setUserId(id);
+      }
+    });
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (mounted) {
+        setUserId(session?.user?.id ?? null);
+      }
+    });
+
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
+  }, []);
+
+  /* ==========================================================
+     NOTIFICATIONS
+
+     Single source of truth shared with the notifications
+     screen. Handles its own realtime channel safely (unique
+     per hook instance), so the dashboard bell badge and the
+     notifications list always agree.
+  ========================================================== */
+
+  const {
+    notifications,
+    unreadCount: unreadNotificationCount,
+    markAsRead: markNotificationAsRead,
+  } = useNotifications(userId);
 
   /* ==========================================================
      LOAD PROFILE
@@ -499,61 +537,16 @@ export function useCommuterDashboard(): UseCommuterDashboardReturn {
   }, []);
 
   /* ==========================================================
-     LOAD NOTIFICATIONS
-  ========================================================== */
-
-  const loadNotifications = useCallback(
-    async (userId: string): Promise<DashboardNotification[]> => {
-      if (!userId) {
-        return [];
-      }
-
-      try {
-        const { data, error } = await supabase
-          .from("notifications")
-          .select(
-            `
-              id,
-              title,
-              message,
-              read,
-              created_at
-            `,
-          )
-          .eq("user_id", userId)
-          .order("created_at", {
-            ascending: false,
-          })
-          .limit(5);
-
-        if (error) {
-          console.warn("Notification fetch error:", error.message);
-
-          return [];
-        }
-
-        return (data ?? []).map((notification) => ({
-          id: notification.id,
-
-          title: notification.title ?? "Notification",
-
-          message: notification.message ?? "",
-
-          read: notification.read ?? false,
-
-          created_at: notification.created_at ?? new Date().toISOString(),
-        }));
-      } catch (error) {
-        console.warn("loadNotifications exception:", error);
-
-        return [];
-      }
-    },
-    [],
-  );
-
-  /* ==========================================================
      LOAD DASHBOARD
+
+     Notifications are intentionally NOT loaded here anymore —
+     useNotifications owns that data and its own realtime
+     channel. Loading it here too was both duplicating fetches
+     and creating a second realtime channel with a colliding
+     name (commuter-notifications-${userId}), which is what
+     caused the "cannot add postgres_changes callbacks after
+     subscribe()" crash whenever this hook and the notifications
+     screen were mounted at the same time.
   ========================================================== */
 
   const loadDashboard = useCallback(
@@ -567,33 +560,21 @@ export function useCommuterDashboard(): UseCommuterDashboardReturn {
 
         setError(null);
 
-        const userId = await getAuthenticatedUserId();
+        const currentUserId = await getAuthenticatedUserId();
 
-        /*
-         * Profile and notifications require
-         * an authenticated user.
-         *
-         * Queue does not.
-         */
+        const [profileResult, queueResult, activityResult] = await Promise.all([
+          currentUserId ? loadProfile(currentUserId) : Promise.resolve(null),
 
-        const [profileResult, queueResult, activityResult, notificationResult] =
-          await Promise.all([
-            userId ? loadProfile(userId) : Promise.resolve(null),
+          loadQueue(),
 
-            loadQueue(),
-
-            loadActivities(),
-
-            userId ? loadNotifications(userId) : Promise.resolve([]),
-          ]);
+          loadActivities(),
+        ]);
 
         setProfile(profileResult);
 
         setJeepneys(queueResult);
 
         setActivities(activityResult);
-
-        setNotifications(notificationResult);
 
         setLastUpdated(new Date());
       } catch (error: any) {
@@ -605,7 +586,7 @@ export function useCommuterDashboard(): UseCommuterDashboardReturn {
         setRefreshing(false);
       }
     },
-    [loadProfile, loadQueue, loadActivities, loadNotifications],
+    [loadProfile, loadQueue, loadActivities],
   );
 
   /* ==========================================================
@@ -640,46 +621,6 @@ export function useCommuterDashboard(): UseCommuterDashboardReturn {
 
     return () => {
       supabase.removeChannel(channel);
-    };
-  }, [loadDashboard]);
-
-  /* ==========================================================
-     REALTIME NOTIFICATIONS
-  ========================================================== */
-
-  useEffect(() => {
-    let channel: ReturnType<typeof supabase.channel> | null = null;
-
-    const setup = async () => {
-      const userId = await getAuthenticatedUserId();
-
-      if (!userId) {
-        return;
-      }
-
-      channel = supabase
-        .channel(`commuter-notifications-${userId}`)
-        .on(
-          "postgres_changes",
-          {
-            event: "*",
-            schema: "public",
-            table: "notifications",
-            filter: `user_id=eq.${userId}`,
-          },
-          () => {
-            loadDashboard(true);
-          },
-        )
-        .subscribe();
-    };
-
-    setup();
-
-    return () => {
-      if (channel) {
-        supabase.removeChannel(channel);
-      }
     };
   }, [loadDashboard]);
 
@@ -742,56 +683,11 @@ export function useCommuterDashboard(): UseCommuterDashboardReturn {
   const nextJeepney = jeepneys.length > 0 ? jeepneys[0] : null;
 
   /* ==========================================================
-     UNREAD NOTIFICATIONS
-  ========================================================== */
-
-  const unreadNotificationCount = useMemo(() => {
-    return notifications.filter((notification) => !notification.read).length;
-  }, [notifications]);
-
-  /* ==========================================================
-     MARK NOTIFICATION AS READ
-  ========================================================== */
-
-  const markNotificationAsRead = useCallback(
-    async (notificationId: string): Promise<boolean> => {
-      try {
-        const { error } = await supabase
-          .from("notifications")
-          .update({
-            read: true,
-          })
-          .eq("id", notificationId);
-
-        if (error) {
-          console.error("Failed to mark notification as read:", error);
-
-          return false;
-        }
-
-        setNotifications((previous) =>
-          previous.map((notification) =>
-            notification.id === notificationId
-              ? {
-                  ...notification,
-                  read: true,
-                }
-              : notification,
-          ),
-        );
-
-        return true;
-      } catch (error) {
-        console.error("markNotificationAsRead exception:", error);
-
-        return false;
-      }
-    },
-    [],
-  );
-
-  /* ==========================================================
      REFRESH
+
+     Refreshes both dashboard data (profile/queue/activity) and
+     notifications, so pull-to-refresh on the dashboard updates
+     the bell badge too.
   ========================================================== */
 
   const refresh = useCallback(async () => {

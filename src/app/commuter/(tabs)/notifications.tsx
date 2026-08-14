@@ -73,7 +73,7 @@ export default function CommuterNotificationsScreen() {
     return (
       <OceanBackground>
         <SafeAreaView className="flex-1">
-          <View className="flex-1 px-6">
+          <View className="flex-1 px-4">
             <Header
               unreadCount={0}
               onMarkAll={handleMarkAllAsRead}
@@ -457,110 +457,45 @@ function Header({
   markingAll: boolean;
 }) {
   return (
-    <View className="pt-3">
-      <View className="flex-row items-center justify-between">
-        <View className="flex-row items-center">
-          <View
-            className="h-[52px] w-[52px] items-center justify-center rounded-[18px]"
-            style={clayStyle()}
-          >
-            <View
-              className="h-[38px] w-[38px] items-center justify-center rounded-full"
-              style={{
-                backgroundColor: "#E0F2FE",
-                borderWidth: 1,
-                borderColor: "rgba(255,255,255,0.9)",
-              }}
-            >
-              <Bell size={20} color={colors.primaryDark} strokeWidth={2.4} />
-            </View>
-          </View>
+    <View className=" pt-4">
+      <View className="flex-row items-start justify-between">
+        <View className="flex-1">
+          <Text className="text-[11px] font-bold uppercase tracking-[1px] text-ocean-700">
+            SMART QUEUE
+          </Text>
 
-          <View className="ml-3">
-            <Text className="text-[11px] font-bold uppercase tracking-[1.4px] text-ocean-700">
-              Smart Queue
-            </Text>
+          <Text className="mt-1 text-[28px] font-extrabold text-ink-dark">
+            Notifications
+          </Text>
 
-            <Text className="mt-0.5 text-[24px] font-extrabold text-ink-dark">
-              Notifications
-            </Text>
-          </View>
+          <Text className="mt-2 text-[12px] font-medium text-ink-secondary">
+            Stay updated with your commute.
+          </Text>
         </View>
 
-        {unreadCount > 0 && (
-          <View className="items-end">
-            <View
-              className="min-w-[32px] items-center rounded-full px-2.5 py-1.5"
-              style={{
-                backgroundColor: "#38BDF8",
-                borderWidth: 1,
-                borderColor: "rgba(255,255,255,0.9)",
-                shadowColor: "#000",
-                shadowOffset: {
-                  width: 0,
-                  height: 2,
-                },
-                shadowOpacity: 0.08,
-                shadowRadius: 4,
-                elevation: 2,
-              }}
-            >
-              <Text className="text-[11px] font-extrabold text-white">
-                {unreadCount > 99 ? "99+" : unreadCount}
+        <Pressable
+          disabled={markingAll || unreadCount === 0}
+          onPress={onMarkAll}
+          className="ml-3 h-[48px] w-[48px] items-center justify-center rounded-[17px] border border-white/90 bg-clay-surface shadow-clay-sm"
+        >
+          {markingAll ? (
+            <ActivityIndicator size="small" color={colors.primaryDark} />
+          ) : (
+            <Bell size={21} color={colors.primaryDark} strokeWidth={2.2} />
+          )}
+
+          {unreadCount > 0 ? (
+            <View className="absolute right-[-2px] top-[-2px] h-[17px] min-w-[17px] items-center justify-center rounded-full bg-red-500 px-1">
+              <Text className="text-[8px] font-extrabold text-white">
+                {unreadCount > 9 ? "9+" : unreadCount}
               </Text>
             </View>
-
-            <Text className="mt-1 text-[9px] font-semibold text-ink-muted">
-              unread
-            </Text>
-          </View>
-        )}
-      </View>
-
-      <View className="mt-4 flex-row items-center justify-between">
-        <Text className="text-[12px] text-ink-secondary">
-          Stay updated with your commute.
-        </Text>
-
-        {unreadCount > 0 && (
-          <Pressable
-            disabled={markingAll}
-            onPress={onMarkAll}
-            className="flex-row items-center rounded-full px-3 py-2"
-            style={{
-              backgroundColor: "#FFFFFF",
-              borderWidth: 1,
-              borderColor: "rgba(255,255,255,0.95)",
-              shadowColor: "#000",
-              shadowOffset: {
-                width: 0,
-                height: 2,
-              },
-              shadowOpacity: 0.045,
-              shadowRadius: 4,
-              elevation: 1,
-            }}
-          >
-            {markingAll ? (
-              <ActivityIndicator size="small" color={colors.primaryDark} />
-            ) : (
-              <CheckCheck
-                size={15}
-                color={colors.primaryDark}
-                strokeWidth={2.4}
-              />
-            )}
-
-            <Text className="ml-1.5 text-[10px] font-extrabold text-ocean-700">
-              Mark all read
-            </Text>
-          </Pressable>
-        )}
+          ) : null}
+        </Pressable>
       </View>
     </View>
   );
 }
-
 function ErrorState({
   message,
   onRetry,

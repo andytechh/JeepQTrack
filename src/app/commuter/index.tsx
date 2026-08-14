@@ -1,7 +1,7 @@
 import { router } from "expo-router";
 import { ChevronRight, MapPin } from "lucide-react-native";
 import { useEffect, useState } from "react";
-import { ActivityIndicator, Pressable, Text, View } from "react-native";
+import { ActivityIndicator, Image, Pressable, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import OceanBackground from "../../src/shared/components/clay/OceanBackground";
@@ -73,8 +73,9 @@ export default function CommuterEntry() {
               <MapPin size={14} color={colors.primaryDark} />
 
               <Text className="ml-1 text-[12px] font-medium text-ink-secondary">
-                Donsol → Daraga
+                Donsol - Daraga
               </Text>
+              <MapPin size={14} color={colors.primaryDark} />
             </View>
           </View>
 
@@ -82,7 +83,10 @@ export default function CommuterEntry() {
           <View className="items-center">
             <View className="mb-8 h-[220px] w-[220px] items-center justify-center rounded-full bg-ocean-100/70">
               <View className="h-[175px] w-[175px] items-center justify-center rounded-full bg-ocean-200/80 shadow-clay">
-                <Text className="text-[72px]">🚐</Text>
+                <Image
+                  source={require("../../../assets/images/logo.png")}
+                  className="w-40 h-40 rounded-full border-2 border-blue-500"
+                />
               </View>
             </View>
 

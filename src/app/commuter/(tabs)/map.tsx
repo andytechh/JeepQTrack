@@ -10,7 +10,7 @@ import {
   Users,
 } from "lucide-react-native";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 
 import {
   ActivityIndicator,
@@ -110,7 +110,16 @@ export default function CommuterMapScreen() {
 
   const [selected, setSelected] = useState<CommuterJeepneyMarker | null>(null);
 
+  // Tracks the selected jeepney id synchronously (unlike `selected` state, which updates
+  // through React's render cycle - WebView messages arrive as separate async events and
+  // can race a stale closure over `selected`, silently dropping the ETA that follows a tap).
+  const selectedIdRef = useRef<string | null>(null);
+
   const [eta, setEta] = useState<JeepneyETA | null>(null);
+
+  // True once we know the route resolved via the straight-line fallback (OSRM unreachable)
+  // rather than the real road route - surfaced so ETA numbers can be flagged as approximate.
+  const [routeApproximate, setRouteApproximate] = useState(false);
 
   /* ==========================================================
      KEEP SELECTED JEEP UPDATED
@@ -127,6 +136,8 @@ export default function CommuterMapScreen() {
       setSelected(updated);
     } else {
       setSelected(null);
+
+      selectedIdRef.current = null;
 
       setEta(null);
     }
@@ -147,6 +158,23 @@ export default function CommuterMapScreen() {
     );
   }, [markers]);
 
+  const handleRouteStatus = React.useCallback(
+    (status: { ready: boolean; approximate?: boolean; error?: string }) => {
+      if (status.ready) {
+        setRouteApproximate(Boolean(status.approximate));
+
+        if (status.approximate) {
+          console.warn(
+            "⚠️ Map is using an approximate straight-line route - the real road route could not be loaded.",
+          );
+        }
+      } else if (status.error) {
+        console.error("❌ Route error:", status.error);
+      }
+    },
+    [],
+  );
+
   /* ==========================================================
      MARKER PRESS
   ========================================================== */
@@ -162,6 +190,8 @@ export default function CommuterMapScreen() {
 
     setSelected(jeepney);
 
+    selectedIdRef.current = jeepneyId;
+
     setEta(null);
   };
 
@@ -169,19 +199,18 @@ export default function CommuterMapScreen() {
      ETA CALLBACK
   ========================================================== */
 
-  const handleJeepneyETA = React.useCallback(
-    (newEta: JeepneyETA) => {
-      console.log("🕐 ETA RECEIVED:", newEta);
+  const handleJeepneyETA = React.useCallback((newEta: JeepneyETA) => {
+    console.log("🕐 ETA RECEIVED:", newEta);
 
-      /*
-       * Only accept ETA for selected jeepney.
-       */
-      if (selected && newEta.jeepneyId === selected.id) {
-        setEta(newEta);
-      }
-    },
-    [selected],
-  );
+    /*
+     * Only accept ETA for the currently selected jeepney. Reads from a ref (not the
+     * `selected` state closure) so this can't race the async WebView message against
+     * React's render cycle.
+     */
+    if (selectedIdRef.current && newEta.jeepneyId === selectedIdRef.current) {
+      setEta(newEta);
+    }
+  }, []);
 
   /* ==========================================================
      LOADING
@@ -297,6 +326,8 @@ export default function CommuterMapScreen() {
 
           onJeepneyETA={handleJeepneyETA}
 
+          onRouteStatus={handleRouteStatus}
+
           showControls={true}
 
           enableRealtime={true}
@@ -402,7 +433,7 @@ export default function CommuterMapScreen() {
 
         {/* ETA */}
 
-        {selected && <ETASection eta={eta} />}
+        {selected && <ETASection eta={eta} approximate={routeApproximate} />}
 
         {/* LAST UPDATE */}
 
@@ -436,7 +467,13 @@ export default function CommuterMapScreen() {
    ETA SECTION
 ============================================================ */
 
-function ETASection({ eta }: { eta: JeepneyETA | null }) {
+function ETASection({
+  eta,
+  approximate,
+}: {
+  eta: JeepneyETA | null;
+  approximate?: boolean;
+}) {
   if (!eta) {
     return (
       <View className="mt-3 rounded-[24px] border border-white bg-white p-4 shadow-clay-floating">
@@ -562,8 +599,10 @@ function ETASection({ eta }: { eta: JeepneyETA | null }) {
 
       <Text className="mt-3 text-[9px] leading-4 text-slate-400">
         ETA uses the jeepney's live GPS speed and its remaining distance along
-        the actual Donsol–Daraga road route. A 20-minute allowance is added for
-        stops, loading, and normal delays.
+        {approximate
+          ? " an approximate straight-line route (the live road route is currently unavailable)"
+          : " the actual Donsol–Daraga road route"}
+        . A 20-minute allowance is added for stops, loading, and normal delays.
       </Text>
     </View>
   );

@@ -1,215 +1,250 @@
-import { Tabs } from "expo-router";
-import React, { useEffect, useRef } from "react";
-import { Animated, Pressable, Text, View } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { Bell, House, Map, Ticket, UserRound } from "lucide-react-native";
+import { Platform, Text, TouchableOpacity, View } from "react-native";
+import { useTheme } from "../../../shared/context/ThemeContext";
 
-import { Bell, House, Map, User, Users } from "lucide-react-native";
-
-import { colors, spacing } from "../../constants/theme";
-
-type TabName = "index" | "queue" | "map" | "notifications" | "profile";
-
-interface ClayTabBarProps {
-  state: any;
-  descriptors: any;
-  navigation: any;
-}
-
-const tabs: {
-  name: TabName;
-  label: string;
-  icon: React.ComponentType<any>;
-}[] = [
-  {
-    name: "index",
-    label: "Home",
-    icon: House,
-  },
-  {
-    name: "queue",
-    label: "Queue",
-    icon: Users,
-  },
-  {
-    name: "map",
-    label: "Map",
-    icon: Map,
-  },
-  {
-    name: "notifications",
-    label: "Alerts",
-    icon: Bell,
-  },
-  {
-    name: "profile",
-    label: "Profile",
-    icon: User,
-  },
-];
-
-function ClayTab({
-  active,
-  label,
-  Icon,
-  onPress,
-  badge,
-}: {
-  active: boolean;
-  label: string;
-  Icon: React.ComponentType<any>;
-  onPress: () => void;
-  badge?: number;
-}) {
-  const scale = useRef(new Animated.Value(active ? 1 : 0.94)).current;
-  const activeScale = useRef(new Animated.Value(active ? 1 : 0)).current;
-
-  useEffect(() => {
-    Animated.parallel([
-      Animated.spring(scale, {
-        toValue: active ? 1 : 0.94,
-        useNativeDriver: true,
-        speed: 24,
-        bounciness: 7,
-      }),
-      Animated.spring(activeScale, {
-        toValue: active ? 1 : 0,
-        useNativeDriver: true,
-        speed: 22,
-        bounciness: 7,
-      }),
-    ]).start();
-  }, [active]);
-
-  const handlePressIn = () => {
-    Animated.spring(scale, {
-      toValue: 0.88,
-      useNativeDriver: true,
-      speed: 30,
-      bounciness: 3,
-    }).start();
+type ClayTabBarProps = {
+  state: {
+    index: number;
+    routes: Array<{
+      key: string;
+      name: string;
+    }>;
   };
 
-  const handlePressOut = () => {
-    Animated.spring(scale, {
-      toValue: active ? 1 : 0.94,
-      useNativeDriver: true,
-      speed: 24,
-      bounciness: 7,
-    }).start();
+  notificationBadge?: number;
+
+  descriptors: Record<
+    string,
+    {
+      options: any;
+    }
+  >;
+
+  navigation: {
+    emit: (event: {
+      type: string;
+      target: string;
+      canPreventDefault?: boolean;
+    }) => {
+      defaultPrevented?: boolean;
+    };
+
+    navigate: (name: string) => void;
   };
+};
 
-  return (
-    <Pressable
-      onPress={onPress}
-      onPressIn={handlePressIn}
-      onPressOut={handlePressOut}
-      className="flex-1 items-center justify-center"
-    >
-      <Animated.View
-        className={`min-h-[56px] min-w-[58px] items-center justify-center rounded-clay-sm px-[7px] ${
-          active ? "border border-white/90 bg-ocean-100 shadow-clay-sm" : ""
-        }`}
-        style={{
-          transform: [{ scale }],
-        }}
-      >
-        {active && (
-          <Animated.View
-            pointerEvents="none"
-            className="absolute left-2 right-2 top-1 h-[2px] rounded-full bg-white"
-            style={{
-              opacity: activeScale,
-              transform: [
-                {
-                  scale: activeScale.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: [0.75, 1],
-                  }),
-                },
-              ],
-            }}
-          />
-        )}
-
-        <View className="relative h-[25px] items-center justify-center">
-          <Icon
-            size={active ? 21 : 20}
-            color={active ? colors.primaryDark : colors.textMuted}
-            strokeWidth={active ? 2.5 : 2}
-          />
-
-          {badge !== undefined && badge > 0 && (
-            <View className="absolute -right-[11px] -top-[7px] h-4 min-w-4 items-center justify-center rounded-full border-2 border-clay-surface bg-danger px-1">
-              <Text className="text-[8px] font-extrabold text-white">
-                {badge > 9 ? "9+" : badge}
-              </Text>
-            </View>
-          )}
-        </View>
-
-        <Text
-          className={`mt-[3px] text-[9px] ${
-            active ? "font-bold text-ocean-700" : "font-medium text-ink-muted"
-          }`}
-        >
-          {label}
-        </Text>
-      </Animated.View>
-    </Pressable>
-  );
-}
-
-export default function ClayTabBar({
+export function ClayTabBar({
   state,
   descriptors,
   navigation,
+  notificationBadge = 0,
 }: ClayTabBarProps) {
-  const insets = useSafeAreaInsets();
+  const { isDark } = useTheme();
+
+  const backgroundColor = isDark ? "#172033" : "#F8FCFF";
+  const borderColor = isDark ? "#263449" : "rgba(255,255,255,0.95)";
+  const activeBackground = isDark ? "#164E63" : "#E0F2FE";
+  const activeColor = "#0EA5E9";
+  const inactiveColor = isDark ? "#94A3B8" : "#64748B";
+  const activeTextColor = isDark ? "#38BDF8" : "#0369A1";
+  const inactiveTextColor = isDark ? "#94A3B8" : "#64748B";
+  const badgeBorderColor = isDark ? "#172033" : "#FFFFFF";
+
+  const renderIcon = (routeName: string, focused: boolean) => {
+    const color = focused ? activeColor : inactiveColor;
+    const size = focused ? 22 : 21;
+    const strokeWidth = focused ? 2.7 : 2.1;
+
+    switch (routeName) {
+      case "index":
+        return <House size={size} color={color} strokeWidth={strokeWidth} />;
+
+      case "queue":
+        return <Ticket size={size} color={color} strokeWidth={strokeWidth} />;
+
+      case "map":
+        return <Map size={size} color={color} strokeWidth={strokeWidth} />;
+
+      case "notifications":
+        return <Bell size={size} color={color} strokeWidth={strokeWidth} />;
+
+      case "profile":
+        return (
+          <UserRound size={size} color={color} strokeWidth={strokeWidth} />
+        );
+
+      default:
+        return null;
+    }
+  };
 
   return (
     <View
-      pointerEvents="box-none"
       className="absolute bottom-0 left-0 right-0 px-4 pt-2"
       style={{
-        paddingBottom: Math.max(insets.bottom, spacing.sm),
+        paddingBottom: Platform.OS === "ios" ? 20 : 10,
       }}
     >
-      <View className="relative min-h-[72px] flex-row items-center rounded-[32px] border border-white/95 bg-clay-surface px-2 py-2 shadow-clay">
+      <View
+        className="relative flex-row items-center justify-around px-2"
+        style={{
+          height: 82,
+          borderRadius: 30,
+          borderWidth: 1,
+          borderColor,
+          backgroundColor,
+          shadowColor: "#000",
+          shadowOffset: {
+            width: 0,
+            height: 8,
+          },
+          shadowOpacity: isDark ? 0.25 : 0.1,
+          shadowRadius: 16,
+          elevation: 8,
+          overflow: "visible",
+        }}
+      >
         <View
           pointerEvents="none"
-          className="absolute left-[30px] right-[30px] top-[1px] h-[2px] rounded-full bg-white"
+          style={{
+            position: "absolute",
+            top: 1,
+            left: 30,
+            right: 30,
+            height: 2,
+            borderRadius: 999,
+            backgroundColor: "rgba(255,255,255,0.95)",
+          }}
         />
 
-        {tabs.map((tab) => {
-          const routeIndex = state.routes.findIndex(
-            (route: any) => route.name === tab.name,
-          );
-          if (routeIndex === -1) return null;
-
-          const route = state.routes[routeIndex];
-          const isFocused = state.index === routeIndex;
+        {state.routes.map((route, index) => {
           const { options } = descriptors[route.key];
+          const isFocused = state.index === index;
 
-          // ✅ Fixed: removed navigation.emit, use navigate directly
           const onPress = () => {
-            if (!isFocused) {
+            const event = navigation.emit({
+              type: "tabPress",
+              target: route.key,
+              canPreventDefault: true,
+            });
+
+            if (!isFocused && !event.defaultPrevented) {
               navigation.navigate(route.name);
             }
           };
 
+          const onLongPress = () => {
+            navigation.emit({
+              type: "tabLongPress",
+              target: route.key,
+            });
+          };
+
+          const label = options.tabBarLabel || options.title || route.name;
+
+          const badge =
+            route.name === "notifications"
+              ? notificationBadge
+              : options.tabBarBadge;
+
           return (
-            <ClayTab
+            <TouchableOpacity
               key={route.key}
-              active={isFocused}
-              label={
-                typeof options.tabBarLabel === "string"
-                  ? options.tabBarLabel
-                  : tab.label
+              accessibilityRole="button"
+              accessibilityState={
+                isFocused
+                  ? {
+                      selected: true,
+                    }
+                  : {}
               }
-              Icon={tab.icon}
               onPress={onPress}
-              badge={tab.name === "notifications" ? 2 : undefined}
-            />
+              onLongPress={onLongPress}
+              activeOpacity={0.75}
+              className="flex-1 items-center justify-center"
+              style={{
+                minWidth: 60,
+              }}
+            >
+              <View
+                className="items-center justify-center"
+                style={{
+                  width: route.name === "queue" ? 70 : 58,
+                  height: 56,
+                  borderRadius: 17,
+                  backgroundColor: isFocused ? activeBackground : "transparent",
+                  borderWidth: isFocused ? 1 : 0,
+                  borderColor: isFocused
+                    ? "rgba(255,255,255,0.95)"
+                    : "transparent",
+                  shadowColor: isFocused ? "#000" : "transparent",
+                  shadowOffset: {
+                    width: 0,
+                    height: isFocused ? 2 : 0,
+                  },
+                  shadowOpacity: isFocused ? 0.06 : 0,
+                  shadowRadius: isFocused ? 4 : 0,
+                  elevation: isFocused ? 2 : 0,
+                }}
+              >
+                {isFocused && (
+                  <View
+                    pointerEvents="none"
+                    style={{
+                      position: "absolute",
+                      top: 3,
+                      left: 10,
+                      right: 10,
+                      height: 2,
+                      borderRadius: 999,
+                      backgroundColor: "#FFFFFF",
+                    }}
+                  />
+                )}
+
+                <View
+                  className="relative items-center justify-center"
+                  style={{
+                    height: 27,
+                    width: 27,
+                  }}
+                >
+                  {renderIcon(route.name, isFocused)}
+
+                  {badge !== undefined &&
+                    badge !== null &&
+                    Number(badge) > 0 && (
+                      <View
+                        className="absolute items-center justify-center rounded-full bg-red-500"
+                        style={{
+                          right: -9,
+                          top: -7,
+                          minWidth: 18,
+                          height: 18,
+                          paddingHorizontal: 4,
+                          borderWidth: 2,
+                          borderColor: badgeBorderColor,
+                        }}
+                      >
+                        <Text className="text-[9px] font-extrabold text-white">
+                          {Number(badge) > 99 ? "99+" : String(badge)}
+                        </Text>
+                      </View>
+                    )}
+                </View>
+
+                <Text
+                  style={{
+                    marginTop: 3,
+                    fontSize: 9,
+                    fontWeight: isFocused ? "800" : "600",
+                    color: isFocused ? activeTextColor : inactiveTextColor,
+                  }}
+                >
+                  {String(label)}
+                </Text>
+              </View>
+            </TouchableOpacity>
           );
         })}
       </View>
@@ -217,23 +252,4 @@ export default function ClayTabBar({
   );
 }
 
-// ─── Layout wrapper with Tabs ──────────────────────────────────────────
-export function CommuterTabsLayout() {
-  return (
-    <Tabs
-      tabBar={(props) => <ClayTabBar {...props} />}
-      screenOptions={{
-        headerShown: false,
-        animation: "shift",
-      }}
-    >
-      <Tabs.Screen name="index" options={{ title: "Home" }} />
-      <Tabs.Screen name="queue" options={{ title: "Queue" }} />
-      <Tabs.Screen name="map" options={{ title: "Map" }} />
-      <Tabs.Screen name="notifications" options={{ title: "Alerts" }} />
-      <Tabs.Screen name="profile" options={{ title: "Profile" }} />
-    </Tabs>
-  );
-}
-
-export default CommuterTabsLayout;
+export default ClayTabBar;

@@ -1,24 +1,15 @@
-// app/staff/(driver)/_layout.tsx
+// app/commuter/(tabs)/_layout.tsx
+
 import { Tabs } from "expo-router";
-import {
-  LayoutDashboard,
-  ListStart,
-  MapPin,
-  MessageCircle,
-  Settings,
-} from "lucide-react-native";
-import { CustomTabBar } from "../../../../src/shared/components/ui/CustomTabBar";
-import { useChatStore } from "../../../../src/shared/store/chatStore";
 
-export default function DriverTabsLayout() {
-  const { unreadCount } = useChatStore();
+import { Bell, House, Map, Ticket, UserRound } from "lucide-react-native";
 
-  const badge =
-    unreadCount > 0 ? (unreadCount > 99 ? "99+" : unreadCount) : undefined;
+import ClayTabBar from "../../../../src/shared/components/clay/ClayTabBar";
 
+export default function CommuterTabsLayout() {
   return (
     <Tabs
-      tabBar={(props) => <CustomTabBar {...(props as any)} />}
+      tabBar={(props) => <ClayTabBar {...(props as any)} />}
       screenOptions={{
         headerShown: false,
       }}
@@ -26,44 +17,48 @@ export default function DriverTabsLayout() {
       <Tabs.Screen
         name="index"
         options={{
-          title: "Dashboard",
-          tabBarIcon: ({ color, size }) => (
-            <LayoutDashboard size={size} color={color} />
-          ),
+          title: "Home",
+
+          tabBarIcon: ({ color, size }) => <House size={size} color={color} />,
         }}
       />
-      <Tabs.Screen
-        name="gps-tracking"
-        options={{
-          title: "Tracking",
-          tabBarIcon: ({ color, size }) => <MapPin size={size} color={color} />,
-        }}
-      />
+
       <Tabs.Screen
         name="queue"
         options={{
           title: "Queue",
-          tabBarIcon: ({ color, size }) => (
-            <ListStart size={size} color={color} />
-          ),
+
+          tabBarIcon: ({ color, size }) => <Ticket size={size} color={color} />,
         }}
       />
+
       <Tabs.Screen
-        name="chat"
+        name="map"
         options={{
-          title: "Chat",
-          tabBarIcon: ({ color, size }) => (
-            <MessageCircle size={size} color={color} />
-          ),
-          tabBarBadge: badge,
+          title: "Map",
+
+          tabBarIcon: ({ color, size }) => <Map size={size} color={color} />,
         }}
       />
+
       <Tabs.Screen
-        name="settings"
+        name="notifications"
         options={{
-          title: "Settings",
+          title: "Alerts",
+
+          tabBarBadge: 2,
+
+          tabBarIcon: ({ color, size }) => <Bell size={size} color={color} />,
+        }}
+      />
+
+      <Tabs.Screen
+        name="profile"
+        options={{
+          title: "Profile",
+
           tabBarIcon: ({ color, size }) => (
-            <Settings size={size} color={color} />
+            <UserRound size={size} color={color} />
           ),
         }}
       />

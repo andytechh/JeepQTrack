@@ -43,6 +43,17 @@ interface MapViewProps {
 
   onJeepneyETA?: (eta: JeepneyETA) => void;
 
+  /**
+   * Fires once the road route resolves - either from OSRM (approximate: false)
+   * or the straight-line fallback used when OSRM is unreachable (approximate: true).
+   * Fires with an error message if the route could not be established at all.
+   */
+  onRouteStatus?: (status: {
+    ready: boolean;
+    approximate?: boolean;
+    error?: string;
+  }) => void;
+
   showControls?: boolean;
 
   enableRealtime?: boolean;
@@ -54,6 +65,7 @@ export const MapView: React.FC<MapViewProps> = ({
   markers,
   onMarkerPress,
   onJeepneyETA,
+  onRouteStatus,
   showControls = true,
   enableRealtime = true,
   style,
@@ -83,6 +95,25 @@ export const MapView: React.FC<MapViewProps> = ({
         const data = JSON.parse(event.nativeEvent.data);
 
         console.log("🗺️ MAP EVENT:", data.type, data);
+
+        /**
+         * ====================================================
+         * ROUTE STATUS
+         * ====================================================
+         */
+        if (data.type === "routeReady" && onRouteStatus) {
+          onRouteStatus({
+            ready: true,
+            approximate: Boolean(data.approximate),
+          });
+        }
+
+        if (data.type === "routeError" && onRouteStatus) {
+          onRouteStatus({
+            ready: false,
+            error: data.message ?? "Unknown route error",
+          });
+        }
 
         /**
          * ====================================================

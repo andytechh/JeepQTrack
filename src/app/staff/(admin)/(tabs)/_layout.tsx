@@ -1,4 +1,3 @@
-// app/staff/(admin)/(tabs)/_layout.tsx
 import { router, Tabs } from "expo-router";
 import {
   Bus,
@@ -22,9 +21,10 @@ export default function AdminTabsLayout() {
         onAvatarPress={() => router.push("/staff/(admin)/(tabs)/settings")}
       />
       <Tabs
-        tabBar={(props) => <CustomTabBar {...props} />}
+        tabBar={(props) => <CustomTabBar {...(props as any)} />}
         screenOptions={{ headerShown: false }}
       >
+        {/* Only these 5 are visible in the tab bar */}
         <Tabs.Screen
           name="index"
           options={{
@@ -68,8 +68,10 @@ export default function AdminTabsLayout() {
             ),
           }}
         />
-        {/* Chat is now a quick action on the Dashboard – add it here if you prefer a tab */}
-        {/* <Tabs.Screen name="chat" options={{ title: "Chat", tabBarIcon: ({ color, size }) => <MessageCircle color={color} size={size} /> }} /> */}
+
+        <Tabs.Screen name="chat" options={{ href: null }} />
+        <Tabs.Screen name="trips" options={{ href: null }} />
+        <Tabs.Screen name="reports" options={{ href: null }} />
       </Tabs>
     </>
   );

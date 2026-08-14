@@ -380,11 +380,14 @@ function updateJeepneyMarker(id, lat, lng, speed, status, force) {
     destination = (distToDonsol < distToDaraga) ? terminals.daraga : terminals.donsOl;
   }
 
-  // Determine direction
-  let remainingDistance = progress.remainingDistance;
+  // Determine direction. routeCoordinates run Donsol -> Daraga, so distanceFromOrigin
+  // is measured from Donsol: it's the correct "remaining distance" for a Donsol-bound
+  // jeepney (how far it's already come from Donsol = how far it still has to go back),
+  // while total - distanceFromOrigin is correct for a Daraga-bound jeepney.
+  let remainingDistance = progress.remainingDistance; // Daraga-bound (default)
   let progressPercent = progress.progress * 100;
   if (destination.id === terminals.donsOl.id) {
-    remainingDistance = routeTotalDistanceMeters - progress.distanceFromOrigin;
+    remainingDistance = progress.distanceFromOrigin; // Donsol-bound
     progressPercent = 100 - progressPercent;
   }
   remainingDistance = Math.max(0, remainingDistance);
@@ -396,7 +399,12 @@ function updateJeepneyMarker(id, lat, lng, speed, status, force) {
 
   const remainingKm = remainingDistance / 1000;
   const travelMinutes = (remainingKm / effectiveSpeed) * 60;
-  const additionalMinutes = ADDITIONAL_ETA_MINUTES;
+  // The 20-minute allowance covers stops/loading over the *remaining* trip, so it should
+  // shrink as less trip is left to make stops on - a jeep that's 80% done only has 20%
+  // of the route (and roughly 20% of the potential stops) left, not the full buffer.
+  const totalRouteKm = routeTotalDistanceMeters / 1000;
+  const remainingFraction = totalRouteKm > 0 ? Math.min(1, remainingKm / totalRouteKm) : 0;
+  const additionalMinutes = ADDITIONAL_ETA_MINUTES * remainingFraction;
   let remainingMinutes = travelMinutes + additionalMinutes;
   if (remainingKm < 0.15) remainingMinutes = 0;
   remainingMinutes = Math.max(0, remainingMinutes);
@@ -458,13 +466,16 @@ const originIcon = L.divIcon({
   className: "custom-div-icon",
   html: '<div style="background:#22c55e;width:40px;height:40px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:20px;border:3px solid white;box-shadow:0 4px 12px rgba(0,0,0,.3);">📍</div>',
   iconSize: [40,40],
-  iconAnchor: [20,20]
+  // Anchored at bottom-center (not center) so the pin sits above the coordinate point
+  // instead of directly on top of it - keeps parked jeepney markers at this terminal
+  // visible and clickable underneath instead of being fully covered.
+  iconAnchor: [20,44]
 });
 const destinationIcon = L.divIcon({
   className: "custom-div-icon",
   html: '<div style="background:#f59e0b;width:40px;height:40px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:20px;border:3px solid white;box-shadow:0 4px 12px rgba(0,0,0,.3);">📍</div>',
   iconSize: [40,40],
-  iconAnchor: [20,20]
+  iconAnchor: [20,44]
 });
 L.marker([terminals.donsOl.lat, terminals.donsOl.lng], { icon: originIcon, zIndexOffset: 1000 }).addTo(map).bindPopup("<strong>Donsol Terminal</strong><br>Origin");
 L.marker([terminals.daraga.lat, terminals.daraga.lng], { icon: destinationIcon, zIndexOffset: 1000 }).addTo(map).bindPopup("<strong>Daraga Terminal</strong><br>Destination");

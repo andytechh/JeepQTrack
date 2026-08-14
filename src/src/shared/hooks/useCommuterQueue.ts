@@ -1,5 +1,6 @@
 // src/shared/hooks/useCommuterQueue.ts
 import { supabase } from "@/src/shared/config/supabase";
+import { calculateJeepneyEta } from "@/src/shared/utils/routeEta";
 import { useEffect, useState } from "react";
 
 export interface CommuterJeepney {
@@ -12,6 +13,10 @@ export interface CommuterJeepney {
   terminalId: number;
   jeepName: string;
   driverName: string;
+  // Only populated for EN_ROUTE jeepneys with a live GPS fix - the road-route ETA,
+  // computed the same way as the map screen (see src/shared/utils/routeEta.ts).
+  remainingDistanceKm?: number;
+  progressPercent?: number;
 }
 
 export function useCommuterQueue() {
@@ -82,12 +87,90 @@ export function useCommuterQueue() {
       });
 
       setJeepneys(mapped);
+      setLoading(false);
+
+      // EN_ROUTE jeepneys still show "—" until their real ETA resolves below - fill it
+      // in as a second pass so the queue list itself isn't blocked waiting on GPS + OSRM.
+      const enRoute = mapped.filter((j) => j.status === "EN_ROUTE");
+      if (enRoute.length > 0) {
+        await attachEtas(enRoute);
+      }
     } catch (err) {
       console.error("❌ Unexpected error:", err);
       setError(err instanceof Error ? err.message : "Unknown error");
-    } finally {
       setLoading(false);
+    } finally {
       setRefreshing(false);
+    }
+  };
+
+  /**
+   * Looks up the latest GPS fix for each EN_ROUTE jeepney and computes its road-route
+   * ETA, then merges the results into state. Jeepneys without a recent GPS fix keep
+   * showing "—" rather than a stale or guessed ETA.
+   */
+  const attachEtas = async (enRoute: CommuterJeepney[]) => {
+    try {
+      const ids = enRoute.map((j) => j.id);
+
+      const { data: gpsRows, error: gpsError } = await supabase
+        .from("latest_gps_tracking")
+        .select("jeepney_id, latitude, longitude, speed")
+        .in("jeepney_id", ids);
+
+      if (gpsError) {
+        console.error("❌ GPS lookup for ETA failed:", gpsError);
+        return;
+      }
+
+      const gpsByJeepneyId = new Map<
+        string,
+        { lat: number; lng: number; speed: number }
+      >();
+      (gpsRows || []).forEach((row: any) => {
+        const lat = Number(row.latitude);
+        const lng = Number(row.longitude);
+        if (Number.isFinite(lat) && Number.isFinite(lng)) {
+          gpsByJeepneyId.set(row.jeepney_id, {
+            lat,
+            lng,
+            speed: Number(row.speed || 0),
+          });
+        }
+      });
+
+      const results = await Promise.all(
+        enRoute.map(async (j) => {
+          const gps = gpsByJeepneyId.get(j.id);
+          if (!gps) return { id: j.id, patch: null };
+
+          const eta = await calculateJeepneyEta(
+            gps.lat,
+            gps.lng,
+            j.terminalId,
+            gps.speed,
+          );
+          if (!eta) return { id: j.id, patch: null };
+
+          return {
+            id: j.id,
+            patch: {
+              estimatedDeparture: eta.estimatedArrivalTime,
+              remainingDistanceKm: eta.remainingDistanceKm,
+              progressPercent: eta.progressPercent,
+            },
+          };
+        }),
+      );
+
+      setJeepneys((current) =>
+        current.map((j) => {
+          const result = results.find((r) => r.id === j.id);
+          return result?.patch ? { ...j, ...result.patch } : j;
+        }),
+      );
+    } catch (err) {
+      console.error("❌ Unexpected error attaching ETAs:", err);
     }
   };
 

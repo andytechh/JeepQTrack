@@ -53,6 +53,20 @@ export function useNotifications(
 
   const mountedRef = useRef(true);
 
+  // Unique id for THIS hook instance. If useNotifications(userId) is mounted
+  // in more than one place at once (e.g. a tab-bar unread badge AND the
+  // notifications screen), each instance previously built the exact same
+  // realtime topic string (`commuter-notifications-${userId}`). Supabase
+  // Realtime treats that as one logical subscription, so when two separate
+  // RealtimeChannel objects raced to join it, the loser would throw:
+  //   "cannot add `postgres_changes` callbacks ... after `subscribe()`"
+  // even though .on() was chained before .subscribe() correctly in this
+  // file. Suffixing the topic with a per-instance id makes every mount use
+  // its own private channel, so instances can never collide.
+  const instanceIdRef = useRef(
+    `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+  );
+
   const unreadCount = notifications.filter(
     (notification) => !notification.read,
   ).length;
@@ -162,6 +176,18 @@ export function useNotifications(
     };
   }, []);
 
+  // Realtime channel setup.
+  //
+  // IMPORTANT: channel creation, `.on(...)` registration, and `.subscribe()`
+  // must all happen SYNCHRONOUSLY in the same tick, with no `await` in
+  // between. If an `await` sits between `supabase.channel(...)` and
+  // `.subscribe()`, React can re-run this effect (StrictMode double-invoke,
+  // fast refresh, userId changing right after auth resolves, etc.) while the
+  // first pass is still "in flight," and Supabase will throw:
+  //
+  //   "cannot add `postgres_changes` callbacks ... after `subscribe()`"
+  //
+  // because a previous/parallel run already subscribed that channel object.
   useEffect(() => {
     if (!userId) {
       setNotifications([]);
@@ -172,135 +198,119 @@ export function useNotifications(
       return;
     }
 
-    let cancelled = false;
+    let isActive = true;
 
-    const setupRealtime = async () => {
-      await loadNotifications(false);
+    // Kick off the initial load independently. Do NOT await this before
+    // setting up the realtime channel below — that's what caused the race.
+    loadNotifications(false);
 
-      if (cancelled) {
-        return;
-      }
+    // Clean up any previous channel synchronously before creating a new one.
+    if (channelRef.current) {
+      console.log("📡 Removing existing commuter notification channel");
+      supabase.removeChannel(channelRef.current);
+      channelRef.current = null;
+    }
 
-      if (channelRef.current) {
-        console.log("📡 Removing existing commuter notification channel");
+    const channelName = `commuter-notifications-${userId}-${instanceIdRef.current}`;
 
-        await supabase.removeChannel(channelRef.current);
+    console.log("📡 Creating commuter channel:", channelName);
 
-        channelRef.current = null;
-      }
+    const channel = supabase.channel(channelName);
 
-      if (cancelled) {
-        return;
-      }
+    channel
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "notifications",
+        },
+        (payload) => {
+          if (!isActive) {
+            return;
+          }
 
-      const channelName = `commuter-notifications-${userId}`;
+          const incoming = payload.new as AppNotification;
 
-      console.log("📡 Creating commuter channel:", channelName);
+          if (!isCommuterType(incoming.type)) {
+            return;
+          }
 
-      const channel = supabase.channel(channelName);
+          if (incoming.user_id !== null && incoming.user_id !== userId) {
+            return;
+          }
 
-      channel
-        .on(
-          "postgres_changes",
-          {
-            event: "INSERT",
-            schema: "public",
-            table: "notifications",
-          },
-          (payload) => {
-            if (cancelled) {
-              return;
+          console.log("🔔 NEW COMMUTER NOTIFICATION:", incoming.title);
+
+          setNotifications((current) => {
+            const exists = current.some((item) => item.id === incoming.id);
+
+            if (exists) {
+              return current;
             }
 
-            const incoming = payload.new as AppNotification;
+            return [incoming, ...current]
+              .sort(
+                (a, b) =>
+                  new Date(b.created_at).getTime() -
+                  new Date(a.created_at).getTime(),
+              )
+              .slice(0, MAX_NOTIFICATIONS);
+          });
+        },
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "notifications",
+        },
+        (payload) => {
+          if (!isActive) {
+            return;
+          }
 
-            if (!isCommuterType(incoming.type)) {
-              return;
-            }
+          const updated = payload.new as AppNotification;
 
-            if (incoming.user_id !== null && incoming.user_id !== userId) {
-              return;
-            }
+          if (!isCommuterType(updated.type)) {
+            return;
+          }
 
-            console.log("🔔 NEW COMMUTER NOTIFICATION:", incoming.title);
+          if (updated.user_id !== null && updated.user_id !== userId) {
+            return;
+          }
 
-            setNotifications((current) => {
-              const exists = current.some((item) => item.id === incoming.id);
+          setNotifications((current) =>
+            current.map((item) => (item.id === updated.id ? updated : item)),
+          );
+        },
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "DELETE",
+          schema: "public",
+          table: "notifications",
+        },
+        (payload) => {
+          if (!isActive) {
+            return;
+          }
 
-              if (exists) {
-                return current;
-              }
+          const deleted = payload.old as Partial<AppNotification>;
 
-              return [incoming, ...current]
-                .sort(
-                  (a, b) =>
-                    new Date(b.created_at).getTime() -
-                    new Date(a.created_at).getTime(),
-                )
-                .slice(0, MAX_NOTIFICATIONS);
-            });
-          },
-        )
-        .on(
-          "postgres_changes",
-          {
-            event: "UPDATE",
-            schema: "public",
-            table: "notifications",
-          },
-          (payload) => {
-            if (cancelled) {
-              return;
-            }
+          if (!deleted.id) {
+            return;
+          }
 
-            const updated = payload.new as AppNotification;
-
-            if (!isCommuterType(updated.type)) {
-              return;
-            }
-
-            if (updated.user_id !== null && updated.user_id !== userId) {
-              return;
-            }
-
-            setNotifications((current) =>
-              current.map((item) => (item.id === updated.id ? updated : item)),
-            );
-          },
-        )
-        .on(
-          "postgres_changes",
-          {
-            event: "DELETE",
-            schema: "public",
-            table: "notifications",
-          },
-          (payload) => {
-            if (cancelled) {
-              return;
-            }
-
-            const deleted = payload.old as Partial<AppNotification>;
-
-            if (!deleted.id) {
-              return;
-            }
-
-            setNotifications((current) =>
-              current.filter((item) => item.id !== deleted.id),
-            );
-          },
-        );
-
-      if (cancelled) {
-        await supabase.removeChannel(channel);
-        return;
-      }
-
-      channelRef.current = channel;
-
-      channel.subscribe((status) => {
-        if (cancelled) {
+          setNotifications((current) =>
+            current.filter((item) => item.id !== deleted.id),
+          );
+        },
+      )
+      .subscribe((status) => {
+        if (!isActive) {
           return;
         }
 
@@ -318,21 +328,19 @@ export function useNotifications(
           console.error("⏱️ Commuter notification realtime TIMED_OUT");
         }
       });
-    };
 
-    setupRealtime();
+    channelRef.current = channel;
 
     return () => {
-      cancelled = true;
+      isActive = false;
 
-      const channel = channelRef.current;
+      const activeChannel = channelRef.current;
 
       channelRef.current = null;
 
-      if (channel) {
+      if (activeChannel) {
         console.log("📡 Cleaning commuter notification channel");
-
-        supabase.removeChannel(channel);
+        supabase.removeChannel(activeChannel);
       }
     };
   }, [userId, loadNotifications, isCommuterType]);

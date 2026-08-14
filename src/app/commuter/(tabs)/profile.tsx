@@ -646,7 +646,7 @@ export default function CommuterProfileScreen() {
                     onPress={() => {
                       showClayAlert(
                         "About Smart Queue",
-                        "Smart Queue helps commuters monitor jeepney queues, arrivals, dispatch updates, and notifications.",
+                        "Smart Queue helps commuters monitor jeepney queues, arrivals, dispatch updates, and notifications. This is foe Capstone and Research Purposes only. Developer; Andy G. Lazarte ",
                         [{ text: "OK", onPress: () => {} }],
                       );
                     }}

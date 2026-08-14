@@ -483,7 +483,7 @@ export default function CommuterQueueScreen() {
         </ScrollView>
       </SafeAreaView>
 
-      {/* DETAIL MODAL – unchanged */}
+      {/* DETAIL MODAL */}
       <Modal
         visible={modalVisible}
         transparent
@@ -529,19 +529,44 @@ export default function CommuterQueueScreen() {
                     {TERMINAL_NAMES[selectedJeepney.terminalId] || "Unknown"}
                   </Text>
                 </View>
-                <View className="flex-row items-center">
-                  <Clock3 size={18} color="#64748b" />
-                  <Text className="ml-3 text-sm text-slate-600">
-                    {selectedJeepney.status === "EN_ROUTE"
-                      ? "ETA: "
-                      : "Est. departure: "}
-                    {selectedJeepney.estimatedDeparture}
-                    <Text className="text-xs text-slate-400 italic">
-                      {" "}
-                      (may change)
+
+                {/* ETA - only shown for EN_ROUTE jeepneys. Other statuses haven't
+                    left the terminal yet, so there's no "arrival ETA" to show -
+                    they get the estimated departure time instead. */}
+                {selectedJeepney.status === "EN_ROUTE" ? (
+                  <View className="flex-row items-center rounded-[16px] bg-ocean-50 px-4 py-3">
+                    <View className="h-[34px] w-[34px] items-center justify-center rounded-full bg-white">
+                      <MapPin
+                        size={16}
+                        color={colors.primaryDark}
+                        strokeWidth={2.3}
+                      />
+                    </View>
+                    <View className="ml-3 flex-1">
+                      <Text className="text-[9px] font-bold uppercase tracking-[0.6px] text-ink-muted">
+                        ETA
+                      </Text>
+                      <Text className="mt-0.5 text-[16px] font-extrabold text-ink-dark">
+                        {selectedJeepney.estimatedDeparture}
+                      </Text>
+                      <Text className="text-[9px] text-ink-muted italic">
+                        Estimated, may change
+                      </Text>
+                    </View>
+                  </View>
+                ) : (
+                  <View className="flex-row items-center">
+                    <Clock3 size={18} color="#64748b" />
+                    <Text className="ml-3 text-sm text-slate-600">
+                      Est. departure: {selectedJeepney.estimatedDeparture}
+                      <Text className="text-xs text-slate-400 italic">
+                        {" "}
+                        (may change)
+                      </Text>
                     </Text>
-                  </Text>
-                </View>
+                  </View>
+                )}
+
                 <View className="flex-row items-center">
                   <Users size={18} color="#64748b" />
                   <Text className="ml-3 text-sm text-slate-600">

@@ -570,7 +570,7 @@ function ETASection({
         <RouteInfo
           icon={<Clock size={16} color={colors.primaryDark} />}
           label="Added time"
-          value="+20 min"
+          value={`+${formatDuration(eta.additionalMinutes)}`}
         />
       </View>
 

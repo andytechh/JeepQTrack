@@ -1,4 +1,11 @@
-import { Bell, House, Map, Ticket, UserRound } from "lucide-react-native";
+import {
+  Bell,
+  House,
+  Map,
+  MessageCircle,
+  Ticket,
+  UserRound,
+} from "lucide-react-native";
 import { Platform, Text, TouchableOpacity, View } from "react-native";
 import { useTheme } from "../../../shared/context/ThemeContext";
 
@@ -64,6 +71,10 @@ export function ClayTabBar({
 
       case "map":
         return <Map size={size} color={color} strokeWidth={strokeWidth} />;
+      case "chat":
+        return (
+          <MessageCircle size={size} color={color} strokeWidth={strokeWidth} />
+        );
 
       case "notifications":
         return <Bell size={size} color={color} strokeWidth={strokeWidth} />;

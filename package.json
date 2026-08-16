@@ -6,6 +6,7 @@
     "@expo/ui": "~56.0.25",
     "@react-aria/utils": "^3.34.1",
     "@react-native-async-storage/async-storage": "2.2.0",
+    "@react-native-vector-icons/ionicons": "^13.1.2",
     "@react-navigation/native": "^7.3.14",
     "@supabase/supabase-js": "^2.109.0",
     "babel-preset-expo": "^56.0.15",

@@ -1,5 +1,3 @@
-// src/shared/components/map/MapControls.tsx
-
 import { Crosshair, Layers, Minus, Plus } from "lucide-react-native";
 import React from "react";
 import { StyleSheet, TouchableOpacity, View } from "react-native";
@@ -11,30 +9,6 @@ interface MapControlsProps {
   onShowTerminals: () => void;
   onRefreshRoute?: () => void;
 }
-
-/*
- * ============================================================
- * DONSol SMART QUEUE
- * Ocean + Soft 3D Clay Theme
- * ============================================================
- *
- * This component intentionally does NOT import lightTheme.
- *
- * Why?
- * The old implementation depended on:
- *
- *   lightTheme.surface
- *   lightTheme.border
- *   lightTheme.text.primary
- *
- * Your current theme does not expose lightTheme in that shape,
- * which caused:
- *
- *   Cannot read property 'surface' of undefined
- *
- * The map controls now use the same design tokens directly.
- * ============================================================
- */
 
 const CLAY = {
   background: "#F8FCFF",

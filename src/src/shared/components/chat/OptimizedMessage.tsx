@@ -1,33 +1,65 @@
-// src/shared/components/chat/OptimizedMessage.tsx
 import { CheckCheck, Edit2, Trash2 } from "lucide-react-native";
-import { memo, useState } from "react";
-import { Image, Modal, Text, TouchableOpacity, View } from "react-native";
+import { memo, useCallback, useMemo, useState } from "react";
+import { Image, Pressable, Text, View } from "react-native";
 
-const EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🙏"];
+const QUICK_REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🙏"];
+
+type ReactionMap = Record<string, string[]>;
 
 interface MessageProps {
   id: string;
   message: string;
   sender_id: string;
   created_at: string;
+
+  // Optional pre-formatted timestamp from chat.tsx
+  formattedTime?: string;
+
   isOwn: boolean;
+
   senderName: string;
   senderAvatar?: string;
   senderRole?: string;
+
   read?: boolean;
   edited?: boolean;
   deleted?: boolean;
-  reactions?: Record<string, string[]>;
+
+  reactions?: ReactionMap;
+
   onEdit?: (id: string, currentText: string) => void;
   onDelete?: (id: string) => void;
-  onAddReaction?: (id: string, emoji: string) => void;
-  onRemoveReaction?: (id: string, emoji: string) => void;
+
+  onAddReaction?: (id: string, emoji: string) => void | Promise<void>;
+  onRemoveReaction?: (id: string, emoji: string) => void | Promise<void>;
+
   currentUserId?: string;
+
   isDark?: boolean;
 }
 
+const ROLE_COLORS: Record<string, string> = {
+  admin: "#7C3AED",
+  dispatcher: "#0284C7",
+  driver: "#16A34A",
+  staff: "#64748B",
+};
+
+const formatPhilippineTime = (dateString: string) => {
+  try {
+    return new Date(dateString).toLocaleTimeString("en-PH", {
+      timeZone: "Asia/Manila",
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+    });
+  } catch {
+    return "";
+  }
+};
+
 export const OptimizedMessage = memo(
-  ({
+  function OptimizedMessage({
     id,
     message,
     isOwn,
@@ -35,78 +67,147 @@ export const OptimizedMessage = memo(
     senderAvatar,
     senderRole,
     created_at,
+    formattedTime,
     read,
     edited,
     deleted,
-    reactions,
+    reactions = {},
     onEdit,
     onDelete,
     onAddReaction,
     onRemoveReaction,
     currentUserId,
     isDark = false,
-  }: MessageProps) => {
-    const [modalVisible, setModalVisible] = useState(false);
+  }: MessageProps) {
+    const [actionsOpen, setActionsOpen] = useState(false);
+    const [reactionBusy, setReactionBusy] = useState(false);
 
-    const initials = senderName?.[0]?.toUpperCase() || "?";
-    const timestamp = new Date(created_at).toLocaleTimeString([], {
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false,
-    });
+    const initials = senderName?.trim()?.charAt(0)?.toUpperCase() || "?";
 
-    const handleLongPress = () => {
-      if (deleted) return;
-      setModalVisible(true);
-    };
+    const roleKey = senderRole?.toLowerCase() || "staff";
 
-    const handleReactionPress = (emoji: string) => {
-      setModalVisible(false);
-      if (!currentUserId) return;
-      const users = reactions?.[emoji] || [];
-      if (users.includes(currentUserId)) {
-        onRemoveReaction?.(id, emoji);
-      } else {
-        onAddReaction?.(id, emoji);
+    const roleColor = ROLE_COLORS[roleKey] || ROLE_COLORS.staff;
+
+    const timestamp = useMemo(
+      () => formattedTime || formatPhilippineTime(created_at),
+      [formattedTime, created_at],
+    );
+
+    const reactionEntries = useMemo(
+      () =>
+        Object.entries(reactions).filter(
+          ([, users]) => Array.isArray(users) && users.length > 0,
+        ),
+      [reactions],
+    );
+
+    const currentReaction = useMemo(() => {
+      if (!currentUserId) return null;
+
+      for (const [emoji, users] of reactionEntries) {
+        if (users.includes(currentUserId)) {
+          return emoji;
+        }
       }
-    };
 
-    const handleEdit = () => {
-      setModalVisible(false);
-      if (onEdit) onEdit(id, message);
-    };
+      return null;
+    }, [currentUserId, reactionEntries]);
 
-    const handleDelete = () => {
-      setModalVisible(false);
-      if (onDelete) onDelete(id);
-    };
+    const handleLongPress = useCallback(() => {
+      if (deleted) return;
 
-    // Reaction pills
-    const reactionEntries = reactions
-      ? Object.entries(reactions).filter(([_, users]) => users.length > 0)
-      : [];
-    const hasReactions = reactionEntries.length > 0;
+      setActionsOpen((previous) => !previous);
+    }, [deleted]);
 
-    // Deleted message placeholder text
+    const handleCloseActions = useCallback(() => {
+      setActionsOpen(false);
+    }, []);
+
+    const handleReaction = useCallback(
+      async (emoji: string) => {
+        if (!currentUserId || reactionBusy || deleted) {
+          return;
+        }
+
+        setReactionBusy(true);
+
+        try {
+          if (currentReaction === emoji) {
+            await onRemoveReaction?.(id, emoji);
+            return;
+          }
+
+          if (currentReaction) {
+            await onRemoveReaction?.(id, currentReaction);
+          }
+
+          await onAddReaction?.(id, emoji);
+        } catch (error) {
+          console.error("Reaction error:", error);
+        } finally {
+          setReactionBusy(false);
+          setActionsOpen(false);
+        }
+      },
+      [
+        currentUserId,
+        reactionBusy,
+        deleted,
+        currentReaction,
+        onRemoveReaction,
+        onAddReaction,
+        id,
+      ],
+    );
+
+    const handleEdit = useCallback(() => {
+      setActionsOpen(false);
+      onEdit?.(id, message);
+    }, [id, message, onEdit]);
+
+    const handleDelete = useCallback(() => {
+      setActionsOpen(false);
+      onDelete?.(id);
+    }, [id, onDelete]);
+
     const deletedText = isOwn ? "You unsent a message" : "Unsent a message";
 
     return (
-      <>
-        <TouchableOpacity
-          onLongPress={handleLongPress}
-          activeOpacity={deleted ? 1 : 0.7}
-          className={`flex-row mb-4 gap-2 ${isOwn ? "justify-end" : "justify-start"}`}
-          disabled={deleted}
+      <View className={`mb-3 px-1 ${isOwn ? "items-end" : "items-start"}`}>
+        <View
+          className={`flex-row max-w-[86%] ${
+            isOwn ? "justify-end" : "justify-start"
+          }`}
         >
           {!isOwn && (
-            <View className="w-8 h-8 rounded-full bg-blue-200 items-center justify-center self-end">
+            <View
+              className="mr-2 self-end h-9 w-9 items-center justify-center rounded-[14px]"
+              style={{
+                backgroundColor: isDark ? "#164E63" : "#BAE6FD",
+
+                shadowColor: "#38BDF8",
+                shadowOffset: {
+                  width: 0,
+                  height: 3,
+                },
+                shadowOpacity: 0.16,
+                shadowRadius: 5,
+                elevation: 3,
+              }}
+            >
               {senderAvatar ? (
                 <Image
-                  source={{ uri: senderAvatar }}
-                  className="w-full h-full rounded-full"
+                  source={{
+                    uri: senderAvatar,
+                  }}
+                  className="h-full w-full rounded-[14px]"
                 />
               ) : (
-                <Text className="text-xs font-semibold text-slate-600">
+                <Text
+                  className={`text-xs font-extrabold ${
+                    isDark ? "text-sky-300" : "text-sky-700"
+                  }`}
+                >
                   {initials}
                 </Text>
               )}
@@ -114,45 +215,79 @@ export const OptimizedMessage = memo(
           )}
 
           <View
-            className={`flex-col max-w-[75%] ${isOwn ? "items-end self-end" : "items-start self-start"}`}
+            className={`max-w-[82%] ${isOwn ? "items-end" : "items-start"}`}
           >
             {!isOwn && (
-              <View className="flex-row items-center gap-1 ml-1 mb-1">
+              <View className="mb-1 ml-1 flex-row items-center">
                 <Text
-                  className={`text-xs ${isDark ? "text-slate-300" : "text-slate-500"}`}
+                  className={`text-[11px] font-extrabold ${
+                    isDark ? "text-slate-200" : "text-slate-700"
+                  }`}
                 >
                   {senderName}
                 </Text>
-                {senderRole && (
+
+                <View
+                  className="ml-1.5 rounded-md px-1.5 py-0.5"
+                  style={{
+                    backgroundColor: `${roleColor}18`,
+                  }}
+                >
                   <Text
-                    className={`text-[10px] uppercase ${isDark ? "text-slate-400" : "text-slate-400"}`}
+                    className="text-[7px] font-black"
+                    style={{
+                      color: roleColor,
+                    }}
                   >
-                    ({senderRole})
+                    {roleKey.toUpperCase()}
                   </Text>
-                )}
+                </View>
               </View>
             )}
 
             <View className="relative">
-              {/* Bubble */}
-              <View
-                className={`rounded-xl px-3 py-2 ${
+              <Pressable
+                onLongPress={handleLongPress}
+                delayLongPress={280}
+                onPress={() => {
+                  if (actionsOpen) {
+                    setActionsOpen(false);
+                  }
+                }}
+                disabled={deleted}
+                className={`rounded-[19px] px-3.5 pb-2 pt-2.5 ${
                   deleted
-                    ? // Deleted bubble – light gray (or dark gray in dark mode) with white text
-                      isDark
-                      ? "bg-gray-700 self-start"
-                      : "bg-gray-200 self-start"
+                    ? isDark
+                      ? "bg-slate-700"
+                      : "bg-slate-200"
                     : isOwn
-                      ? "bg-sky-500 self-end"
+                      ? "bg-sky-500"
                       : isDark
-                        ? "bg-slate-700 self-start"
-                        : "bg-blue-100 self-start"
+                        ? "bg-slate-700"
+                        : "bg-white"
                 }`}
+                style={{
+                  borderBottomLeftRadius: !isOwn && !deleted ? 6 : 19,
+
+                  borderBottomRightRadius: isOwn && !deleted ? 6 : 19,
+
+                  shadowColor: isOwn ? "#0284C7" : "#7DD3FC",
+
+                  shadowOffset: {
+                    width: 0,
+                    height: 3,
+                  },
+
+                  shadowOpacity: deleted ? 0.04 : 0.11,
+
+                  shadowRadius: 7,
+                  elevation: 3,
+                }}
               >
                 {deleted ? (
                   <Text
-                    className={`text-sm font-italic ${
-                      isDark ? "text-white" : "text-slate-800"
+                    className={`text-sm italic ${
+                      isDark ? "text-slate-300" : "text-slate-500"
                     }`}
                   >
                     {deletedText}
@@ -160,7 +295,7 @@ export const OptimizedMessage = memo(
                 ) : (
                   <>
                     <Text
-                      className={`text-sm leading-relaxed ${
+                      className={`text-[14px] leading-[20px] ${
                         isOwn
                           ? "text-white"
                           : isDark
@@ -170,156 +305,191 @@ export const OptimizedMessage = memo(
                     >
                       {message}
                     </Text>
-                    {edited && (
+
+                    <View className="mt-1.5 flex-row items-center justify-end">
+                      {edited && (
+                        <Text
+                          className={`mr-1 text-[8px] italic ${
+                            isOwn ? "text-white/60" : "text-slate-400"
+                          }`}
+                        >
+                          edited
+                        </Text>
+                      )}
+
                       <Text
-                        className={`text-[10px] ${
-                          isOwn
-                            ? "text-white/60"
-                            : isDark
-                              ? "text-slate-400"
-                              : "text-slate-400"
+                        className={`text-[9px] ${
+                          isOwn ? "text-sky-100" : "text-slate-400"
                         }`}
                       >
-                        (edited)
+                        {timestamp}
                       </Text>
-                    )}
+
+                      {isOwn && (
+                        <View className="ml-1">
+                          <CheckCheck
+                            size={13}
+                            color={read ? "#0369A1" : "#BAE6FD"}
+                          />
+                        </View>
+                      )}
+                    </View>
                   </>
                 )}
-              </View>
+              </Pressable>
 
-              {/* Reaction pills – only if not deleted and has reactions */}
-              {!deleted && hasReactions && (
+              {!deleted && reactionEntries.length > 0 && (
                 <View
-                  className={`absolute flex-row flex-wrap gap-0.5 ${
-                    isOwn
-                      ? "bottom-[-6px] right-[-4px]"
-                      : "bottom-[-6px] left-[-4px]"
+                  className={`absolute -bottom-2 flex-row flex-wrap ${
+                    isOwn ? "right-1" : "left-1"
                   }`}
                 >
-                  {reactionEntries.map(([emoji, users]) => (
-                    <TouchableOpacity
-                      key={emoji}
-                      onPress={() => handleReactionPress(emoji)}
-                      className={`flex-row items-center rounded-full px-1.5 py-0.8 border ${
-                        users.includes(currentUserId || "")
-                          ? "border-sky-400"
-                          : isDark
-                            ? "border-slate-600"
-                            : "border-slate-200"
-                      } ${isDark ? "bg-slate-800" : "bg-white"}`}
-                      style={{ elevation: 1 }}
-                    >
-                      <Text className="text-xs mr-0.5">{emoji}</Text>
-                      <Text
-                        className={`text-[9px] ${isDark ? "text-slate-300" : "text-slate-500"}`}
+                  {reactionEntries.map(([emoji, users]) => {
+                    const reacted =
+                      !!currentUserId && users.includes(currentUserId);
+
+                    return (
+                      <Pressable
+                        key={emoji}
+                        disabled={reactionBusy}
+                        onPress={() => handleReaction(emoji)}
+                        className={`mr-1 mb-1 flex-row items-center rounded-full border px-2 py-0.5 ${
+                          reacted
+                            ? "border-sky-400 bg-sky-100"
+                            : isDark
+                              ? "border-slate-600 bg-slate-800"
+                              : "border-white bg-white"
+                        }`}
+                        style={{
+                          shadowColor: "#64748B",
+                          shadowOffset: {
+                            width: 0,
+                            height: 2,
+                          },
+                          shadowOpacity: 0.12,
+                          shadowRadius: 4,
+                          elevation: 2,
+                        }}
                       >
-                        {users.length}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
+                        <Text className="text-[12px]">{emoji}</Text>
+
+                        <Text
+                          className={`ml-0.5 text-[9px] font-bold ${
+                            reacted
+                              ? "text-sky-700"
+                              : isDark
+                                ? "text-slate-300"
+                                : "text-slate-500"
+                          }`}
+                        >
+                          {users.length}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
                 </View>
               )}
             </View>
 
-            {/* Footer: timestamp + read receipt (only if not deleted) */}
-            <View className="flex-row items-center gap-1 mt-1 px-1">
-              <Text
-                className={`text-[10px] ${isDark ? "text-slate-400" : "text-slate-400"}`}
-              >
-                {timestamp}
-              </Text>
-              {isOwn && !deleted && read && (
-                <CheckCheck size={14} color="#0ea5e9" />
-              )}
-            </View>
-          </View>
-        </TouchableOpacity>
-
-        {/* ─── Modal – only for non‑deleted messages ──────────────── */}
-        {!deleted && (
-          <Modal
-            transparent
-            visible={modalVisible}
-            onRequestClose={() => setModalVisible(false)}
-            animationType="slide"
-          >
-            <TouchableOpacity
-              className="flex-1 bg-black/40 justify-end"
-              activeOpacity={1}
-              onPress={() => setModalVisible(false)}
-            >
+            {actionsOpen && !deleted && (
               <View
-                className={`rounded-t-3xl px-4 pb-8 pt-2 ${isDark ? "bg-slate-800" : "bg-white"}`}
+                className={`mt-2 rounded-[20px] p-2 ${
+                  isOwn ? "self-end" : "self-start"
+                } ${isDark ? "bg-slate-800" : "bg-white"}`}
+                style={{
+                  minWidth: 225,
+
+                  shadowColor: "#0EA5E9",
+                  shadowOffset: {
+                    width: 0,
+                    height: 6,
+                  },
+                  shadowOpacity: 0.18,
+                  shadowRadius: 14,
+                  elevation: 8,
+                }}
               >
                 <View
-                  className={`w-12 h-1 rounded-full self-center mb-3 ${isDark ? "bg-slate-600" : "bg-slate-300"}`}
-                />
-
-                {/* Emoji row */}
-                <View className="flex-row justify-around py-2">
-                  {EMOJIS.map((emoji) => (
-                    <TouchableOpacity
+                  className={`mb-1 flex-row items-center justify-between rounded-[15px] px-1.5 py-1 ${
+                    isDark ? "bg-slate-700" : "bg-sky-50"
+                  }`}
+                >
+                  {QUICK_REACTIONS.map((emoji) => (
+                    <Pressable
                       key={emoji}
-                      onPress={() => handleReactionPress(emoji)}
-                      className="p-2"
+                      disabled={reactionBusy}
+                      onPress={() => handleReaction(emoji)}
+                      className={`h-10 w-10 items-center justify-center rounded-[13px] ${
+                        currentReaction === emoji ? "bg-sky-200" : ""
+                      }`}
                     >
-                      <Text className="text-3xl">{emoji}</Text>
-                    </TouchableOpacity>
+                      <Text className="text-[22px]">{emoji}</Text>
+                    </Pressable>
                   ))}
                 </View>
 
-                {/* Actions (only for own messages) */}
                 {isOwn && (
                   <>
-                    <TouchableOpacity
-                      className={`flex-row items-center py-3 px-2 ${isDark ? "border-slate-700" : "border-slate-100"} border-t`}
+                    <Pressable
                       onPress={handleEdit}
+                      className={`mt-1 flex-row items-center rounded-[14px] px-3 py-2.5 ${
+                        isDark ? "bg-slate-700" : "bg-sky-50"
+                      }`}
                     >
-                      <Edit2 size={20} color="#0ea5e9" />
-                      <Text
-                        className={`ml-4 text-base ${isDark ? "text-slate-200" : "text-slate-700"}`}
-                      >
-                        Edit
-                      </Text>
-                    </TouchableOpacity>
+                      <Edit2 size={18} color="#0284C7" />
 
-                    <TouchableOpacity
-                      className="flex-row items-center py-3 px-2"
-                      onPress={handleDelete}
-                    >
-                      <Trash2 size={20} color="#ef4444" />
-                      <Text className="ml-4 text-red-500 text-base">
-                        Unsend
+                      <Text
+                        className={`ml-3 text-[13px] font-bold ${
+                          isDark ? "text-slate-200" : "text-slate-700"
+                        }`}
+                      >
+                        Edit message
                       </Text>
-                    </TouchableOpacity>
+                    </Pressable>
+
+                    <Pressable
+                      onPress={handleDelete}
+                      className={`mt-1 flex-row items-center rounded-[14px] px-3 py-2.5 ${
+                        isDark ? "bg-red-950" : "bg-red-50"
+                      }`}
+                    >
+                      <Trash2 size={18} color="#EF4444" />
+
+                      <Text className="ml-3 text-[13px] font-bold text-red-500">
+                        Unsend message
+                      </Text>
+                    </Pressable>
                   </>
                 )}
 
-                <TouchableOpacity
-                  className={`mt-2 pt-3 items-center ${isDark ? "border-slate-700" : "border-slate-100"} border-t`}
-                  onPress={() => setModalVisible(false)}
+                <Pressable
+                  onPress={handleCloseActions}
+                  className="mt-1 items-center rounded-[14px] py-2"
                 >
-                  <Text
-                    className={`text-base font-semibold ${isDark ? "text-slate-400" : "text-slate-400"}`}
-                  >
-                    Cancel
+                  <Text className="text-[12px] font-bold text-slate-400">
+                    Tap message to close
                   </Text>
-                </TouchableOpacity>
+                </Pressable>
               </View>
-            </TouchableOpacity>
-          </Modal>
-        )}
-      </>
+            )}
+          </View>
+        </View>
+      </View>
     );
   },
-  (prev, next) =>
-    prev.id === next.id &&
-    prev.message === next.message &&
-    prev.isOwn === next.isOwn &&
-    prev.read === next.read &&
-    prev.edited === next.edited &&
-    prev.deleted === next.deleted &&
-    prev.reactions === next.reactions &&
-    prev.senderRole === next.senderRole &&
-    prev.isDark === next.isDark,
+  (previous, next) =>
+    previous.id === next.id &&
+    previous.message === next.message &&
+    previous.created_at === next.created_at &&
+    previous.formattedTime === next.formattedTime &&
+    previous.isOwn === next.isOwn &&
+    previous.read === next.read &&
+    previous.edited === next.edited &&
+    previous.deleted === next.deleted &&
+    previous.reactions === next.reactions &&
+    previous.senderName === next.senderName &&
+    previous.senderAvatar === next.senderAvatar &&
+    previous.senderRole === next.senderRole &&
+    previous.currentUserId === next.currentUserId &&
+    previous.isDark === next.isDark,
 );

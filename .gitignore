@@ -8,11 +8,12 @@ node_modules/
 dist/
 web-build/
 expo-env.d.ts
-
+my-jeepq-app-firebase-adminsdk-fbsvc-a883f67b60.json
 # Native
 .kotlin/
 *.orig.*
 *.jks
+
 *.p8
 *.p12
 *.key

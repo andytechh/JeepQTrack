@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../../config/supabase";
 
 export type JeepneyStatus =
@@ -33,6 +33,14 @@ export interface AdminJeepney {
 
   created_at: string;
   updated_at: string;
+
+  /*
+   * Timestamp of this jeepney's most recent GPS ping.
+   * Not a column on `jeepneys` - merged in client-side from
+   * `latest_gps_tracking`. Used to decide whether a jeepney has
+   * been "active today".
+   */
+  last_gps_at: string | null;
 }
 
 export interface AdminDashboardStats {
@@ -99,6 +107,36 @@ const SELECT_COLUMNS = `
   updated_at
 `;
 
+/* ============================================================
+   HELPERS
+============================================================ */
+
+/*
+ * A jeepney is "active today" if its most recent GPS ping was
+ * recorded on the current calendar date (device-local time).
+ * A jeepney that hasn't reported GPS at all today - even if its
+ * `status` row still says "waiting" from yesterday - is excluded.
+ */
+function isActiveToday(recordedAt: string | null): boolean {
+  if (!recordedAt) {
+    return false;
+  }
+
+  const recorded = new Date(recordedAt);
+
+  if (Number.isNaN(recorded.getTime())) {
+    return false;
+  }
+
+  const now = new Date();
+
+  return (
+    recorded.getFullYear() === now.getFullYear() &&
+    recorded.getMonth() === now.getMonth() &&
+    recorded.getDate() === now.getDate()
+  );
+}
+
 export function useAdminDashboard(): AdminDashboardResult {
   const [jeepneys, setJeepneys] = useState<AdminJeepney[]>([]);
 
@@ -107,6 +145,8 @@ export function useAdminDashboard(): AdminDashboardResult {
   const [refreshing, setRefreshing] = useState(false);
 
   const [error, setError] = useState<string | null>(null);
+
+  const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
 
   const loadDashboard = useCallback(async (isRefresh = false) => {
     try {
@@ -136,6 +176,33 @@ export function useAdminDashboard(): AdminDashboardResult {
 
         throw fetchError;
       }
+
+      /*
+       * Get latest GPS ping per jeepney so we can tell which ones
+       * have actually been active today.
+       */
+      const { data: gpsRecords, error: gpsError } = await supabase
+        .from("latest_gps_tracking")
+        .select("jeepney_id, recorded_at")
+        .order("recorded_at", {
+          ascending: false,
+        });
+
+      if (gpsError) {
+        // Don't hard-fail the dashboard over GPS lookup issues -
+        // just fall back to no jeepneys being marked active-today.
+        console.error("❌ Admin dashboard GPS lookup failed:", gpsError);
+      }
+
+      const lastGpsById = new Map<string, string>();
+
+      gpsRecords?.forEach((record: any) => {
+        if (!record.jeepney_id || lastGpsById.has(record.jeepney_id)) {
+          return;
+        }
+
+        lastGpsById.set(record.jeepney_id, record.recorded_at);
+      });
 
       const normalized: AdminJeepney[] = (data ?? []).map((item: any) => ({
         id: item.id,
@@ -186,6 +253,8 @@ export function useAdminDashboard(): AdminDashboardResult {
         created_at: item.created_at ?? new Date().toISOString(),
 
         updated_at: item.updated_at ?? new Date().toISOString(),
+
+        last_gps_at: lastGpsById.get(item.id) ?? null,
       }));
 
       setJeepneys(normalized);
@@ -215,7 +284,7 @@ export function useAdminDashboard(): AdminDashboardResult {
   }, [loadDashboard]);
 
   /*
-   * Realtime jeepney updates.
+   * Realtime jeepney + GPS updates.
    */
   useEffect(() => {
     console.log("📡 Starting admin jeepney realtime subscription...");
@@ -247,7 +316,62 @@ export function useAdminDashboard(): AdminDashboardResult {
         (payload) => {
           console.log("🔄 Jeepney updated:", payload.new);
 
-          loadDashboard(true);
+          const updated = payload.new as any;
+
+          setJeepneys((current) =>
+            current.map((jeepney) => {
+              if (jeepney.id !== updated.id) {
+                return jeepney;
+              }
+
+              /*
+               * `jeepneys` table rows don't carry `last_gps_at` -
+               * preserve whatever we already had for it.
+               */
+              return {
+                ...jeepney,
+
+                plate_number: updated.plate_number ?? jeepney.plate_number,
+                jeep_name: updated.jeep_name ?? jeepney.jeep_name,
+                driver_name: updated.driver_name ?? jeepney.driver_name,
+                driver_id: updated.driver_id ?? jeepney.driver_id,
+                bracket: Number(updated.bracket ?? jeepney.bracket),
+                capacity: Number(updated.capacity ?? jeepney.capacity),
+                current_occupancy: Number(
+                  updated.current_occupancy ?? jeepney.current_occupancy,
+                ),
+                last_occupancy_update:
+                  updated.last_occupancy_update ??
+                  jeepney.last_occupancy_update,
+                status: (updated.status ?? jeepney.status) as JeepneyStatus,
+                queue_position:
+                  updated.queue_position === null ||
+                  updated.queue_position === undefined
+                    ? null
+                    : Number(updated.queue_position),
+                departure_time:
+                  updated.departure_time ?? jeepney.departure_time,
+                eta:
+                  updated.eta === null || updated.eta === undefined
+                    ? null
+                    : Number(updated.eta),
+                current_latitude:
+                  updated.current_latitude === null ||
+                  updated.current_latitude === undefined
+                    ? jeepney.current_latitude
+                    : Number(updated.current_latitude),
+                current_longitude:
+                  updated.current_longitude === null ||
+                  updated.current_longitude === undefined
+                    ? jeepney.current_longitude
+                    : Number(updated.current_longitude),
+                terminal_id: Number(updated.terminal_id ?? jeepney.terminal_id),
+                loading_ends_at:
+                  updated.loading_ends_at ?? jeepney.loading_ends_at,
+                updated_at: updated.updated_at ?? jeepney.updated_at,
+              };
+            }),
+          );
         },
       )
 
@@ -261,7 +385,40 @@ export function useAdminDashboard(): AdminDashboardResult {
         (payload) => {
           console.log("🔴 Jeepney deleted:", payload.old);
 
-          loadDashboard(true);
+          const deleted = payload.old as any;
+
+          setJeepneys((current) =>
+            current.filter((jeepney) => jeepney.id !== deleted.id),
+          );
+        },
+      )
+
+      /*
+       * GPS pings update `last_gps_at` directly in state, so a
+       * jeepney flips into "active today" the moment it reports,
+       * without waiting for a full dashboard reload.
+       */
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "gps_tracking",
+        },
+        (payload) => {
+          const gps = payload.new as any;
+
+          const jeepneyId = String(gps.jeepney_id);
+
+          const recordedAt = gps.recorded_at ?? new Date().toISOString();
+
+          setJeepneys((current) =>
+            current.map((jeepney) =>
+              jeepney.id === jeepneyId
+                ? { ...jeepney, last_gps_at: recordedAt }
+                : jeepney,
+            ),
+          );
         },
       )
 
@@ -269,12 +426,24 @@ export function useAdminDashboard(): AdminDashboardResult {
         console.log("📡 Admin jeepney realtime:", status);
       });
 
+    channelRef.current = channel;
+
     return () => {
       console.log("📡 Removing admin jeepney realtime...");
 
       supabase.removeChannel(channel);
+
+      channelRef.current = null;
     };
   }, [loadDashboard]);
+
+  /*
+   * Only jeepneys that have actually reported GPS today feed the
+   * dashboard's sections and stats below.
+   */
+  const activeTodayJeepneys = useMemo(() => {
+    return jeepneys.filter((jeepney) => isActiveToday(jeepney.last_gps_at));
+  }, [jeepneys]);
 
   /*
    * Waiting jeepneys.
@@ -283,7 +452,7 @@ export function useAdminDashboard(): AdminDashboardResult {
    * jeepneys.queue_position
    */
   const waitingJeepneys = useMemo(() => {
-    return jeepneys
+    return activeTodayJeepneys
       .filter(
         (jeepney) =>
           jeepney.status === "waiting" && jeepney.queue_position !== null,
@@ -291,48 +460,56 @@ export function useAdminDashboard(): AdminDashboardResult {
       .sort(
         (a, b) => (a.queue_position ?? 999999) - (b.queue_position ?? 999999),
       );
-  }, [jeepneys]);
+  }, [activeTodayJeepneys]);
 
   /*
    * Current loading jeepney.
    */
   const loadingJeepney = useMemo(() => {
-    return jeepneys.find((jeepney) => jeepney.status === "loading") ?? null;
-  }, [jeepneys]);
+    return (
+      activeTodayJeepneys.find((jeepney) => jeepney.status === "loading") ??
+      null
+    );
+  }, [activeTodayJeepneys]);
 
   /*
    * En-route jeepneys.
    */
   const enRouteJeepneys = useMemo(() => {
-    return jeepneys.filter((jeepney) => jeepney.status === "en_route");
-  }, [jeepneys]);
+    return activeTodayJeepneys.filter(
+      (jeepney) => jeepney.status === "en_route",
+    );
+  }, [activeTodayJeepneys]);
 
   /*
    * Statistics.
    */
   const stats = useMemo<AdminDashboardStats>(() => {
-    if (!jeepneys || jeepneys.length === 0) {
+    if (!activeTodayJeepneys || activeTodayJeepneys.length === 0) {
       return EMPTY_STATS;
     }
 
     return {
-      total: jeepneys.length,
+      total: activeTodayJeepneys.length,
 
-      active: jeepneys.filter((j) => j.status !== "inactive").length,
+      active: activeTodayJeepneys.filter((j) => j.status !== "inactive").length,
 
-      waiting: jeepneys.filter((j) => j.status === "waiting").length,
+      waiting: activeTodayJeepneys.filter((j) => j.status === "waiting").length,
 
-      loading: jeepneys.filter((j) => j.status === "loading").length,
+      loading: activeTodayJeepneys.filter((j) => j.status === "loading").length,
 
-      enRoute: jeepneys.filter((j) => j.status === "en_route").length,
+      enRoute: activeTodayJeepneys.filter((j) => j.status === "en_route")
+        .length,
 
-      arrived: jeepneys.filter((j) => j.status === "arrived").length,
+      arrived: activeTodayJeepneys.filter((j) => j.status === "arrived").length,
 
-      dispatched: jeepneys.filter((j) => j.status === "dispatched").length,
+      dispatched: activeTodayJeepneys.filter((j) => j.status === "dispatched")
+        .length,
 
-      inactive: jeepneys.filter((j) => j.status === "inactive").length,
+      inactive: activeTodayJeepneys.filter((j) => j.status === "inactive")
+        .length,
     };
-  }, [jeepneys]);
+  }, [activeTodayJeepneys]);
 
   const refresh = useCallback(async () => {
     await loadDashboard(true);
@@ -340,9 +517,10 @@ export function useAdminDashboard(): AdminDashboardResult {
 
   return {
     /*
-     * Always arrays.
+     * Always arrays. Exposed as the active-today set so any screen
+     * consuming `jeepneys` directly also gets the filtered view.
      */
-    jeepneys: jeepneys ?? [],
+    jeepneys: activeTodayJeepneys ?? [],
 
     waitingJeepneys: waitingJeepneys ?? [],
 

@@ -7,13 +7,15 @@
     "icon": "./assets/images/logo.png",
     "scheme": "jeepqtrack",
     "userInterfaceStyle": "automatic",
+
     "ios": {
       "icon": "./assets/expo.icon"
     },
+
     "android": {
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/images/android-icon-foreground.png",
+        "foregroundImage": "./assets/images/logo.png",
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
@@ -22,15 +24,24 @@
       "package": "com.andevs.JeepQTrack",
       "permissions": ["android.permission.POST_NOTIFICATIONS"]
     },
+
     "web": {
       "output": "static",
-      "favicon": "./assets/images/favicon.png",
+      "favicon": "./assets/images/logo.png",
       "bundler": "metro"
     },
+
     "plugins": [
       "expo-router",
       "@react-native-vector-icons/ionicons",
-      "expo-notifications",
+
+      [
+        "expo-notifications",
+        {
+          "sounds": ["./assets/sounds/chat.wav"]
+        }
+      ],
+
       [
         "expo-splash-screen",
         {
@@ -41,19 +52,23 @@
           }
         }
       ],
+
       "expo-secure-store",
       "expo-web-browser"
     ],
+
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
     },
+
     "extra": {
       "router": {},
       "eas": {
         "projectId": "59e56dea-8e12-4f2e-ba74-cb0b92e84592"
       }
     },
+
     "owner": "andevs"
   }
 }

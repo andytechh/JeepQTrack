@@ -19,6 +19,7 @@ type ClayTabBarProps = {
   };
 
   notificationBadge?: number;
+  chatUnreadCount?: number;
 
   descriptors: Record<
     string,
@@ -45,16 +46,20 @@ export function ClayTabBar({
   descriptors,
   navigation,
   notificationBadge = 0,
+  chatUnreadCount = 0,
 }: ClayTabBarProps) {
   const { isDark } = useTheme();
 
   const backgroundColor = isDark ? "#172033" : "#F8FCFF";
   const borderColor = isDark ? "#263449" : "rgba(255,255,255,0.95)";
   const activeBackground = isDark ? "#164E63" : "#E0F2FE";
+
   const activeColor = "#0EA5E9";
   const inactiveColor = isDark ? "#94A3B8" : "#64748B";
+
   const activeTextColor = isDark ? "#38BDF8" : "#0369A1";
   const inactiveTextColor = isDark ? "#94A3B8" : "#64748B";
+
   const badgeBorderColor = isDark ? "#172033" : "#FFFFFF";
 
   const renderIcon = (routeName: string, focused: boolean) => {
@@ -71,6 +76,7 @@ export function ClayTabBar({
 
       case "map":
         return <Map size={size} color={color} strokeWidth={strokeWidth} />;
+
       case "chat":
         return (
           <MessageCircle size={size} color={color} strokeWidth={strokeWidth} />
@@ -104,6 +110,7 @@ export function ClayTabBar({
           borderWidth: 1,
           borderColor,
           backgroundColor,
+
           shadowColor: "#000",
           shadowOffset: {
             width: 0,
@@ -112,6 +119,7 @@ export function ClayTabBar({
           shadowOpacity: isDark ? 0.25 : 0.1,
           shadowRadius: 16,
           elevation: 8,
+
           overflow: "visible",
         }}
       >
@@ -130,6 +138,7 @@ export function ClayTabBar({
 
         {state.routes.map((route, index) => {
           const { options } = descriptors[route.key];
+
           const isFocused = state.index === index;
 
           const onPress = () => {
@@ -154,9 +163,11 @@ export function ClayTabBar({
           const label = options.tabBarLabel || options.title || route.name;
 
           const badge =
-            route.name === "notifications"
-              ? notificationBadge
-              : options.tabBarBadge;
+            route.name === "chat"
+              ? chatUnreadCount
+              : route.name === "notifications"
+                ? notificationBadge
+                : options.tabBarBadge;
 
           return (
             <TouchableOpacity
@@ -183,16 +194,22 @@ export function ClayTabBar({
                   width: route.name === "queue" ? 70 : 58,
                   height: 56,
                   borderRadius: 17,
+
                   backgroundColor: isFocused ? activeBackground : "transparent",
+
                   borderWidth: isFocused ? 1 : 0,
+
                   borderColor: isFocused
                     ? "rgba(255,255,255,0.95)"
                     : "transparent",
+
                   shadowColor: isFocused ? "#000" : "transparent",
+
                   shadowOffset: {
                     width: 0,
                     height: isFocused ? 2 : 0,
                   },
+
                   shadowOpacity: isFocused ? 0.06 : 0,
                   shadowRadius: isFocused ? 4 : 0,
                   elevation: isFocused ? 2 : 0,
@@ -230,14 +247,33 @@ export function ClayTabBar({
                         style={{
                           right: -9,
                           top: -7,
+
                           minWidth: 18,
                           height: 18,
+
                           paddingHorizontal: 4,
+
                           borderWidth: 2,
                           borderColor: badgeBorderColor,
+
+                          shadowColor: "#EF4444",
+                          shadowOffset: {
+                            width: 0,
+                            height: 2,
+                          },
+                          shadowOpacity: 0.2,
+                          shadowRadius: 3,
+                          elevation: 3,
                         }}
                       >
-                        <Text className="text-[9px] font-extrabold text-white">
+                        <Text
+                          style={{
+                            color: "#FFFFFF",
+                            fontSize: 9,
+                            fontWeight: "900",
+                            lineHeight: 11,
+                          }}
+                        >
                           {Number(badge) > 99 ? "99+" : String(badge)}
                         </Text>
                       </View>
@@ -249,6 +285,7 @@ export function ClayTabBar({
                     marginTop: 3,
                     fontSize: 9,
                     fontWeight: isFocused ? "800" : "600",
+
                     color: isFocused ? activeTextColor : inactiveTextColor,
                   }}
                 >

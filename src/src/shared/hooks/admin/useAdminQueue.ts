@@ -23,6 +23,14 @@ export interface AdminQueueJeepney {
   loading_ends_at: string | null;
   departed_at: string | null;
   updated_at: string | null;
+
+  /*
+   * Timestamp of this jeepney's most recent GPS ping.
+   * Not a column on `jeepneys` - merged in client-side from
+   * `latest_gps_tracking`. Used to decide whether a jeepney has
+   * been "active today".
+   */
+  last_gps_at: string | null;
 }
 
 export type QueueTerminal = "all" | 1 | 2;
@@ -79,6 +87,36 @@ const QUEUE_COLUMNS = `
 // GPS positions change continuously but jeepneys don't refetch on their own,
 // so this keeps ETA fresh without needing a realtime subscription on gps_tracking.
 const ETA_REFRESH_INTERVAL_MS = 25000;
+
+/* ============================================================
+   HELPERS
+============================================================ */
+
+/*
+ * A jeepney is "active today" if its most recent GPS ping was
+ * recorded on the current calendar date (device-local time).
+ * A jeepney whose `status` row still says "waiting" from a
+ * previous day, but hasn't reported GPS today, is excluded.
+ */
+function isActiveToday(recordedAt: string | null): boolean {
+  if (!recordedAt) {
+    return false;
+  }
+
+  const recorded = new Date(recordedAt);
+
+  if (Number.isNaN(recorded.getTime())) {
+    return false;
+  }
+
+  const now = new Date();
+
+  return (
+    recorded.getFullYear() === now.getFullYear() &&
+    recorded.getMonth() === now.getMonth() &&
+    recorded.getDate() === now.getDate()
+  );
+}
 
 export function useAdminQueue(): UseAdminQueueResult {
   const [jeepneys, setJeepneys] = useState<AdminQueueJeepney[]>([]);
@@ -214,7 +252,40 @@ export function useAdminQueue(): UseAdminQueueResult {
           return;
         }
 
-        const rows = (data ?? []) as AdminQueueJeepney[];
+        const rawRows = (data ?? []) as Omit<
+          AdminQueueJeepney,
+          "last_gps_at"
+        >[];
+
+        /*
+         * Get latest GPS ping per jeepney so we can tell which ones
+         * have actually been active today.
+         */
+        const ids = rawRows.map((row) => row.id);
+
+        let lastGpsById = new Map<string, string>();
+
+        if (ids.length > 0) {
+          const { data: gpsRows, error: gpsError } = await supabase
+            .from("latest_gps_tracking")
+            .select("jeepney_id, recorded_at")
+            .in("jeepney_id", ids);
+
+          if (gpsError) {
+            console.error("❌ Admin queue GPS lookup failed:", gpsError);
+          } else {
+            gpsRows?.forEach((row: any) => {
+              if (!row.jeepney_id) return;
+              lastGpsById.set(row.jeepney_id, row.recorded_at);
+            });
+          }
+        }
+
+        const rows: AdminQueueJeepney[] = rawRows.map((row) => ({
+          ...row,
+          last_gps_at: lastGpsById.get(row.id) ?? null,
+        }));
+
         setJeepneys(rows);
         setLoading(false);
         setRefreshing(false);
@@ -295,7 +366,10 @@ export function useAdminQueue(): UseAdminQueueResult {
           table: "jeepneys",
         },
         (payload) => {
-          const incoming = payload.new as AdminQueueJeepney;
+          const incoming = payload.new as Omit<
+            AdminQueueJeepney,
+            "last_gps_at"
+          >;
 
           console.log("🟢 Jeepney added to queue:", incoming.plate_number);
 
@@ -308,10 +382,12 @@ export function useAdminQueue(): UseAdminQueueResult {
               return current;
             }
 
-            return [...current, incoming];
+            // No GPS ping known yet - it'll flip into "active today"
+            // as soon as a gps_tracking INSERT arrives for it.
+            return [...current, { ...incoming, last_gps_at: null }];
           });
 
-          attachEtas([incoming]);
+          attachEtas([{ ...incoming, last_gps_at: null }]);
         },
       )
 
@@ -329,7 +405,7 @@ export function useAdminQueue(): UseAdminQueueResult {
           table: "jeepneys",
         },
         (payload) => {
-          const updated = payload.new as AdminQueueJeepney;
+          const updated = payload.new as Omit<AdminQueueJeepney, "last_gps_at">;
 
           console.log(
             "🔄 Jeepney queue updated:",
@@ -348,14 +424,20 @@ export function useAdminQueue(): UseAdminQueueResult {
               return current.filter((jeepney) => jeepney.id !== updated.id);
             }
 
-            const exists = current.some((jeepney) => jeepney.id === updated.id);
+            const existing = current.find(
+              (jeepney) => jeepney.id === updated.id,
+            );
 
-            if (!exists) {
-              return [...current, updated];
+            if (!existing) {
+              return [...current, { ...updated, last_gps_at: null }];
             }
 
+            // `jeepneys` table rows don't carry `last_gps_at` -
+            // preserve whatever we already had for it.
             return current.map((jeepney) =>
-              jeepney.id === updated.id ? updated : jeepney,
+              jeepney.id === updated.id
+                ? { ...updated, last_gps_at: existing.last_gps_at }
+                : jeepney,
             );
           });
 
@@ -363,7 +445,7 @@ export function useAdminQueue(): UseAdminQueueResult {
           // an ordinary field update on an already en-route jeepney is harmless to
           // recompute too since attachEtas() no-ops for anything not en route.
           if (updated.status !== "inactive") {
-            attachEtas([updated]);
+            attachEtas([{ ...updated, last_gps_at: null }]);
           }
         },
       )
@@ -392,6 +474,40 @@ export function useAdminQueue(): UseAdminQueueResult {
 
           setJeepneys((current) =>
             current.filter((jeepney) => jeepney.id !== deleted.id),
+          );
+        },
+      )
+
+      /*
+       * --------------------------------------------------------
+       * GPS PING
+       *
+       * Updates `last_gps_at` directly in state, so a jeepney
+       * flips into "active today" the moment it reports, without
+       * waiting for a full queue reload.
+       * --------------------------------------------------------
+       */
+
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "gps_tracking",
+        },
+        (payload) => {
+          const gps = payload.new as any;
+
+          const jeepneyId = String(gps.jeepney_id);
+
+          const recordedAt = gps.recorded_at ?? new Date().toISOString();
+
+          setJeepneys((current) =>
+            current.map((jeepney) =>
+              jeepney.id === jeepneyId
+                ? { ...jeepney, last_gps_at: recordedAt }
+                : jeepney,
+            ),
           );
         },
       )
@@ -441,6 +557,21 @@ export function useAdminQueue(): UseAdminQueueResult {
 
   /*
    * ============================================================
+   * ACTIVE TODAY FILTER
+   *
+   * Only jeepneys that have reported GPS today feed the sections
+   * below - a stale "waiting" row from a previous day won't show.
+   * ============================================================
+   */
+
+  const activeTodayJeepneys = useMemo(() => {
+    return filteredJeepneys.filter((jeepney) =>
+      isActiveToday(jeepney.last_gps_at),
+    );
+  }, [filteredJeepneys]);
+
+  /*
+   * ============================================================
    * LOADING JEEPNEY
    *
    * Your database constraint guarantees:
@@ -451,12 +582,12 @@ export function useAdminQueue(): UseAdminQueueResult {
 
   const loadingJeepney = useMemo(() => {
     return (
-      filteredJeepneys.find(
+      activeTodayJeepneys.find(
         (jeepney) =>
           jeepney.status === "loading" && jeepney.queue_position === 1,
       ) ?? null
     );
-  }, [filteredJeepneys]);
+  }, [activeTodayJeepneys]);
 
   /*
    * ============================================================
@@ -467,7 +598,7 @@ export function useAdminQueue(): UseAdminQueueResult {
    */
 
   const waitingJeepneys = useMemo(() => {
-    return filteredJeepneys
+    return activeTodayJeepneys
       .filter(
         (jeepney) =>
           jeepney.status === "waiting" && jeepney.queue_position !== null,
@@ -478,7 +609,7 @@ export function useAdminQueue(): UseAdminQueueResult {
           (b.queue_position ?? Number.MAX_SAFE_INTEGER)
         );
       });
-  }, [filteredJeepneys]);
+  }, [activeTodayJeepneys]);
 
   /*
    * ============================================================
@@ -487,7 +618,7 @@ export function useAdminQueue(): UseAdminQueueResult {
    */
 
   const enRouteJeepneys = useMemo(() => {
-    return filteredJeepneys
+    return activeTodayJeepneys
       .filter(
         (jeepney) =>
           jeepney.status === "en_route" || jeepney.status === "dispatched",
@@ -503,7 +634,7 @@ export function useAdminQueue(): UseAdminQueueResult {
 
         return bTime - aTime;
       });
-  }, [filteredJeepneys]);
+  }, [activeTodayJeepneys]);
 
   /*
    * ============================================================
@@ -512,7 +643,7 @@ export function useAdminQueue(): UseAdminQueueResult {
    */
 
   const arrivedJeepneys = useMemo(() => {
-    return filteredJeepneys
+    return activeTodayJeepneys
       .filter((jeepney) => jeepney.status === "arrived")
       .sort((a, b) => {
         const aTime = a.updated_at ? new Date(a.updated_at).getTime() : 0;
@@ -521,7 +652,7 @@ export function useAdminQueue(): UseAdminQueueResult {
 
         return bTime - aTime;
       });
-  }, [filteredJeepneys]);
+  }, [activeTodayJeepneys]);
 
   /*
    * ============================================================
@@ -530,10 +661,10 @@ export function useAdminQueue(): UseAdminQueueResult {
    */
 
   const activeJeepneys = useMemo(() => {
-    return filteredJeepneys.filter(
+    return activeTodayJeepneys.filter(
       (jeepney) => jeepney.status === "waiting" || jeepney.status === "loading",
     );
-  }, [filteredJeepneys]);
+  }, [activeTodayJeepneys]);
 
   /*
    * ============================================================
@@ -546,7 +677,7 @@ export function useAdminQueue(): UseAdminQueueResult {
   }, [loadQueue]);
 
   return {
-    jeepneys: filteredJeepneys,
+    jeepneys: activeTodayJeepneys,
 
     loadingJeepney,
 

@@ -1,92 +1,42 @@
-import { useRouter } from "expo-router";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useFocusEffect } from "expo-router";
+import {
+  Check,
+  MessageCircle,
+  MoreVertical,
+  SendHorizontal,
+  Shield,
+  Users,
+  X,
+} from "lucide-react-native";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  AppState,
   FlatList,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   Pressable,
-  RefreshControl,
-  StyleSheet,
   Text,
   TextInput,
   View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { useOptimizedChat } from "../../../../src/shared/hooks/useOptimizedChat";
-import { useAuthStore } from "../../../../src/shared/store/authStore";
+import { OptimizedMessage } from "@/src/shared/components/chat/OptimizedMessage";
+import { supabase } from "@/src/shared/config/supabase";
+import { useTheme } from "@/src/shared/context/ThemeContext";
+import { useOptimizedChat } from "@/src/shared/hooks/useOptimizedChat";
+import { useAuthStore } from "@/src/shared/store/authStore";
 
-interface ChatMessage {
-  id: string;
-  room_id: string;
-  sender_id: string;
-  message: string;
-  created_at: string;
-  updated_at?: string;
-  edited_at?: string;
-  deleted_at?: string;
-  read_by: string[];
-  reactions?: Record<string, string[]>;
-  status?: string;
-  sender?: {
-    id: string;
-    display_name: string;
-    role: string;
-    avatar_url?: string;
-  };
-}
-
-/* =========================================================
-   COLORS
-========================================================= */
-
-const COLORS = {
-  background: "#EEF8FF",
-  surface: "#FFFFFF",
-  surfaceBlue: "#E0F2FE",
-
-  primary: "#38BDF8",
-  primaryDark: "#0284C7",
-  primarySoft: "#BAE6FD",
-
-  text: "#0F172A",
-  secondary: "#475569",
-  muted: "#94A3B8",
-
-  border: "#D8ECF7",
-
-  incoming: "#FFFFFF",
-  outgoing: "#DDF3FF",
-
-  danger: "#EF4444",
-  success: "#22C55E",
-};
-
-const ROLE_COLORS: Record<string, string> = {
-  admin: "#7C3AED",
-  dispatcher: "#0284C7",
-  driver: "#16A34A",
-  staff: "#64748B",
-};
-
-const ROLE_LABELS: Record<string, string> = {
-  admin: "ADMIN",
-  dispatcher: "DISPATCHER",
-  driver: "DRIVER",
-  staff: "STAFF",
-};
-
-const QUICK_REACTIONS = ["👍", "❤️", "😂", "👏"];
-
-/* =========================================================
-   ADMIN CHAT SCREEN
-========================================================= */
+const PRESENCE_CHANNEL = "staff-presence";
+const BATCH_SIZE = 10;
 
 export default function AdminChatScreen() {
-  const router = useRouter();
-
   const { user } = useAuthStore();
+  const { isDark } = useTheme();
+  const insets = useSafeAreaInsets();
 
   const {
     messages,
@@ -94,237 +44,369 @@ export default function AdminChatScreen() {
     sending,
     hasMore,
     unreadCount,
+
     sendMessage,
     loadOlderMessages,
     markAsRead,
-    refreshMessages,
+
     editMessage,
     deleteMessage,
+    adminDeleteMessage,
+
     addReaction,
     removeReaction,
   } = useOptimizedChat();
 
-  const [text, setText] = useState("");
-  const [refreshing, setRefreshing] = useState(false);
-  const [selectedMessage, setSelectedMessage] = useState<ChatMessage | null>(
-    null,
-  );
+  const [inputText, setInputText] = useState("");
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
 
-  const listRef = useRef<FlatList<ChatMessage>>(null);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [onlineCount, setOnlineCount] = useState(0);
+  const [totalMembers, setTotalMembers] = useState(0);
+
+  const [adminMenuVisible, setAdminMenuVisible] = useState(false);
+  const [memberModalVisible, setMemberModalVisible] = useState(false);
+
+  const flatListRef = useRef<FlatList>(null);
   const inputRef = useRef<TextInput>(null);
+  const presenceChannelRef = useRef<any>(null);
 
-  const currentUserId = user?.uid;
+  const isNearLatestRef = useRef(true);
+  const initialScrollDoneRef = useRef(false);
 
-  /* =========================================================
-     MARK MESSAGES AS READ
-  ========================================================= */
+  const isAdmin = user?.role?.toLowerCase() === "admin";
 
-  useEffect(() => {
-    if (!loading && currentUserId) {
-      markAsRead();
-    }
-  }, [loading, currentUserId, markAsRead]);
+  /*
+   * CLAYMORPHISM COLORS
+   *
+   * The header intentionally uses the same clay surface
+   * as the rest of the interface instead of a blue header.
+   */
+  const colors = useMemo(
+    () => ({
+      background: isDark ? "#0F172A" : "#EEF8FF",
 
-  /* =========================================================
-     ROLE HELPERS
-  ========================================================= */
+      surface: isDark ? "#172033" : "#FFFFFF",
 
-  const getRoleLabel = useCallback((role?: string) => {
-    if (!role) return "STAFF";
+      surfaceSoft: isDark ? "#1E293B" : "#F7FBFE",
 
-    return ROLE_LABELS[role.toLowerCase()] || role.toUpperCase();
-  }, []);
+      surfaceRaised: isDark ? "#202D42" : "#FDFEFF",
 
-  const getRoleColor = useCallback((role?: string) => {
-    if (!role) return ROLE_COLORS.staff;
+      primary: "#0EA5E9",
+      primaryDark: "#0284C7",
 
-    return ROLE_COLORS[role.toLowerCase()] || ROLE_COLORS.staff;
-  }, []);
+      primarySoft: isDark ? "#164E63" : "#E0F2FE",
 
-  /* =========================================================
-     TIME FORMAT
-  ========================================================= */
+      text: isDark ? "#F8FAFC" : "#0F172A",
 
-  const formatTime = useCallback((dateString: string) => {
-    const date = new Date(dateString);
+      secondary: isDark ? "#CBD5E1" : "#475569",
 
-    return date.toLocaleTimeString([], {
-      hour: "numeric",
-      minute: "2-digit",
-    });
-  }, []);
+      muted: isDark ? "#64748B" : "#94A3B8",
 
-  /* =========================================================
-     DATE SEPARATOR
-  ========================================================= */
+      border: isDark ? "#263449" : "#D9EAF4",
 
-  const shouldShowDate = useCallback(
-    (index: number) => {
-      if (index === 0) return true;
+      success: "#22C55E",
 
-      const current = new Date(messages[index].created_at);
-
-      const previous = new Date(messages[index - 1].created_at);
-
-      return current.toDateString() !== previous.toDateString();
-    },
-    [messages],
+      danger: "#EF4444",
+    }),
+    [isDark],
   );
 
-  /* =========================================================
-     DATE LABEL
-  ========================================================= */
+  /*
+   * LOAD TOTAL STAFF MEMBERS
+   */
+  useEffect(() => {
+    if (!user?.uid) return;
 
-  const formatDateLabel = useCallback((dateString: string) => {
-    const date = new Date(dateString);
+    let cancelled = false;
 
-    const today = new Date();
+    const loadMembers = async () => {
+      try {
+        const { count, error } = await supabase
+          .from("users")
+          .select("*", {
+            count: "exact",
+            head: true,
+          })
+          .in("role", ["admin", "dispatcher", "driver", "staff"]);
 
-    const yesterday = new Date();
-    yesterday.setDate(today.getDate() - 1);
+        if (error) {
+          console.error("Failed to load members:", error);
+          return;
+        }
 
-    if (date.toDateString() === today.toDateString()) {
-      return "TODAY";
-    }
+        if (!cancelled && count !== null) {
+          setTotalMembers(count);
+        }
+      } catch (error) {
+        console.error("Load members error:", error);
+      }
+    };
 
-    if (date.toDateString() === yesterday.toDateString()) {
-      return "YESTERDAY";
-    }
+    loadMembers();
 
-    return date
-      .toLocaleDateString([], {
-        month: "short",
-        day: "numeric",
-        year: "numeric",
-      })
-      .toUpperCase();
-  }, []);
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.uid]);
 
-  /* =========================================================
-     SEND MESSAGE
-  ========================================================= */
+  /*
+   * STAFF PRESENCE
+   */
+  useEffect(() => {
+    if (!user?.uid) return;
 
-  const handleSend = useCallback(async () => {
-    const trimmed = text.trim();
+    const channel = supabase.channel(PRESENCE_CHANNEL, {
+      config: {
+        presence: {
+          key: user.uid,
+        },
+      },
+    });
 
-    if (!trimmed || sending) return;
+    channel.on(
+      "presence",
+      {
+        event: "sync",
+      },
+      () => {
+        const state = channel.presenceState();
 
-    setText("");
+        let count = 0;
 
-    try {
-      await sendMessage(trimmed);
+        Object.keys(state).forEach((key) => {
+          const entries = state[key] as any[];
 
-      requestAnimationFrame(() => {
-        listRef.current?.scrollToEnd({
-          animated: true,
+          if (entries?.some((entry) => entry?.status === "online")) {
+            count++;
+          }
         });
-      });
-    } catch (error) {
-      console.error("Send message error:", error);
 
-      setText(trimmed);
+        setOnlineCount(count);
+      },
+    );
 
-      Alert.alert(
-        "Message Error",
-        "Unable to send the message. Please try again.",
-      );
-    }
-  }, [text, sending, sendMessage]);
+    channel.subscribe(async (status) => {
+      if (status === "SUBSCRIBED") {
+        try {
+          await channel.track({
+            user_id: user.uid,
+            display_name: user.displayName || "Staff",
+            status: "online",
+            last_seen: new Date().toISOString(),
+          });
+        } catch (error) {
+          console.error("Presence track error:", error);
+        }
+      }
+    });
 
-  /* =========================================================
-     REFRESH
-  ========================================================= */
+    presenceChannelRef.current = channel;
 
-  const handleRefresh = useCallback(async () => {
-    if (refreshing) return;
+    return () => {
+      try {
+        channel.untrack();
+        channel.unsubscribe();
+      } catch {}
 
-    setRefreshing(true);
+      presenceChannelRef.current = null;
+    };
+  }, [user?.uid, user?.displayName]);
 
-    try {
-      await refreshMessages();
-    } catch (error) {
-      console.error("Refresh error:", error);
-    } finally {
-      setRefreshing(false);
-    }
-  }, [refreshing, refreshMessages]);
+  /*
+   * RE-TRACK PRESENCE WHEN APP RETURNS
+   */
+  useEffect(() => {
+    const subscription = AppState.addEventListener(
+      "change",
+      async (nextState) => {
+        const channel = presenceChannelRef.current;
 
-  /* =========================================================
-     LOAD OLDER
-  ========================================================= */
+        if (!channel || !user?.uid) {
+          return;
+        }
 
-  const handleLoadOlder = useCallback(async () => {
-    if (!hasMore || loading) return;
+        if (nextState === "active") {
+          try {
+            await channel.track({
+              user_id: user.uid,
+              display_name: user.displayName || "Staff",
+              status: "online",
+              last_seen: new Date().toISOString(),
+            });
+          } catch {}
+        }
+      },
+    );
 
-    await loadOlderMessages();
-  }, [hasMore, loading, loadOlderMessages]);
+    return () => subscription.remove();
+  }, [user?.uid, user?.displayName]);
 
-  /* =========================================================
-     EDIT MESSAGE
-  ========================================================= */
+  /*
+   * MARK CHAT AS READ WHEN SCREEN IS FOCUSED
+   */
+  useFocusEffect(
+    useCallback(() => {
+      if (unreadCount > 0) {
+        markAsRead();
+      }
+    }, [unreadCount, markAsRead]),
+  );
 
-  const handleEdit = useCallback(
-    (message: ChatMessage) => {
-      if (Platform.OS === "ios") {
-        Alert.prompt(
-          "Edit Message",
-          "Update your message:",
-          [
-            {
-              text: "Cancel",
-              style: "cancel",
-            },
-            {
-              text: "Save",
-              onPress: async (value?: string) => {
-                if (!value?.trim()) return;
+  /*
+   * CHAT DATA
+   *
+   * The hook keeps messages oldest -> newest.
+   * FlatList inverted therefore displays newest at the bottom.
+   */
+  const displayMessages = useMemo(() => [...messages].reverse(), [messages]);
 
-                await editMessage(message.id, value.trim());
-              },
-            },
-          ],
-          "plain-text",
-          message.message,
-        );
-
+  /*
+   * SCROLL TO LATEST
+   */
+  const scrollToLatest = useCallback(
+    (animated = false) => {
+      if (!displayMessages.length) {
         return;
       }
 
-      /*
-       * Android does not support Alert.prompt.
-       * Use a simple temporary edit prompt through
-       * the same chat input.
-       */
-      Alert.alert(
-        "Edit Message",
-        "Android does not support the native text prompt here.",
-        [
-          {
-            text: "Cancel",
-            style: "cancel",
-          },
-          {
-            text: "Copy to input",
-            onPress: () => {
-              setText(message.message);
-              inputRef.current?.focus();
-            },
-          },
-        ],
-      );
+      requestAnimationFrame(() => {
+        flatListRef.current?.scrollToIndex({
+          index: 0,
+          animated,
+        });
+      });
     },
-    [editMessage],
+    [displayMessages.length],
   );
 
-  /* =========================================================
-     DELETE MESSAGE
-  ========================================================= */
+  /*
+   * INITIAL SCROLL
+   */
+  useEffect(() => {
+    if (
+      !loading &&
+      displayMessages.length > 0 &&
+      !initialScrollDoneRef.current
+    ) {
+      initialScrollDoneRef.current = true;
 
+      setTimeout(() => {
+        scrollToLatest(false);
+      }, 80);
+    }
+  }, [loading, displayMessages.length, scrollToLatest]);
+
+  /*
+   * TRACK WHETHER USER IS NEAR THE LATEST MESSAGE
+   */
+  const handleScroll = useCallback(({ nativeEvent }: any) => {
+    isNearLatestRef.current = nativeEvent.contentOffset.y < 80;
+  }, []);
+
+  /*
+   * LOAD OLDER
+   */
+  const handleLoadMore = useCallback(async () => {
+    if (!hasMore || isLoadingMore) {
+      return;
+    }
+
+    setIsLoadingMore(true);
+
+    try {
+      await loadOlderMessages();
+    } catch (error) {
+      console.error("Load older messages error:", error);
+    } finally {
+      setIsLoadingMore(false);
+    }
+  }, [hasMore, isLoadingMore, loadOlderMessages]);
+
+  /*
+   * EDIT
+   */
+  const handleEditMessage = useCallback(
+    (messageId: string, currentText: string) => {
+      setEditingMessageId(messageId);
+      setInputText(currentText);
+
+      setTimeout(() => {
+        inputRef.current?.focus();
+      }, 100);
+    },
+    [],
+  );
+
+  /*
+   * CANCEL EDIT
+   */
+  const cancelEditing = useCallback(() => {
+    setEditingMessageId(null);
+    setInputText("");
+    inputRef.current?.blur();
+  }, []);
+
+  /*
+   * UPDATE MESSAGE
+   */
+  const handleUpdateMessage = useCallback(async () => {
+    if (!editingMessageId) {
+      return;
+    }
+
+    const text = inputText.trim();
+
+    if (!text) {
+      return;
+    }
+
+    await editMessage(editingMessageId, text);
+
+    cancelEditing();
+  }, [editingMessageId, inputText, editMessage, cancelEditing]);
+
+  /*
+   * SEND MESSAGE
+   */
+  const handleSend = useCallback(async () => {
+    if (editingMessageId) {
+      await handleUpdateMessage();
+      return;
+    }
+
+    const text = inputText.trim();
+
+    if (!text || sending) {
+      return;
+    }
+
+    await sendMessage(text);
+
+    setInputText("");
+
+    if (isNearLatestRef.current) {
+      setTimeout(() => {
+        scrollToLatest(true);
+      }, 100);
+    }
+  }, [
+    editingMessageId,
+    inputText,
+    sending,
+    sendMessage,
+    handleUpdateMessage,
+    scrollToLatest,
+  ]);
+
+  /*
+   * DELETE / ADMIN DELETE
+   */
   const handleDelete = useCallback(
-    (message: ChatMessage) => {
+    (messageId: string) => {
       Alert.alert(
-        "Delete Message",
-        "Are you sure you want to delete this message?",
+        "Delete message",
+        isAdmin ? "Delete this message for everyone?" : "Delete your message?",
         [
           {
             text: "Cancel",
@@ -334,1234 +416,969 @@ export default function AdminChatScreen() {
             text: "Delete",
             style: "destructive",
             onPress: async () => {
-              await deleteMessage(message.id);
+              try {
+                if (isAdmin && typeof adminDeleteMessage === "function") {
+                  await adminDeleteMessage(messageId);
+                } else {
+                  await deleteMessage(messageId);
+                }
+              } catch (error) {
+                console.error("Delete message error:", error);
+
+                Alert.alert(
+                  "Unable to delete",
+                  "You do not have permission to delete this message.",
+                );
+              }
             },
           },
         ],
       );
     },
-    [deleteMessage],
+    [isAdmin, adminDeleteMessage, deleteMessage],
   );
 
-  /* =========================================================
-     MESSAGE LONG PRESS
-  ========================================================= */
-
-  const handleMessageLongPress = useCallback(
-    (message: ChatMessage) => {
-      const isMine = message.sender_id === currentUserId;
-
-      if (message.deleted_at) return;
-
-      const options = isMine
-        ? ["React", "Edit Message", "Delete Message", "Cancel"]
-        : ["React", "Cancel"];
-
-      Alert.alert(
-        message.sender?.display_name || "Message",
-        "Choose an action",
-        options.map((option) => ({
-          text: option,
-          style:
-            option === "Delete Message"
-              ? "destructive"
-              : option === "Cancel"
-                ? "cancel"
-                : "default",
-
-          onPress: () => {
-            if (option === "React") {
-              setSelectedMessage(message);
-            }
-
-            if (option === "Edit Message") {
-              handleEdit(message);
-            }
-
-            if (option === "Delete Message") {
-              handleDelete(message);
-            }
-          },
-        })),
-      );
-    },
-    [currentUserId, handleEdit, handleDelete],
-  );
-
-  /* =========================================================
-     REACTION
-  ========================================================= */
-
-  const handleReaction = useCallback(
-    async (message: ChatMessage, emoji: string) => {
-      if (!currentUserId) return;
-
-      const users = message.reactions?.[emoji] || [];
-
-      if (users.includes(currentUserId)) {
-        await removeReaction(message.id, emoji);
-      } else {
-        await addReaction(message.id, emoji);
-      }
-
-      setSelectedMessage(null);
-    },
-    [currentUserId, addReaction, removeReaction],
-  );
-
-  /* =========================================================
-     REACTION CHIPS
-  ========================================================= */
-
-  const renderReactions = useCallback(
-    (message: ChatMessage) => {
-      const reactions = message.reactions;
-
-      if (!reactions) return null;
-
-      const entries = Object.entries(reactions).filter(
-        ([, users]) => users.length > 0,
-      );
-
-      if (!entries.length) return null;
-
-      return (
-        <View style={styles.reactionsRow}>
-          {entries.map(([emoji, users]) => {
-            const reacted = currentUserId && users.includes(currentUserId);
-
-            return (
-              <Pressable
-                key={emoji}
-                onPress={() => handleReaction(message, emoji)}
-                style={[
-                  styles.reactionChip,
-                  reacted && styles.reactionChipActive,
-                ]}
-              >
-                <Text style={styles.reactionEmoji}>{emoji}</Text>
-
-                <Text
-                  style={[
-                    styles.reactionCount,
-                    reacted && styles.reactionCountActive,
-                  ]}
-                >
-                  {users.length}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
-      );
-    },
-    [currentUserId, handleReaction],
-  );
-
-  /* =========================================================
-     MESSAGE RENDERER
-  ========================================================= */
-
+  /*
+   * RENDER MESSAGE
+   *
+   * No formattedTime prop is passed here.
+   * OptimizedMessage calculates the Philippine 12-hour
+   * timestamp itself.
+   */
   const renderMessage = useCallback(
-    ({ item, index }: { item: ChatMessage; index: number }) => {
-      const isMine = item.sender_id === currentUserId;
+    ({ item }: { item: (typeof messages)[number] }) => {
+      const isOwn = item.sender_id === user?.uid;
 
-      const senderName = item.sender?.display_name || "Unknown Staff";
-
-      const role = item.sender?.role || "staff";
-
-      const roleColor = getRoleColor(role);
-
-      const deleted = !!item.deleted_at;
+      const readByOthers =
+        isOwn && (item.read_by?.some((id) => id !== user?.uid) ?? false);
 
       return (
-        <View>
-          {/* DATE SEPARATOR */}
-
-          {shouldShowDate(index) && (
-            <View style={styles.dateSeparator}>
-              <View style={styles.dateLine} />
-
-              <View style={styles.datePill}>
-                <Text style={styles.dateText}>
-                  {formatDateLabel(item.created_at)}
-                </Text>
-              </View>
-
-              <View style={styles.dateLine} />
-            </View>
-          )}
-
-          {/* MESSAGE ROW */}
-
-          <View style={[styles.messageRow, isMine && styles.messageRowMine]}>
-            {/* INCOMING AVATAR */}
-
-            {!isMine && (
-              <View
-                style={[
-                  styles.avatar,
-                  {
-                    backgroundColor: roleColor,
-                  },
-                ]}
-              >
-                <Text style={styles.avatarText}>
-                  {senderName.charAt(0).toUpperCase()}
-                </Text>
-              </View>
-            )}
-
-            <View
-              style={[styles.messageColumn, isMine && styles.messageColumnMine]}
-            >
-              {/* SENDER */}
-
-              {!isMine && (
-                <View style={styles.senderHeader}>
-                  <Text style={styles.senderName}>{senderName}</Text>
-
-                  <View
-                    style={[
-                      styles.roleBadge,
-                      {
-                        backgroundColor: `${roleColor}18`,
-                      },
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.roleBadgeText,
-                        {
-                          color: roleColor,
-                        },
-                      ]}
-                    >
-                      {getRoleLabel(role)}
-                    </Text>
-                  </View>
-                </View>
-              )}
-
-              {/* MESSAGE BUBBLE */}
-
-              <Pressable
-                onLongPress={() => handleMessageLongPress(item)}
-                delayLongPress={350}
-                style={[
-                  styles.messageBubble,
-                  isMine ? styles.messageBubbleMine : styles.messageBubbleOther,
-                ]}
-              >
-                {deleted ? (
-                  <Text style={styles.deletedText}>Message deleted</Text>
-                ) : (
-                  <Text
-                    style={[
-                      styles.messageText,
-                      isMine && styles.messageTextMine,
-                    ]}
-                  >
-                    {item.message}
-                  </Text>
-                )}
-
-                {/* MESSAGE META */}
-
-                <View
-                  style={[styles.messageMeta, isMine && styles.messageMetaMine]}
-                >
-                  {item.edited_at && !deleted && (
-                    <Text
-                      style={[
-                        styles.editedText,
-                        isMine && styles.editedTextMine,
-                      ]}
-                    >
-                      edited
-                    </Text>
-                  )}
-
-                  <Text
-                    style={[styles.timeText, isMine && styles.timeTextMine]}
-                  >
-                    {formatTime(item.created_at)}
-                  </Text>
-
-                  {isMine && (
-                    <Text
-                      style={[
-                        styles.checkIcon,
-                        {
-                          color:
-                            item.read_by?.length > 1
-                              ? COLORS.primaryDark
-                              : COLORS.muted,
-                        },
-                      ]}
-                    >
-                      {item.read_by?.length > 1 ? "✓✓" : "✓"}
-                    </Text>
-                  )}
-                </View>
-              </Pressable>
-
-              {/* REACTIONS */}
-
-              {renderReactions(item)}
-            </View>
-          </View>
-        </View>
+        <OptimizedMessage
+          id={item.id}
+          message={item.message}
+          sender_id={item.sender_id}
+          created_at={item.created_at}
+          isOwn={isOwn}
+          senderName={item.sender?.display_name ?? "Staff"}
+          senderRole={item.sender?.role ?? "staff"}
+          senderAvatar={item.sender?.avatar_url}
+          read={readByOthers}
+          edited={!!item.edited_at}
+          deleted={!!item.deleted_at}
+          reactions={item.reactions || {}}
+          onEdit={handleEditMessage}
+          onDelete={handleDelete}
+          onAddReaction={addReaction}
+          onRemoveReaction={removeReaction}
+          currentUserId={user?.uid}
+          isDark={isDark}
+        />
       );
     },
     [
-      currentUserId,
-      getRoleColor,
-      getRoleLabel,
-      shouldShowDate,
-      formatDateLabel,
-      formatTime,
-      handleMessageLongPress,
-      renderReactions,
+      user?.uid,
+      isDark,
+      handleEditMessage,
+      handleDelete,
+      addReaction,
+      removeReaction,
     ],
   );
 
-  /* =========================================================
-     LOADING
-  ========================================================= */
-
-  if (loading && messages.length === 0) {
+  /*
+   * LOADING SCREEN
+   */
+  if (loading && !messages.length) {
     return (
-      <View style={styles.loadingContainer}>
-        <View style={styles.loadingClay}>
-          <ActivityIndicator size="large" color={COLORS.primaryDark} />
-
-          <Text style={styles.loadingText}>Loading staff chat...</Text>
+      <View
+        className="flex-1 items-center justify-center"
+        style={{
+          backgroundColor: colors.background,
+        }}
+      >
+        <View
+          style={{
+            width: 70,
+            height: 70,
+            borderRadius: 24,
+            alignItems: "center",
+            justifyContent: "center",
+            backgroundColor: colors.surface,
+            shadowColor: "#38BDF8",
+            shadowOffset: {
+              width: 0,
+              height: 6,
+            },
+            shadowOpacity: 0.15,
+            shadowRadius: 12,
+            elevation: 6,
+          }}
+        >
+          <MessageCircle size={31} color={colors.primaryDark} />
         </View>
+
+        <ActivityIndicator
+          size="small"
+          color={colors.primary}
+          style={{
+            marginTop: 18,
+          }}
+        />
+
+        <Text
+          style={{
+            marginTop: 10,
+            color: colors.secondary,
+            fontWeight: "700",
+          }}
+        >
+          Loading staff chat...
+        </Text>
       </View>
     );
   }
 
-  /* =========================================================
-     MAIN SCREEN
-  ========================================================= */
-
   return (
-    <View style={styles.container}>
-      <KeyboardAvoidingView
-        style={styles.keyboardContainer}
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
+    <KeyboardAvoidingView
+      style={{
+        flex: 1,
+        backgroundColor: colors.background,
+      }}
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
+    >
+      <View
+        style={{
+          flex: 1,
+          backgroundColor: colors.background,
+        }}
       >
-        {/* =================================================
-            HEADER
-        ================================================= */}
+        {/* ====================================================== */}
+        {/* CLAY HEADER */}
+        {/* ====================================================== */}
 
-        <View style={styles.header}>
-          {/* BACK */}
+        <View
+          style={{
+            paddingTop: Math.max(insets.top, 10),
+            paddingBottom: 11,
+            paddingHorizontal: 14,
 
-          <Pressable onPress={() => router.back()} style={styles.headerButton}>
-            <Text style={styles.headerIcon}>‹</Text>
-          </Pressable>
+            /*
+             * IMPORTANT:
+             * Header is now clay white/gray instead
+             * of blue.
+             */
+            backgroundColor: isDark ? "#172033" : "#DFF3FC",
 
-          {/* TITLE */}
+            borderBottomWidth: 1,
+            borderBottomColor: colors.border,
 
-          <View style={styles.headerCenter}>
-            <View style={styles.headerTitleRow}>
-              <View style={styles.chatIcon}>
-                <Text style={styles.chatIconText}>💬</Text>
-              </View>
+            shadowColor: "#38BDF8",
+            shadowOffset: {
+              width: 0,
+              height: 5,
+            },
+            shadowOpacity: isDark ? 0.08 : 0.12,
+            shadowRadius: 10,
 
-              <View>
-                <Text style={styles.headerTitle}>Staff Chat</Text>
+            elevation: 8,
 
-                <View style={styles.onlineRow}>
-                  <View style={styles.onlineDot} />
+            zIndex: 30,
+          }}
+        >
+          <View className="flex-row items-center">
+            {/* CHAT ICON */}
 
-                  <Text style={styles.onlineText}>Staff General Chat</Text>
-                </View>
+            <View
+              style={{
+                width: 49,
+                height: 49,
+                borderRadius: 17,
+
+                alignItems: "center",
+                justifyContent: "center",
+
+                backgroundColor: isDark ? "#203047" : "#EAF7FF",
+
+                borderWidth: 1,
+                borderColor: isDark ? "#2D415A" : "#D6EDF9",
+
+                shadowColor: "#38BDF8",
+                shadowOffset: {
+                  width: 0,
+                  height: 4,
+                },
+                shadowOpacity: 0.16,
+                shadowRadius: 8,
+                elevation: 4,
+              }}
+            >
+              <MessageCircle
+                size={24}
+                color={colors.primaryDark}
+                strokeWidth={2.5}
+              />
+            </View>
+
+            {/* CHAT TITLE */}
+
+            <View
+              className="flex-1"
+              style={{
+                marginLeft: 11,
+              }}
+            >
+              <Text
+                numberOfLines={1}
+                style={{
+                  color: colors.text,
+                  fontSize: 18,
+                  fontWeight: "900",
+                  letterSpacing: -0.3,
+                }}
+              >
+                Staff Chat
+              </Text>
+
+              <View
+                className="flex-row items-center"
+                style={{
+                  marginTop: 2,
+                }}
+              >
+                {/* ONLINE DOT */}
+
+                <View
+                  style={{
+                    width: 7,
+                    height: 7,
+                    borderRadius: 4,
+                    backgroundColor: colors.success,
+                    marginRight: 5,
+                  }}
+                />
+
+                <Text
+                  numberOfLines={1}
+                  style={{
+                    color: colors.secondary,
+                    fontSize: 10,
+                    fontWeight: "700",
+                  }}
+                >
+                  {onlineCount} online
+                  {" · "}
+                  {totalMembers} members
+                </Text>
               </View>
             </View>
+
+            {/* UNREAD */}
+
+            {unreadCount > 0 && (
+              <View
+                style={{
+                  marginRight: 7,
+                  minWidth: 29,
+                  height: 29,
+                  borderRadius: 15,
+                  paddingHorizontal: 7,
+
+                  alignItems: "center",
+                  justifyContent: "center",
+
+                  backgroundColor: colors.danger,
+
+                  shadowColor: colors.danger,
+                  shadowOffset: {
+                    width: 0,
+                    height: 3,
+                  },
+                  shadowOpacity: 0.18,
+                  shadowRadius: 5,
+                  elevation: 3,
+                }}
+              >
+                <Text
+                  style={{
+                    color: "#FFFFFF",
+                    fontSize: 10,
+                    fontWeight: "900",
+                  }}
+                >
+                  {unreadCount > 99 ? "99+" : unreadCount}
+                </Text>
+              </View>
+            )}
+
+            {/* ADMIN BUTTON */}
+
+            {isAdmin && (
+              <Pressable
+                onPress={() => setAdminMenuVisible(true)}
+                style={{
+                  width: 42,
+                  height: 42,
+                  borderRadius: 14,
+
+                  alignItems: "center",
+                  justifyContent: "center",
+
+                  backgroundColor: colors.surface,
+
+                  borderWidth: 1,
+                  borderColor: colors.border,
+
+                  shadowColor: "#64748B",
+                  shadowOffset: {
+                    width: 0,
+                    height: 3,
+                  },
+                  shadowOpacity: 0.12,
+                  shadowRadius: 6,
+                  elevation: 3,
+                }}
+              >
+                <MoreVertical size={21} color={colors.secondary} />
+              </Pressable>
+            )}
           </View>
-
-          {/* REFRESH */}
-
-          <Pressable onPress={handleRefresh} style={styles.headerButton}>
-            <Text style={styles.refreshIcon}>↻</Text>
-          </Pressable>
         </View>
 
-        {/* =================================================
-            UNREAD BANNER
-        ================================================= */}
-
-        {unreadCount > 0 && (
-          <Pressable onPress={markAsRead} style={styles.unreadBanner}>
-            <Text style={styles.unreadIcon}>✉</Text>
-
-            <Text style={styles.unreadBannerText}>
-              {unreadCount} unread {unreadCount === 1 ? "message" : "messages"}
-            </Text>
-
-            <Text style={styles.unreadBannerAction}>Mark read</Text>
-          </Pressable>
-        )}
-
-        {/* =================================================
-            MESSAGE LIST
-        ================================================= */}
+        {/* ====================================================== */}
+        {/* MESSAGES */}
+        {/* ====================================================== */}
 
         <FlatList
-          ref={listRef}
-          data={messages}
-          keyExtractor={(item) => item.id}
+          ref={flatListRef}
+          data={displayMessages}
           renderItem={renderMessage}
-          style={styles.messageList}
-          contentContainerStyle={[
-            styles.messageContent,
-            messages.length === 0 && styles.emptyMessageContent,
-          ]}
+          keyExtractor={(item) => item.id}
+          inverted
           keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
-          onStartReached={handleLoadOlder}
-          onStartReachedThreshold={0.2}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={handleRefresh}
-              tintColor={COLORS.primaryDark}
-            />
+          keyboardDismissMode={
+            Platform.OS === "ios" ? "interactive" : "on-drag"
           }
-          ListHeaderComponent={
-            hasMore ? (
-              <Pressable
-                onPress={handleLoadOlder}
-                style={styles.loadOlderButton}
+          showsVerticalScrollIndicator={false}
+          onScroll={handleScroll}
+          scrollEventThrottle={16}
+          onEndReached={handleLoadMore}
+          onEndReachedThreshold={0.35}
+          removeClippedSubviews={Platform.OS === "android"}
+          initialNumToRender={BATCH_SIZE}
+          maxToRenderPerBatch={BATCH_SIZE}
+          updateCellsBatchingPeriod={40}
+          windowSize={5}
+          contentContainerStyle={{
+            paddingHorizontal: 12,
+            paddingTop: 14,
+            paddingBottom: 18,
+          }}
+          ListFooterComponent={
+            isLoadingMore ? (
+              <View
+                className="items-center"
+                style={{
+                  paddingVertical: 12,
+                }}
               >
-                <Text style={styles.loadOlderIcon}>↑</Text>
+                <ActivityIndicator size="small" color={colors.primary} />
 
-                <Text style={styles.loadOlderText}>Load older messages</Text>
-              </Pressable>
+                <Text
+                  style={{
+                    marginTop: 5,
+                    color: colors.muted,
+                    fontSize: 10,
+                  }}
+                >
+                  Loading older messages...
+                </Text>
+              </View>
             ) : null
           }
           ListEmptyComponent={
-            <View style={styles.emptyState}>
-              <View style={styles.emptyIconClay}>
-                <Text style={styles.emptyIconText}>💬</Text>
+            <View
+              className="items-center justify-center"
+              style={{
+                minHeight: 280,
+              }}
+            >
+              <View
+                className="items-center justify-center"
+                style={{
+                  width: 85,
+                  height: 85,
+                  borderRadius: 28,
+                  backgroundColor: colors.surface,
+
+                  shadowColor: "#38BDF8",
+                  shadowOffset: {
+                    width: 0,
+                    height: 6,
+                  },
+                  shadowOpacity: 0.12,
+                  shadowRadius: 12,
+                  elevation: 5,
+                }}
+              >
+                <MessageCircle size={38} color={colors.primaryDark} />
               </View>
 
-              <Text style={styles.emptyTitle}>No messages yet</Text>
+              <Text
+                style={{
+                  marginTop: 15,
+                  color: colors.text,
+                  fontSize: 18,
+                  fontWeight: "800",
+                }}
+              >
+                No messages yet
+              </Text>
 
-              <Text style={styles.emptySubtitle}>
-                Start a conversation with the staff.
+              <Text
+                style={{
+                  marginTop: 5,
+                  color: colors.secondary,
+                  fontSize: 12,
+                }}
+              >
+                Start a conversation.
               </Text>
             </View>
           }
         />
 
-        {/* =================================================
-            REACTION PICKER
-        ================================================= */}
+        {/* ====================================================== */}
+        {/* EDIT BAR */}
+        {/* ====================================================== */}
 
-        {selectedMessage && (
-          <View style={styles.reactionPicker}>
-            {QUICK_REACTIONS.map((emoji) => (
-              <Pressable
-                key={emoji}
-                onPress={() => handleReaction(selectedMessage, emoji)}
-                style={styles.reactionPickerButton}
+        {editingMessageId && (
+          <View
+            style={{
+              marginHorizontal: 12,
+              marginBottom: 6,
+              paddingHorizontal: 12,
+              height: 42,
+              borderRadius: 15,
+
+              flexDirection: "row",
+              alignItems: "center",
+
+              backgroundColor: colors.surface,
+
+              borderWidth: 1,
+              borderColor: colors.border,
+
+              shadowColor: "#38BDF8",
+              shadowOffset: {
+                width: 0,
+                height: 3,
+              },
+              shadowOpacity: 0.08,
+              shadowRadius: 7,
+              elevation: 3,
+            }}
+          >
+            <View
+              style={{
+                width: 4,
+                height: 23,
+                borderRadius: 4,
+                backgroundColor: colors.primary,
+                marginRight: 9,
+              }}
+            />
+
+            <View className="flex-1">
+              <Text
+                style={{
+                  color: colors.primaryDark,
+                  fontSize: 9,
+                  fontWeight: "900",
+                }}
               >
-                <Text style={styles.reactionPickerEmoji}>{emoji}</Text>
-              </Pressable>
-            ))}
+                EDITING MESSAGE
+              </Text>
+
+              <Text
+                style={{
+                  color: colors.secondary,
+                  fontSize: 10,
+                }}
+              >
+                Update your message
+              </Text>
+            </View>
 
             <Pressable
-              onPress={() => setSelectedMessage(null)}
-              style={styles.reactionPickerClose}
+              onPress={cancelEditing}
+              style={{
+                width: 30,
+                height: 30,
+                borderRadius: 10,
+
+                alignItems: "center",
+                justifyContent: "center",
+
+                backgroundColor: colors.surfaceSoft,
+              }}
             >
-              <Text style={styles.closeIcon}>×</Text>
+              <X size={16} color={colors.secondary} />
             </Pressable>
           </View>
         )}
 
-        {/* =================================================
-            INPUT
-        ================================================= */}
+        {/* ====================================================== */}
+        {/* INPUT */}
+        {/* ====================================================== */}
 
-        <View style={styles.inputArea}>
-          <View style={styles.inputClay}>
+        <View
+          style={{
+            paddingHorizontal: 12,
+            paddingTop: 7,
+            paddingBottom:
+              Platform.OS === "ios" ? Math.max(insets.bottom, 8) : 8,
+
+            backgroundColor: colors.background,
+          }}
+        >
+          <View
+            className="flex-row items-end"
+            style={{
+              minHeight: 58,
+              maxHeight: 130,
+              borderRadius: 22,
+
+              paddingLeft: 15,
+              paddingRight: 7,
+              paddingVertical: 7,
+
+              backgroundColor: colors.surface,
+
+              borderWidth: 1,
+              borderColor: colors.border,
+
+              shadowColor: "#38BDF8",
+              shadowOffset: {
+                width: 0,
+                height: 5,
+              },
+              shadowOpacity: isDark ? 0.12 : 0.16,
+              shadowRadius: 12,
+              elevation: 5,
+            }}
+          >
             <TextInput
               ref={inputRef}
-              value={text}
-              onChangeText={setText}
-              placeholder="Message staff..."
-              placeholderTextColor={COLORS.muted}
+              value={inputText}
+              onChangeText={setInputText}
+              placeholder={
+                editingMessageId ? "Edit message..." : "Message staff..."
+              }
+              placeholderTextColor={colors.muted}
               multiline
               maxLength={2000}
-              style={styles.input}
+              blurOnSubmit={false}
               editable={!sending}
-              returnKeyType="default"
+              style={{
+                flex: 1,
+                maxHeight: 105,
+                minHeight: 42,
+
+                paddingTop: 10,
+                paddingBottom: 8,
+                paddingRight: 8,
+
+                color: colors.text,
+                fontSize: 14,
+                lineHeight: 20,
+              }}
             />
 
-            <View style={styles.inputActions}>
-              <Text style={styles.characterCount}>{text.length}/2000</Text>
+            <Pressable
+              onPress={handleSend}
+              disabled={!inputText.trim() || sending}
+              style={{
+                width: 43,
+                height: 43,
+                borderRadius: 15,
 
-              <Pressable
-                onPress={handleSend}
-                disabled={!text.trim() || sending}
-                style={[
-                  styles.sendButton,
-                  (!text.trim() || sending) && styles.sendButtonDisabled,
-                ]}
-              >
-                {sending ? (
-                  <ActivityIndicator size="small" color="#FFFFFF" />
-                ) : (
-                  <Text style={styles.sendIcon}>➤</Text>
-                )}
-              </Pressable>
-            </View>
+                alignItems: "center",
+                justifyContent: "center",
+
+                backgroundColor:
+                  !inputText.trim() || sending
+                    ? "#CBD5E1"
+                    : editingMessageId
+                      ? "#16A34A"
+                      : colors.primaryDark,
+
+                shadowColor:
+                  !inputText.trim() || sending ? "#64748B" : colors.primaryDark,
+
+                shadowOffset: {
+                  width: 0,
+                  height: 3,
+                },
+                shadowOpacity: 0.16,
+                shadowRadius: 5,
+                elevation: 3,
+              }}
+            >
+              {sending ? (
+                <ActivityIndicator size="small" color="#FFF" />
+              ) : editingMessageId ? (
+                <Check size={19} color="#FFF" strokeWidth={2.8} />
+              ) : (
+                <SendHorizontal size={19} color="#FFF" strokeWidth={2.5} />
+              )}
+            </Pressable>
           </View>
         </View>
-      </KeyboardAvoidingView>
-    </View>
+
+        {/* ====================================================== */}
+        {/* ADMIN MENU */}
+        {/* ====================================================== */}
+
+        <Modal
+          visible={adminMenuVisible}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setAdminMenuVisible(false)}
+        >
+          <Pressable
+            style={{
+              flex: 1,
+              backgroundColor: "rgba(15,23,42,0.45)",
+
+              justifyContent: "flex-start",
+              alignItems: "flex-end",
+
+              paddingTop: insets.top + 58,
+              paddingRight: 14,
+            }}
+            onPress={() => setAdminMenuVisible(false)}
+          >
+            <Pressable
+              onPress={() => {}}
+              style={{
+                width: 235,
+                borderRadius: 24,
+                padding: 10,
+
+                backgroundColor: colors.surface,
+
+                borderWidth: 1,
+                borderColor: colors.border,
+
+                shadowColor: "#000",
+                shadowOffset: {
+                  width: 0,
+                  height: 10,
+                },
+                shadowOpacity: 0.18,
+                shadowRadius: 20,
+                elevation: 12,
+              }}
+            >
+              {/* MENU HEADER */}
+
+              <View
+                style={{
+                  paddingHorizontal: 9,
+                  paddingVertical: 8,
+                }}
+              >
+                <View className="flex-row items-center">
+                  <View
+                    style={{
+                      width: 34,
+                      height: 34,
+                      borderRadius: 11,
+
+                      alignItems: "center",
+                      justifyContent: "center",
+
+                      backgroundColor: colors.primarySoft,
+                    }}
+                  >
+                    <Shield size={17} color={colors.primaryDark} />
+                  </View>
+
+                  <View
+                    style={{
+                      marginLeft: 9,
+                    }}
+                  >
+                    <Text
+                      style={{
+                        color: colors.text,
+                        fontSize: 13,
+                        fontWeight: "900",
+                      }}
+                    >
+                      Admin Controls
+                    </Text>
+
+                    <Text
+                      style={{
+                        color: colors.muted,
+                        fontSize: 9,
+                      }}
+                    >
+                      Staff chat management
+                    </Text>
+                  </View>
+                </View>
+              </View>
+
+              {/* MEMBERS */}
+
+              <Pressable
+                onPress={() => {
+                  setAdminMenuVisible(false);
+
+                  setMemberModalVisible(true);
+                }}
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+
+                  padding: 12,
+                  borderRadius: 15,
+
+                  backgroundColor: colors.surfaceSoft,
+
+                  marginTop: 3,
+                }}
+              >
+                <Users size={18} color={colors.primaryDark} />
+
+                <View
+                  style={{
+                    marginLeft: 11,
+                  }}
+                >
+                  <Text
+                    style={{
+                      color: colors.text,
+                      fontSize: 12,
+                      fontWeight: "800",
+                    }}
+                  >
+                    Manage Members
+                  </Text>
+
+                  <Text
+                    style={{
+                      color: colors.muted,
+                      fontSize: 9,
+                    }}
+                  >
+                    {totalMembers} staff members
+                  </Text>
+                </View>
+              </Pressable>
+
+              {/* OVERVIEW */}
+
+              <Pressable
+                onPress={() => setAdminMenuVisible(false)}
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+
+                  padding: 12,
+                  borderRadius: 15,
+
+                  marginTop: 5,
+                }}
+              >
+                <MessageCircle size={18} color={colors.secondary} />
+
+                <View
+                  style={{
+                    marginLeft: 11,
+                  }}
+                >
+                  <Text
+                    style={{
+                      color: colors.text,
+                      fontSize: 12,
+                      fontWeight: "700",
+                    }}
+                  >
+                    Chat Overview
+                  </Text>
+
+                  <Text
+                    style={{
+                      color: colors.muted,
+                      fontSize: 9,
+                    }}
+                  >
+                    {onlineCount} staff currently online
+                  </Text>
+                </View>
+              </Pressable>
+            </Pressable>
+          </Pressable>
+        </Modal>
+
+        {/* ====================================================== */}
+        {/* MEMBERS MODAL */}
+        {/* ====================================================== */}
+
+        <Modal
+          visible={memberModalVisible}
+          transparent
+          animationType="slide"
+          onRequestClose={() => setMemberModalVisible(false)}
+        >
+          <View
+            style={{
+              flex: 1,
+              justifyContent: "flex-end",
+
+              backgroundColor: "rgba(15,23,42,0.45)",
+            }}
+          >
+            <View
+              style={{
+                backgroundColor: colors.surface,
+
+                borderTopLeftRadius: 30,
+                borderTopRightRadius: 30,
+
+                paddingTop: 8,
+                paddingHorizontal: 18,
+
+                paddingBottom: Math.max(insets.bottom, 18),
+
+                shadowColor: "#000",
+                shadowOffset: {
+                  width: 0,
+                  height: -8,
+                },
+                shadowOpacity: 0.15,
+                shadowRadius: 20,
+                elevation: 15,
+              }}
+            >
+              {/* HANDLE */}
+
+              <View
+                style={{
+                  alignSelf: "center",
+                  width: 40,
+                  height: 4,
+                  borderRadius: 4,
+
+                  backgroundColor: colors.border,
+
+                  marginBottom: 18,
+                }}
+              />
+
+              {/* TITLE */}
+
+              <View className="flex-row items-center">
+                <View
+                  style={{
+                    width: 45,
+                    height: 45,
+                    borderRadius: 15,
+
+                    alignItems: "center",
+                    justifyContent: "center",
+
+                    backgroundColor: colors.primarySoft,
+                  }}
+                >
+                  <Users size={22} color={colors.primaryDark} />
+                </View>
+
+                <View
+                  className="flex-1"
+                  style={{
+                    marginLeft: 11,
+                  }}
+                >
+                  <Text
+                    style={{
+                      color: colors.text,
+                      fontSize: 18,
+                      fontWeight: "900",
+                    }}
+                  >
+                    Staff Members
+                  </Text>
+
+                  <Text
+                    style={{
+                      color: colors.secondary,
+                      fontSize: 11,
+                    }}
+                  >
+                    {onlineCount} online
+                    {" · "}
+                    {totalMembers} total
+                  </Text>
+                </View>
+
+                <Pressable
+                  onPress={() => setMemberModalVisible(false)}
+                  style={{
+                    width: 36,
+                    height: 36,
+                    borderRadius: 12,
+
+                    alignItems: "center",
+                    justifyContent: "center",
+
+                    backgroundColor: colors.surfaceSoft,
+                  }}
+                >
+                  <X size={18} color={colors.secondary} />
+                </Pressable>
+              </View>
+
+              {/* ADMIN INFO */}
+
+              <View
+                style={{
+                  marginTop: 18,
+                  padding: 15,
+                  borderRadius: 18,
+
+                  backgroundColor: colors.primarySoft,
+                }}
+              >
+                <Text
+                  style={{
+                    color: colors.primaryDark,
+                    fontSize: 11,
+                    fontWeight: "800",
+                  }}
+                >
+                  ADMIN ACCESS
+                </Text>
+
+                <Text
+                  style={{
+                    marginTop: 4,
+                    color: colors.secondary,
+                    fontSize: 11,
+                    lineHeight: 17,
+                  }}
+                >
+                  As an administrator, you can manage chat messages and staff
+                  participation.
+                </Text>
+              </View>
+            </View>
+          </View>
+        </Modal>
+      </View>
+    </KeyboardAvoidingView>
   );
 }
-
-/* =========================================================
-   STYLES
-========================================================= */
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: COLORS.background,
-  },
-
-  keyboardContainer: {
-    flex: 1,
-  },
-
-  /* =====================================================
-     LOADING
-  ===================================================== */
-
-  loadingContainer: {
-    flex: 1,
-    backgroundColor: COLORS.background,
-    justifyContent: "center",
-    alignItems: "center",
-    padding: 24,
-  },
-
-  loadingClay: {
-    width: "85%",
-    paddingVertical: 32,
-    borderRadius: 28,
-    backgroundColor: COLORS.surface,
-    alignItems: "center",
-
-    shadowColor: "#7DD3FC",
-    shadowOffset: {
-      width: 0,
-      height: 10,
-    },
-    shadowOpacity: 0.2,
-    shadowRadius: 18,
-    elevation: 8,
-  },
-
-  loadingText: {
-    marginTop: 14,
-    fontSize: 14,
-    fontWeight: "600",
-    color: COLORS.secondary,
-  },
-
-  /* =====================================================
-     HEADER
-  ===================================================== */
-
-  header: {
-    minHeight: 78,
-    paddingHorizontal: 16,
-    paddingTop: Platform.OS === "ios" ? 10 : 8,
-    paddingBottom: 10,
-
-    flexDirection: "row",
-    alignItems: "center",
-
-    backgroundColor: COLORS.surface,
-
-    shadowColor: "#7DD3FC",
-    shadowOffset: {
-      width: 0,
-      height: 5,
-    },
-    shadowOpacity: 0.12,
-    shadowRadius: 12,
-    elevation: 5,
-  },
-
-  headerButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 15,
-
-    alignItems: "center",
-    justifyContent: "center",
-
-    backgroundColor: COLORS.surfaceBlue,
-
-    shadowColor: "#7DD3FC",
-    shadowOffset: {
-      width: 2,
-      height: 3,
-    },
-    shadowOpacity: 0.2,
-    shadowRadius: 5,
-    elevation: 3,
-  },
-
-  headerIcon: {
-    fontSize: 36,
-    lineHeight: 38,
-    fontWeight: "300",
-    color: COLORS.text,
-  },
-
-  refreshIcon: {
-    fontSize: 28,
-    lineHeight: 30,
-    fontWeight: "700",
-    color: COLORS.primaryDark,
-  },
-
-  headerCenter: {
-    flex: 1,
-    marginHorizontal: 12,
-  },
-
-  headerTitleRow: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-
-  chatIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 14,
-
-    alignItems: "center",
-    justifyContent: "center",
-
-    backgroundColor: COLORS.primarySoft,
-
-    marginRight: 10,
-  },
-
-  chatIconText: {
-    fontSize: 19,
-  },
-
-  headerTitle: {
-    fontSize: 18,
-    fontWeight: "800",
-    color: COLORS.text,
-  },
-
-  onlineRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginTop: 3,
-  },
-
-  onlineDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 4,
-
-    backgroundColor: COLORS.success,
-
-    marginRight: 5,
-  },
-
-  onlineText: {
-    fontSize: 11,
-    fontWeight: "600",
-    color: COLORS.muted,
-  },
-
-  /* =====================================================
-     UNREAD
-  ===================================================== */
-
-  unreadBanner: {
-    marginHorizontal: 14,
-    marginTop: 10,
-
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-
-    borderRadius: 15,
-
-    backgroundColor: COLORS.primarySoft,
-
-    flexDirection: "row",
-    alignItems: "center",
-  },
-
-  unreadIcon: {
-    fontSize: 17,
-    color: COLORS.primaryDark,
-  },
-
-  unreadBannerText: {
-    flex: 1,
-    marginLeft: 8,
-
-    fontSize: 12,
-    fontWeight: "700",
-
-    color: COLORS.primaryDark,
-  },
-
-  unreadBannerAction: {
-    fontSize: 11,
-    fontWeight: "800",
-    color: COLORS.primaryDark,
-  },
-
-  /* =====================================================
-     MESSAGE LIST
-  ===================================================== */
-
-  messageList: {
-    flex: 1,
-  },
-
-  messageContent: {
-    paddingHorizontal: 14,
-    paddingTop: 12,
-    paddingBottom: 18,
-  },
-
-  emptyMessageContent: {
-    flexGrow: 1,
-    justifyContent: "center",
-  },
-
-  /* =====================================================
-     LOAD OLDER
-  ===================================================== */
-
-  loadOlderButton: {
-    alignSelf: "center",
-
-    flexDirection: "row",
-    alignItems: "center",
-
-    backgroundColor: COLORS.surface,
-
-    paddingHorizontal: 15,
-    paddingVertical: 9,
-
-    borderRadius: 15,
-    marginBottom: 15,
-
-    shadowColor: "#7DD3FC",
-    shadowOffset: {
-      width: 0,
-      height: 3,
-    },
-    shadowOpacity: 0.12,
-    shadowRadius: 7,
-    elevation: 3,
-  },
-
-  loadOlderIcon: {
-    fontSize: 16,
-    fontWeight: "800",
-    color: COLORS.primaryDark,
-  },
-
-  loadOlderText: {
-    marginLeft: 5,
-
-    fontSize: 11,
-    fontWeight: "700",
-
-    color: COLORS.primaryDark,
-  },
-
-  /* =====================================================
-     DATE
-  ===================================================== */
-
-  dateSeparator: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginVertical: 16,
-  },
-
-  dateLine: {
-    flex: 1,
-    height: 1,
-    backgroundColor: COLORS.border,
-  },
-
-  datePill: {
-    marginHorizontal: 10,
-
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-
-    borderRadius: 10,
-
-    backgroundColor: COLORS.surfaceBlue,
-  },
-
-  dateText: {
-    fontSize: 9,
-    fontWeight: "800",
-    color: COLORS.secondary,
-    letterSpacing: 0.5,
-  },
-
-  /* =====================================================
-     MESSAGE
-  ===================================================== */
-
-  messageRow: {
-    flexDirection: "row",
-    alignItems: "flex-end",
-    marginBottom: 11,
-  },
-
-  messageRowMine: {
-    justifyContent: "flex-end",
-  },
-
-  avatar: {
-    width: 35,
-    height: 35,
-    borderRadius: 13,
-
-    justifyContent: "center",
-    alignItems: "center",
-
-    marginRight: 8,
-
-    shadowColor: "#64748B",
-    shadowOffset: {
-      width: 0,
-      height: 3,
-    },
-    shadowOpacity: 0.15,
-    shadowRadius: 5,
-    elevation: 3,
-  },
-
-  avatarText: {
-    color: "#FFFFFF",
-    fontSize: 13,
-    fontWeight: "800",
-  },
-
-  messageColumn: {
-    maxWidth: "78%",
-  },
-
-  messageColumnMine: {
-    alignItems: "flex-end",
-  },
-
-  senderHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-
-    marginBottom: 4,
-    marginLeft: 3,
-  },
-
-  senderName: {
-    fontSize: 11,
-    fontWeight: "800",
-    color: COLORS.text,
-  },
-
-  roleBadge: {
-    marginLeft: 6,
-
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-
-    borderRadius: 6,
-  },
-
-  roleBadgeText: {
-    fontSize: 7,
-    fontWeight: "900",
-  },
-
-  messageBubble: {
-    paddingHorizontal: 13,
-    paddingTop: 10,
-    paddingBottom: 8,
-
-    borderRadius: 18,
-
-    shadowColor: "#7DD3FC",
-    shadowOffset: {
-      width: 0,
-      height: 3,
-    },
-    shadowOpacity: 0.1,
-    shadowRadius: 7,
-    elevation: 3,
-  },
-
-  messageBubbleOther: {
-    backgroundColor: COLORS.incoming,
-
-    borderBottomLeftRadius: 5,
-  },
-
-  messageBubbleMine: {
-    backgroundColor: COLORS.outgoing,
-
-    borderBottomRightRadius: 5,
-  },
-
-  messageText: {
-    fontSize: 14,
-    lineHeight: 20,
-    color: COLORS.text,
-  },
-
-  messageTextMine: {
-    color: "#075985",
-  },
-
-  deletedText: {
-    fontSize: 13,
-    fontStyle: "italic",
-    color: COLORS.muted,
-  },
-
-  /* =====================================================
-     MESSAGE META
-  ===================================================== */
-
-  messageMeta: {
-    marginTop: 5,
-
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "flex-end",
-  },
-
-  messageMetaMine: {
-    justifyContent: "flex-end",
-  },
-
-  timeText: {
-    fontSize: 9,
-    color: COLORS.muted,
-    marginLeft: 4,
-  },
-
-  timeTextMine: {
-    color: "#38A3D8",
-  },
-
-  editedText: {
-    fontSize: 8,
-    color: COLORS.muted,
-    fontStyle: "italic",
-  },
-
-  editedTextMine: {
-    color: "#38A3D8",
-  },
-
-  checkIcon: {
-    fontSize: 11,
-    fontWeight: "800",
-    marginLeft: 4,
-  },
-
-  /* =====================================================
-     REACTIONS
-  ===================================================== */
-
-  reactionsRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    marginTop: 4,
-  },
-
-  reactionChip: {
-    flexDirection: "row",
-    alignItems: "center",
-
-    paddingHorizontal: 7,
-    paddingVertical: 3,
-
-    borderRadius: 10,
-
-    marginRight: 4,
-    marginBottom: 3,
-
-    backgroundColor: COLORS.surface,
-
-    shadowColor: "#64748B",
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.08,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-
-  reactionChipActive: {
-    backgroundColor: COLORS.primarySoft,
-  },
-
-  reactionEmoji: {
-    fontSize: 12,
-  },
-
-  reactionCount: {
-    marginLeft: 3,
-
-    fontSize: 9,
-    fontWeight: "700",
-
-    color: COLORS.secondary,
-  },
-
-  reactionCountActive: {
-    color: COLORS.primaryDark,
-  },
-
-  /* =====================================================
-     REACTION PICKER
-  ===================================================== */
-
-  reactionPicker: {
-    position: "absolute",
-
-    bottom: 88,
-    left: 20,
-    right: 20,
-
-    backgroundColor: COLORS.surface,
-
-    borderRadius: 20,
-    padding: 8,
-
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-
-    shadowColor: "#0EA5E9",
-    shadowOffset: {
-      width: 0,
-      height: 7,
-    },
-    shadowOpacity: 0.18,
-    shadowRadius: 15,
-    elevation: 8,
-  },
-
-  reactionPickerButton: {
-    width: 43,
-    height: 43,
-
-    alignItems: "center",
-    justifyContent: "center",
-
-    borderRadius: 14,
-
-    backgroundColor: COLORS.surfaceBlue,
-
-    marginHorizontal: 3,
-  },
-
-  reactionPickerEmoji: {
-    fontSize: 21,
-  },
-
-  reactionPickerClose: {
-    width: 35,
-    height: 35,
-
-    borderRadius: 12,
-
-    alignItems: "center",
-    justifyContent: "center",
-
-    marginLeft: 5,
-
-    backgroundColor: "#F1F5F9",
-  },
-
-  closeIcon: {
-    fontSize: 25,
-    lineHeight: 27,
-    fontWeight: "300",
-    color: COLORS.secondary,
-  },
-
-  /* =====================================================
-     INPUT
-  ===================================================== */
-
-  inputArea: {
-    paddingHorizontal: 12,
-    paddingTop: 8,
-
-    paddingBottom: Platform.OS === "ios" ? 18 : 10,
-
-    backgroundColor: COLORS.background,
-  },
-
-  inputClay: {
-    minHeight: 58,
-    maxHeight: 130,
-
-    borderRadius: 21,
-
-    paddingLeft: 15,
-    paddingRight: 7,
-    paddingVertical: 7,
-
-    flexDirection: "row",
-    alignItems: "flex-end",
-
-    backgroundColor: COLORS.surface,
-
-    shadowColor: "#7DD3FC",
-    shadowOffset: {
-      width: 0,
-      height: 5,
-    },
-    shadowOpacity: 0.17,
-    shadowRadius: 12,
-    elevation: 5,
-  },
-
-  input: {
-    flex: 1,
-    maxHeight: 105,
-
-    paddingTop: 8,
-    paddingBottom: 8,
-
-    fontSize: 14,
-    lineHeight: 19,
-
-    color: COLORS.text,
-  },
-
-  inputActions: {
-    alignItems: "flex-end",
-    justifyContent: "flex-end",
-  },
-
-  characterCount: {
-    fontSize: 8,
-    color: COLORS.muted,
-
-    marginBottom: 3,
-    marginRight: 3,
-  },
-
-  sendButton: {
-    width: 43,
-    height: 43,
-
-    borderRadius: 15,
-
-    alignItems: "center",
-    justifyContent: "center",
-
-    backgroundColor: COLORS.primaryDark,
-
-    shadowColor: "#0284C7",
-    shadowOffset: {
-      width: 0,
-      height: 4,
-    },
-    shadowOpacity: 0.25,
-    shadowRadius: 7,
-    elevation: 4,
-  },
-
-  sendButtonDisabled: {
-    backgroundColor: "#CBD5E1",
-    shadowOpacity: 0,
-    elevation: 0,
-  },
-
-  sendIcon: {
-    fontSize: 19,
-    fontWeight: "900",
-    color: "#FFFFFF",
-  },
-
-  /* =====================================================
-     EMPTY
-  ===================================================== */
-
-  emptyState: {
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 35,
-  },
-
-  emptyIconClay: {
-    width: 90,
-    height: 90,
-
-    borderRadius: 30,
-
-    backgroundColor: COLORS.primarySoft,
-
-    justifyContent: "center",
-    alignItems: "center",
-
-    marginBottom: 18,
-
-    shadowColor: "#38BDF8",
-    shadowOffset: {
-      width: 0,
-      height: 8,
-    },
-    shadowOpacity: 0.18,
-    shadowRadius: 12,
-    elevation: 6,
-  },
-
-  emptyIconText: {
-    fontSize: 42,
-  },
-
-  emptyTitle: {
-    fontSize: 19,
-    fontWeight: "800",
-    color: COLORS.text,
-  },
-
-  emptySubtitle: {
-    marginTop: 6,
-
-    textAlign: "center",
-
-    fontSize: 13,
-    lineHeight: 19,
-
-    color: COLORS.secondary,
-  },
-});

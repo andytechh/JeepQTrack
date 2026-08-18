@@ -25,6 +25,9 @@ import {
 
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { useState } from "react";
+
+import ClayAdminDrawer from "../../../../src/shared/components/clay/ClayAdminDrawer";
 import OceanBackground from "../../../../src/shared/components/clay/OceanBackground";
 
 import { colors } from "../../../../src/shared/constants/theme";
@@ -34,14 +37,10 @@ import {
   useAdminDashboard,
 } from "../../../../src/shared/hooks/admin/useAdminDashboard";
 
-/*
- * ============================================================
- * ADMIN DASHBOARD
- * ============================================================
- */
-
 export default function AdminDashboardScreen() {
   const router = useRouter();
+
+  const [drawerOpen, setDrawerOpen] = useState(false);
 
   const {
     jeepneys,
@@ -54,12 +53,6 @@ export default function AdminDashboardScreen() {
     error,
     refresh,
   } = useAdminDashboard();
-
-  /*
-   * ==========================================================
-   * LOADING
-   * ==========================================================
-   */
 
   if (loading) {
     return (
@@ -83,12 +76,6 @@ export default function AdminDashboardScreen() {
     );
   }
 
-  /*
-   * ==========================================================
-   * SCREEN
-   * ==========================================================
-   */
-
   return (
     <OceanBackground intensity={0.28}>
       <SafeAreaView className="flex-1">
@@ -107,19 +94,13 @@ export default function AdminDashboardScreen() {
               paddingBottom: 130,
             }}
           >
-            {/* =================================================
-                HEADER
-            ================================================= */}
+            {/* HEADER */}
 
             <View className="pt-3">
               <View className="flex-row items-center justify-between">
                 <View className="flex-row items-center">
                   <Pressable
-                    onPress={() => {
-                      /*
-                       * Drawer navigation will be connected here.
-                       */
-                    }}
+                    onPress={() => setDrawerOpen(true)}
                     className="h-[50px] w-[50px] items-center justify-center rounded-[18px] border border-white/90 bg-clay-surface shadow-clay-sm"
                   >
                     <Menu
@@ -158,9 +139,7 @@ export default function AdminDashboardScreen() {
               </View>
             </View>
 
-            {/* =================================================
-                ERROR
-            ================================================= */}
+            {/* ERROR */}
 
             {error && (
               <View className="mt-5 rounded-[24px] border border-red-100 bg-white/90 p-5">
@@ -197,9 +176,7 @@ export default function AdminDashboardScreen() {
               </View>
             )}
 
-            {/* =================================================
-                STAT CARDS
-            ================================================= */}
+            {/* STAT CARDS */}
 
             <View className="mt-5">
               <View className="flex-row">
@@ -255,9 +232,7 @@ export default function AdminDashboardScreen() {
               </View>
             </View>
 
-            {/* =================================================
-                CURRENT LOADING
-            ================================================= */}
+            {/* CURRENT LOADING */}
 
             <SectionHeader
               title="Current Loading"
@@ -280,9 +255,7 @@ export default function AdminDashboardScreen() {
               />
             )}
 
-            {/* =================================================
-                QUEUE
-            ================================================= */}
+            {/* QUEUE */}
 
             <SectionHeader
               title="Jeepney Queue"
@@ -321,9 +294,7 @@ export default function AdminDashboardScreen() {
               </View>
             )}
 
-            {/* =================================================
-                EN ROUTE
-            ================================================= */}
+            {/* EN ROUTE */}
 
             <SectionHeader
               title="Currently En Route"
@@ -351,9 +322,7 @@ export default function AdminDashboardScreen() {
               </View>
             )}
 
-            {/* =================================================
-                TERMINAL SUMMARY
-            ================================================= */}
+            {/* TERMINAL SUMMARY */}
 
             <SectionHeader
               title="Terminal Overview"
@@ -362,17 +331,24 @@ export default function AdminDashboardScreen() {
 
             <TerminalSummary stats={stats} />
           </ScrollView>
+
+          <ClayAdminDrawer
+            visible={drawerOpen}
+            onClose={() => setDrawerOpen(false)}
+            onNavigate={(route) => {
+              setDrawerOpen(false);
+              router.push(route as any);
+            }}
+          />
         </View>
       </SafeAreaView>
     </OceanBackground>
   );
 }
 
-/*
- * ============================================================
- * CLAY STAT CARD
- * ============================================================
- */
+/* ============================================================
+   CLAY STAT CARD
+============================================================ */
 
 function ClayStatCard({
   title,
@@ -427,11 +403,9 @@ function ClayStatCard({
   );
 }
 
-/*
- * ============================================================
- * SECTION HEADER
- * ============================================================
- */
+/* ============================================================
+   SECTION HEADER
+============================================================ */
 
 function SectionHeader({
   title,
@@ -465,11 +439,9 @@ function SectionHeader({
   );
 }
 
-/*
- * ============================================================
- * LOADING JEEPNEY
- * ============================================================
- */
+/* ============================================================
+   LOADING JEEPNEY
+============================================================ */
 
 function LoadingJeepneyCard({ jeepney }: { jeepney: AdminJeepney }) {
   const capacity = jeepney.capacity || 1;
@@ -561,11 +533,9 @@ function LoadingJeepneyCard({ jeepney }: { jeepney: AdminJeepney }) {
   );
 }
 
-/*
- * ============================================================
- * QUEUE CARD
- * ============================================================
- */
+/* ============================================================
+   QUEUE CARD
+============================================================ */
 
 function QueueJeepneyCard({
   jeepney,
@@ -628,11 +598,9 @@ function QueueJeepneyCard({
   );
 }
 
-/*
- * ============================================================
- * EN ROUTE CARD
- * ============================================================
- */
+/* ============================================================
+   EN ROUTE CARD
+============================================================ */
 
 function EnRouteCard({ jeepney }: { jeepney: AdminJeepney }) {
   return (
@@ -670,11 +638,9 @@ function EnRouteCard({ jeepney }: { jeepney: AdminJeepney }) {
   );
 }
 
-/*
- * ============================================================
- * EMPTY CARD
- * ============================================================
- */
+/* ============================================================
+   EMPTY CARD
+============================================================ */
 
 function EmptyCard({
   icon,
@@ -702,11 +668,9 @@ function EmptyCard({
   );
 }
 
-/*
- * ============================================================
- * TERMINAL SUMMARY
- * ============================================================
- */
+/* ============================================================
+   TERMINAL SUMMARY
+============================================================ */
 
 function TerminalSummary({
   stats,
@@ -758,11 +722,9 @@ function TerminalSummary({
   );
 }
 
-/*
- * ============================================================
- * SUMMARY ROW
- * ============================================================
- */
+/* ============================================================
+   SUMMARY ROW
+============================================================ */
 
 function SummaryRow({
   icon,

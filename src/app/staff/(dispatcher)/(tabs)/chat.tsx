@@ -1,2 +1,2 @@
-export { default } from "../../(driver)/(tabs)/chat";
+export { default } from "../../(admin)/(tabs)/chat";
 

@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { supabase } from "../../config/supabase";
-import { DispatchService } from "../../services/DispatchService";
 import { useAuthStore } from "../../store/authStore";
 
 export interface QueueJeepney {
@@ -47,42 +46,32 @@ export interface QueueTerminalSection {
   jeepneys: QueueJeepney[];
 }
 
-interface UseDispatcherQueueResult {
+interface UseDriverQueueResult {
   jeepneys: QueueJeepney[];
   recentTrips: RecentTrip[];
   sections: QueueTerminalSection[];
 
+  myJeepneyId: string | null;
+
   waitingCount: number;
   loadingCount: number;
-  enRouteCount: number;
   totalCount: number;
 
   loading: boolean;
   refreshing: boolean;
   error: string | null;
 
-  dispatchingId: string | null;
-
   refresh: () => Promise<void>;
-  dispatchJeepney: (jeepney: QueueJeepney) => Promise<{
-    success: boolean;
-    message: string;
-  }>;
 }
 
 const TERMINAL_NAMES = {
-  1: {
-    name: "Donsol",
-    subtitle: "Terminal 1",
-  },
-  2: {
-    name: "Daraga",
-    subtitle: "Terminal 2",
-  },
+  1: { name: "Donsol", subtitle: "Terminal 1" },
+  2: { name: "Daraga", subtitle: "Terminal 2" },
 } as const;
 
-export function useDispatcherQueue(): UseDispatcherQueueResult {
-  const { user } = useAuthStore();
+export function useDriverQueue(): UseDriverQueueResult {
+  const user = useAuthStore((state) => state.user);
+  const myJeepneyId = user?.jeepneyId ?? null;
 
   const [jeepneys, setJeepneys] = useState<QueueJeepney[]>([]);
   const [recentTrips, setRecentTrips] = useState<RecentTrip[]>([]);
@@ -90,8 +79,6 @@ export function useDispatcherQueue(): UseDispatcherQueueResult {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  const [dispatchingId, setDispatchingId] = useState<string | null>(null);
 
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
 
@@ -120,21 +107,11 @@ export function useDispatcherQueue(): UseDispatcherQueueResult {
         `,
       )
       .in("status", ["waiting", "loading"])
-      .order("terminal_id", {
-        ascending: true,
-        nullsLast: true,
-      })
-      .order("bracket", {
-        ascending: true,
-      })
-      .order("queue_position", {
-        ascending: true,
-        nullsLast: true,
-      });
+      .order("terminal_id", { ascending: true, nullsLast: true })
+      .order("bracket", { ascending: true })
+      .order("queue_position", { ascending: true, nullsLast: true });
 
-    if (queueError) {
-      throw queueError;
-    }
+    if (queueError) throw queueError;
 
     setJeepneys((data ?? []) as QueueJeepney[]);
   }, []);
@@ -159,14 +136,10 @@ export function useDispatcherQueue(): UseDispatcherQueueResult {
           )
         `,
       )
-      .order("departure_time", {
-        ascending: false,
-      })
+      .order("departure_time", { ascending: false })
       .limit(8);
 
-    if (tripsError) {
-      throw tripsError;
-    }
+    if (tripsError) throw tripsError;
 
     const normalized: RecentTrip[] = (data ?? []).map((trip: any) => {
       const jeepney = Array.isArray(trip.jeepneys)
@@ -201,18 +174,13 @@ export function useDispatcherQueue(): UseDispatcherQueueResult {
     try {
       await Promise.all([fetchQueue(), fetchRecentTrips()]);
     } catch (err: any) {
-      console.error("Failed to load dispatcher queue:", err);
-
-      setError(
-        err?.message ||
-          "Unable to load the dispatcher queue. Please try again.",
-      );
+      console.error("Failed to load driver queue:", err);
+      setError(err?.message || "Unable to load the queue. Please try again.");
     }
   }, [fetchQueue, fetchRecentTrips]);
 
   const refresh = useCallback(async () => {
     setRefreshing(true);
-
     try {
       await fetchAll();
     } finally {
@@ -220,75 +188,16 @@ export function useDispatcherQueue(): UseDispatcherQueueResult {
     }
   }, [fetchAll]);
 
-  const dispatchJeepney = useCallback(
-    async (jeepney: QueueJeepney) => {
-      if (!user?.uid) {
-        return {
-          success: false,
-          message: "Your dispatcher account could not be verified.",
-        };
-      }
-
-      if (!jeepney.id) {
-        return {
-          success: false,
-          message: "Invalid jeepney.",
-        };
-      }
-
-      setDispatchingId(jeepney.id);
-
-      try {
-        const result = await DispatchService.dispatchJeepney(
-          jeepney.id,
-          user.uid,
-        );
-
-        if (!result) {
-          return {
-            success: false,
-            message: "Unable to send the dispatch alert.",
-          };
-        }
-
-        await Promise.all([fetchQueue(), fetchRecentTrips()]);
-
-        return {
-          success: true,
-          message: `Dispatch alert sent to ${
-            jeepney.jeep_name || jeepney.plate_number
-          }.`,
-        };
-      } catch (err: any) {
-        console.error("Dispatcher dispatch error:", err);
-
-        return {
-          success: false,
-          message:
-            err?.message ||
-            "Unable to send the dispatch alert. Please try again.",
-        };
-      } finally {
-        setDispatchingId(null);
-      }
-    },
-    [fetchQueue, fetchRecentTrips, user?.uid],
-  );
-
   useEffect(() => {
     let mounted = true;
 
     const initialize = async () => {
       if (!mounted) return;
-
       setLoading(true);
-
       try {
         await fetchAll();
       } finally {
-        if (mounted) {
-          setLoading(false);
-        }
+        if (mounted) setLoading(false);
       }
     };
 
@@ -306,32 +215,18 @@ export function useDispatcherQueue(): UseDispatcherQueueResult {
     }
 
     const channel = supabase
-      .channel("dispatcher-queue-realtime")
+      .channel("driver-queue-realtime")
       .on(
         "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "jeepneys",
-        },
-        () => {
-          fetchQueue();
-        },
+        { event: "*", schema: "public", table: "jeepneys" },
+        () => fetchQueue(),
       )
       .on(
         "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "trips",
-        },
-        () => {
-          fetchRecentTrips();
-        },
+        { event: "*", schema: "public", table: "trips" },
+        () => fetchRecentTrips(),
       )
-      .subscribe((status) => {
-        console.log("📡 Dispatcher queue realtime:", status);
-      });
+      .subscribe();
 
     channelRef.current = channel;
 
@@ -345,7 +240,6 @@ export function useDispatcherQueue(): UseDispatcherQueueResult {
 
   const sections = useMemo<QueueTerminalSection[]>(() => {
     const terminalOne = jeepneys.filter((item) => item.terminal_id === 1);
-
     const terminalTwo = jeepneys.filter((item) => item.terminal_id === 2);
 
     return [
@@ -374,34 +268,17 @@ export function useDispatcherQueue(): UseDispatcherQueueResult {
     [jeepneys],
   );
 
-  const enRouteCount = useMemo(
-    () =>
-      recentTrips.filter(
-        (trip) =>
-          trip.status === "active" ||
-          trip.status === "en_route" ||
-          !trip.arrival_time,
-      ).length,
-    [recentTrips],
-  );
-
   return {
     jeepneys,
     recentTrips,
     sections,
-
+    myJeepneyId,
     waitingCount,
     loadingCount,
-    enRouteCount,
     totalCount: jeepneys.length,
-
     loading,
     refreshing,
     error,
-
-    dispatchingId,
-
     refresh,
-    dispatchJeepney,
   };
 }

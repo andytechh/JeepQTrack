@@ -32,44 +32,67 @@ export default function DispatcherLayout() {
 
   if (!hydrated && !user) {
     return (
-      <View className="flex-1 items-center justify-center bg-clay-background">
+      <View
+        style={{
+          flex: 1,
+          alignItems: "center",
+          justifyContent: "center",
+          backgroundColor: "#EEF8FF",
+        }}
+      >
         <ActivityIndicator size="large" color="#0EA5E9" />
 
-        <Text className="mt-4 text-ink-muted">Loading...</Text>
+        <Text style={{ marginTop: 16, color: "#94A3B8" }}>Loading...</Text>
       </View>
     );
   }
 
   if (!user && hydrated) {
     return (
-      <View className="flex-1 items-center justify-center bg-clay-background px-5">
-        <Text className="text-center text-ink-muted">No user found</Text>
+      <View
+        style={{
+          flex: 1,
+          alignItems: "center",
+          justifyContent: "center",
+          backgroundColor: "#EEF8FF",
+          paddingHorizontal: 20,
+        }}
+      >
+        <Text style={{ textAlign: "center", color: "#94A3B8" }}>
+          No user found
+        </Text>
 
         <TouchableOpacity
-          className="mt-4 rounded-[16px] bg-ocean-500 px-6 py-3"
+          style={{
+            marginTop: 16,
+            borderRadius: 16,
+            backgroundColor: "#0EA5E9",
+            paddingHorizontal: 24,
+            paddingVertical: 12,
+          }}
           onPress={() => router.replace("/staff/login")}
         >
-          <Text className="font-bold text-white">Go to Login</Text>
+          <Text style={{ fontWeight: "700", color: "#FFFFFF" }}>
+            Go to Login
+          </Text>
         </TouchableOpacity>
       </View>
     );
   }
 
   return (
-    <View className="flex-1 bg-clay-background">
-      <Stack
-        screenOptions={{
+    <Stack
+      screenOptions={{
+        headerShown: false,
+        animation: "fade",
+      }}
+    >
+      <Stack.Screen
+        name="(tabs)"
+        options={{
           headerShown: false,
-          animation: "fade",
         }}
-      >
-        <Stack.Screen
-          name="(tabs)"
-          options={{
-            headerShown: false,
-          }}
-        />
-      </Stack>
-    </View>
+      />
+    </Stack>
   );
 }

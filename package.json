@@ -10,6 +10,7 @@
     "@react-navigation/native": "^7.3.14",
     "@supabase/supabase-js": "^2.109.0",
     "babel-preset-expo": "^56.0.15",
+    "base64-arraybuffer": "^1.0.2",
     "class-variance-authority": "^0.7.1",
     "expo": "~56.0.19",
     "expo-blob": "^57.0.1",

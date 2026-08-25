@@ -24,6 +24,7 @@ import {
 } from "react-native";
 
 import { supabase } from "@/src/shared/config/supabase";
+import { useAuthStore } from "@/src/shared/store/authStore";
 
 interface ClayAdminDrawerProps {
   visible: boolean;
@@ -156,6 +157,8 @@ export default function ClayAdminDrawer({
 
   const [loggingOut, setLoggingOut] = useState(false);
 
+  const logout = useAuthStore((state) => state.logout);
+
   useEffect(() => {
     Animated.spring(translateX, {
       toValue: visible ? 0 : -390,
@@ -165,6 +168,32 @@ export default function ClayAdminDrawer({
     }).start();
   }, [visible, translateX]);
 
+  const performLogout = async () => {
+    try {
+      setLoggingOut(true);
+
+      const { error } = await supabase.auth.signOut();
+
+      if (error) {
+        throw error;
+      }
+
+      // Clear local auth state BEFORE navigating, so the root layout's
+      // auth-guard effect sees isAuthenticated === false and doesn't
+      // bounce us straight back into the admin stack.
+      logout();
+
+      setLogoutModalVisible(false);
+      onClose();
+
+      router.replace("/staff/login");
+    } catch (error) {
+      console.error("Logout error:", error);
+
+      setLoggingOut(false);
+    }
+  };
+
   if (!visible) {
     return (
       <>
@@ -172,26 +201,7 @@ export default function ClayAdminDrawer({
           visible={logoutModalVisible}
           loggingOut={loggingOut}
           onCancel={() => setLogoutModalVisible(false)}
-          onConfirm={async () => {
-            try {
-              setLoggingOut(true);
-
-              const { error } = await supabase.auth.signOut();
-
-              if (error) {
-                throw error;
-              }
-
-              setLogoutModalVisible(false);
-              onClose();
-
-              router.replace("/staff/login");
-            } catch (error) {
-              console.error("Logout error:", error);
-
-              setLoggingOut(false);
-            }
-          }}
+          onConfirm={performLogout}
         />
       </>
     );
@@ -323,26 +333,7 @@ export default function ClayAdminDrawer({
         visible={logoutModalVisible}
         loggingOut={loggingOut}
         onCancel={() => setLogoutModalVisible(false)}
-        onConfirm={async () => {
-          try {
-            setLoggingOut(true);
-
-            const { error } = await supabase.auth.signOut();
-
-            if (error) {
-              throw error;
-            }
-
-            setLogoutModalVisible(false);
-            onClose();
-
-            router.replace("/staff/login");
-          } catch (error) {
-            console.error("Logout error:", error);
-
-            setLoggingOut(false);
-          }
-        }}
+        onConfirm={performLogout}
       />
     </>
   );

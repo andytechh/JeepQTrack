@@ -1,5 +1,3 @@
-// app/staff/(dispatcher)/(tabs)/_layout.tsx
-
 import { Tabs } from "expo-router";
 import {
   LayoutDashboard,
@@ -17,9 +15,15 @@ export default function DispatcherTabsLayout() {
 
   return (
     <Tabs
-      tabBar={(props) => (
-        <ClayTabBar {...(props as any)} chatUnreadCount={unreadCount} />
-      )}
+      tabBar={(props) => {
+        const currentRoute = props.state.routes[props.state.index];
+        console.log("ROUTE NAME:", currentRoute?.name);
+        if (currentRoute?.name === "chat") {
+          return null;
+        }
+
+        return <ClayTabBar {...(props as any)} chatUnreadCount={unreadCount} />;
+      }}
       screenOptions={{
         headerShown: false,
       }}
@@ -73,7 +77,7 @@ export default function DispatcherTabsLayout() {
       />
 
       <Tabs.Screen
-        name="settings"
+        name="profile"
         options={{
           title: "Settings",
           headerShown: false,

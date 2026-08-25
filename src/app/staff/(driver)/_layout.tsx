@@ -13,7 +13,6 @@ import {
   View,
 } from "react-native";
 
-import { ModernHeader } from "../../../src/shared/components/ui/ModernHeader";
 import { supabase } from "../../../src/shared/config/supabase";
 import { AuthService } from "../../../src/shared/services/AuthService";
 import { NotificationService } from "../../../src/shared/services/NotificationService";
@@ -179,17 +178,6 @@ export default function DriverLayout() {
 
   return (
     <View className="flex-1 bg-[#0a1628] pt-0">
-      {/* ─── HEADER ────────────────────────────────────────────────── */}
-      <ModernHeader
-        avatarText={user?.displayName || "Driver"}
-        notificationCount={notificationCount}
-        onNotificationPress={() => {
-          fetchNotifications();
-          setShowNotifications(true);
-        }}
-        onAvatarPress={() => setShowProfileMenu(true)}
-      />
-
       {/* ─── TABS ──────────────────────────────────────────────────── */}
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="(tabs)" />

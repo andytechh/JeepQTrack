@@ -1,4 +1,3 @@
-// src/shared/store/dispatcherStore.ts
 import { create } from "zustand";
 import { supabase } from "../config/supabase";
 import { useAuthStore } from "./authStore";

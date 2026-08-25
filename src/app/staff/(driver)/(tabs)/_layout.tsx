@@ -2,14 +2,22 @@
 
 import { Tabs } from "expo-router";
 
-import { Bell, House, Map, Ticket, UserRound } from "lucide-react-native";
+import { House, Map, Ticket, UserRound } from "lucide-react-native";
 
 import ClayTabBar from "../../../../src/shared/components/clay/ClayTabBar";
 
 export default function CommuterTabsLayout() {
   return (
     <Tabs
-      tabBar={(props) => <ClayTabBar {...(props as any)} />}
+      tabBar={(props) => {
+        const currentRoute = props.state.routes[props.state.index];
+
+        if (currentRoute?.name === "chat") {
+          return null;
+        }
+
+        return <ClayTabBar {...(props as any)} />;
+      }}
       screenOptions={{
         headerShown: false,
       }}
@@ -42,13 +50,11 @@ export default function CommuterTabsLayout() {
       />
 
       <Tabs.Screen
-        name="notifications"
+        name="chat"
         options={{
-          title: "Alerts",
+          title: "Chat",
 
-          tabBarBadge: 2,
-
-          tabBarIcon: ({ color, size }) => <Bell size={size} color={color} />,
+          tabBarIcon: ({ color, size }) => <Map size={size} color={color} />,
         }}
       />
 

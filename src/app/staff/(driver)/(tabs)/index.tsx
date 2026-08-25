@@ -5,10 +5,8 @@ import {
   ChevronRight,
   Clock3,
   MapPin,
-  RefreshCw,
   Users,
 } from "lucide-react-native";
-import { useMemo } from "react";
 import {
   ActivityIndicator,
   Pressable,
@@ -21,109 +19,37 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import OceanBackground from "../../../../src/shared/components/clay/OceanBackground";
 import { colors } from "../../../../src/shared/constants/theme";
-import { useCommuterDashboard } from "../../../../src/shared/hooks/useCommuterDashboard";
+import {
+  DriverJeepney,
+  useDriverDashboard,
+} from "../../../../src/shared/hooks/driver/useDriverDashboard";
 
 function getStatusLabel(status: string) {
   switch (status?.toLowerCase()) {
-    case "loading":
-      return "Loading";
-
     case "waiting":
       return "Waiting";
-
-    case "ready":
-      return "Ready";
-
+    case "loading":
+      return "Loading";
+    case "en_route":
+      return "En Route";
     case "arrived":
       return "Arrived";
-
     case "dispatched":
       return "Dispatched";
-
-    case "departed":
-      return "Departed";
-
+    case "inactive":
+      return "Inactive";
     default:
       return status || "Unknown";
   }
 }
 
-function getStatusStyle(status: string) {
-  switch (status?.toLowerCase()) {
-    case "loading":
-      return {
-        container: "bg-amber-100",
-        text: "text-amber-700",
-      };
-
-    case "ready":
-      return {
-        container: "bg-green-100",
-        text: "text-green-700",
-      };
-
-    case "arrived":
-      return {
-        container: "bg-sky-100",
-        text: "text-sky-700",
-      };
-
-    case "dispatched":
-      return {
-        container: "bg-purple-100",
-        text: "text-purple-700",
-      };
-
-    default:
-      return {
-        container: "bg-slate-100",
-        text: "text-slate-600",
-      };
-  }
-}
-
 function getOccupancyPercentage(occupancy: number, capacity: number) {
-  if (!capacity || capacity <= 0) {
-    return 0;
-  }
-
+  if (!capacity || capacity <= 0) return 0;
   return Math.min(100, Math.round((occupancy / capacity) * 100));
 }
 
-function formatRelativeTime(timestamp: string) {
-  const date = new Date(timestamp);
-  const now = Date.now();
-
-  const difference = Math.max(0, now - date.getTime());
-
-  const seconds = Math.floor(difference / 1000);
-
-  if (seconds < 60) {
-    return "Just now";
-  }
-
-  const minutes = Math.floor(seconds / 60);
-
-  if (minutes < 60) {
-    return `${minutes}m ago`;
-  }
-
-  const hours = Math.floor(minutes / 60);
-
-  if (hours < 24) {
-    return `${hours}h ago`;
-  }
-
-  const days = Math.floor(hours / 24);
-
-  return `${days}d ago`;
-}
-
 function formatTime(timestamp: string | null) {
-  if (!timestamp) {
-    return "Not available";
-  }
-
+  if (!timestamp) return "Not available";
   try {
     return new Date(timestamp).toLocaleTimeString([], {
       hour: "numeric",
@@ -134,32 +60,20 @@ function formatTime(timestamp: string | null) {
   }
 }
 
-function getActivityText(status: string, plateNumber: string) {
-  switch (status?.toLowerCase()) {
-    case "waiting":
-      return `Jeepney ${plateNumber} is waiting`;
-
-    case "loading":
-      return `Jeepney ${plateNumber} is loading`;
-
-    case "dispatched":
-      return `Jeepney ${plateNumber} was dispatched`;
-
-    case "arrived":
-      return `Jeepney ${plateNumber} arrived`;
-
-    case "ready":
-      return `Jeepney ${plateNumber} is ready`;
-
-    default:
-      return `Jeepney ${plateNumber} was updated`;
-  }
-}
-
-function NextJeepneyCard({
+/**
+ * The centerpiece of the driver dashboard: their own jeep, made obvious
+ * with a big queue-position number and a banner state when it's their turn.
+ */
+function MyJeepneyCard({
   jeepney,
+  aheadOfMe,
+  isNextInLine,
+  isLoadingNow,
 }: {
-  jeepney: ReturnType<typeof useCommuterDashboard>["nextJeepney"];
+  jeepney: DriverJeepney | null;
+  aheadOfMe: number;
+  isNextInLine: boolean;
+  isLoadingNow: boolean;
 }) {
   if (!jeepney) {
     return (
@@ -170,11 +84,11 @@ function NextJeepneyCard({
           </View>
 
           <Text className="mt-4 text-[17px] font-extrabold text-ink-dark">
-            No jeepneys in queue
+            You're not in the queue
           </Text>
 
           <Text className="mt-1 text-center text-[11px] leading-[17px] text-ink-secondary">
-            There are currently no jeepneys waiting at the terminal.
+            Enter the terminal geofence to join the queue automatically.
           </Text>
         </View>
       </View>
@@ -185,22 +99,32 @@ function NextJeepneyCard({
     jeepney.current_occupancy,
     jeepney.capacity,
   );
-
   const seatsLeft = Math.max(0, jeepney.capacity - jeepney.current_occupancy);
-
-  const statusStyle = getStatusStyle(jeepney.status);
+  const highlighted = isNextInLine || isLoadingNow;
 
   return (
-    <View className="mt-5 overflow-hidden rounded-[28px] border border-white/90 bg-clay-surface shadow-clay">
+    <View
+      className={`mt-5 overflow-hidden rounded-[28px] shadow-clay-floating ${
+        highlighted ? "border-2 border-amber-300" : "border border-white/90"
+      }`}
+    >
+      {highlighted && (
+        <View className="bg-amber-400 px-5 py-2.5">
+          <Text className="text-center text-[11px] font-extrabold uppercase tracking-[1px] text-amber-950">
+            {isLoadingNow ? "You're loading now" : "You're next — get ready"}
+          </Text>
+        </View>
+      )}
+
       <View className="bg-ocean-400 p-5">
         <View className="flex-row items-start justify-between">
           <View>
             <Text className="text-[10px] font-bold uppercase tracking-[1px] text-white/70">
-              Next Jeepney
+              Your Jeepney
             </Text>
 
             <Text className="mt-1 text-[13px] font-semibold text-white/80">
-              Queue position #{jeepney.queue_position}
+              {jeepney.jeep_name || jeepney.plate_number}
             </Text>
           </View>
 
@@ -209,13 +133,25 @@ function NextJeepneyCard({
           </View>
         </View>
 
-        <Text className="mt-5 text-[28px] font-extrabold text-white">
-          {jeepney.plate_number}
+        <View className="mt-5 flex-row items-end">
+          <Text className="text-[52px] font-extrabold leading-[52px] text-white">
+            {jeepney.queue_position ?? "—"}
+          </Text>
+          <Text className="mb-1.5 ml-2 text-[13px] font-semibold text-white/75">
+            queue position
+          </Text>
+        </View>
+
+        <Text className="mt-1 text-[11px] font-semibold text-white/75">
+          {jeepney.queue_position
+            ? aheadOfMe === 0
+              ? "You're at the front of the line"
+              : `${aheadOfMe} ${aheadOfMe === 1 ? "jeepney" : "jeepneys"} ahead of you`
+            : "Not currently queued"}
         </Text>
 
         <View className="mt-2 flex-row items-center">
           <MapPin size={13} color="#FFFFFF" strokeWidth={2.2} />
-
           <Text className="ml-1 text-[10px] font-semibold text-white/80">
             {jeepney.terminal_id === 1
               ? "Donsol Terminal"
@@ -226,14 +162,11 @@ function NextJeepneyCard({
         </View>
       </View>
 
-      <View className="p-5">
+      <View className="bg-clay-surface p-5">
         <View className="flex-row items-center justify-between">
-          <View
-            className={`flex-row items-center rounded-full px-3 py-2 ${statusStyle.container}`}
-          >
-            <View className="mr-2 h-[7px] w-[7px] rounded-full bg-current" />
-
-            <Text className={`text-[10px] font-extrabold ${statusStyle.text}`}>
+          <View className="flex-row items-center rounded-full bg-ocean-100 px-3 py-2">
+            <View className="mr-2 h-[7px] w-[7px] rounded-full bg-ocean-600" />
+            <Text className="text-[10px] font-extrabold text-ocean-700">
               {getStatusLabel(jeepney.status)}
             </Text>
           </View>
@@ -247,7 +180,6 @@ function NextJeepneyCard({
           <View className="flex-row items-center justify-between">
             <View className="flex-row items-center">
               <Users size={15} color={colors.textSecondary} strokeWidth={2.2} />
-
               <Text className="ml-2 text-[11px] font-bold text-ink-secondary">
                 Occupancy
               </Text>
@@ -267,9 +199,7 @@ function NextJeepneyCard({
                     ? "h-full rounded-full bg-amber-400"
                     : "h-full rounded-full bg-ocean-400"
               }
-              style={{
-                width: `${occupancy}%`,
-              }}
+              style={{ width: `${occupancy}%` }}
             />
           </View>
 
@@ -283,9 +213,8 @@ function NextJeepneyCard({
                     ? "Moderate"
                     : "Seats available"}
             </Text>
-
             <Text className="text-[10px] font-semibold text-ink-secondary">
-              {seatsLeft} {seatsLeft === 1 ? "seat" : "seats"} available
+              {seatsLeft} {seatsLeft === 1 ? "seat" : "seats"} left
             </Text>
           </View>
         </View>
@@ -300,7 +229,6 @@ function NextJeepneyCard({
               <Text className="text-[9px] font-bold uppercase tracking-[0.6px] text-ink-muted">
                 Loading ends
               </Text>
-
               <Text className="mt-0.5 text-[13px] font-extrabold text-ink-dark">
                 {formatTime(jeepney.loading_ends_at)}
               </Text>
@@ -312,14 +240,14 @@ function NextJeepneyCard({
   );
 }
 
-export default function CommuterDashboardScreen() {
+export default function DriverDashboardScreen() {
   const {
-    jeepneys,
-    nextJeepney,
-    queueCount,
-    totalPassengers,
-    availableSeats,
-    activities,
+    myJeepney,
+    queueJeepneys,
+    totalInQueue,
+    aheadOfMe,
+    isNextInLine,
+    isLoadingNow,
     notifications,
     unreadNotificationCount,
     loading,
@@ -327,30 +255,21 @@ export default function CommuterDashboardScreen() {
     error,
     lastUpdated,
     refresh,
-  } = useCommuterDashboard();
-
-  /**
-   * We intentionally only show a small activity preview.
-   * The Queue screen contains the full queue.
-   */
-  const activityPreview = useMemo(() => {
-    return activities.slice(0, 3);
-  }, [activities]);
+  } = useDriverDashboard();
 
   const handleNotifications = () => {
-    router.push("/commuter/(tabs)/notifications");
+    router.push("/staff/(driver)/notifications");
   };
 
   const handleQueue = () => {
-    router.push("/commuter/(tabs)/queue");
+    router.push("/driver/(tabs)/queue");
   };
 
-  if (loading && jeepneys.length === 0) {
+  if (loading && !myJeepney) {
     return (
       <OceanBackground intensity={0.3}>
         <SafeAreaView className="flex-1 items-center justify-center">
           <ActivityIndicator size="large" color={colors.primaryDark} />
-
           <Text className="mt-4 text-[13px] font-semibold text-ink-secondary">
             Loading your dashboard...
           </Text>
@@ -383,31 +302,22 @@ export default function CommuterDashboardScreen() {
               <Text className="text-[11px] font-bold uppercase tracking-[1.4px] text-ocean-700">
                 SMART QUEUE
               </Text>
-
               <Text className="mt-1 text-[28px] font-extrabold text-ink-dark">
-                Dashboard
+                My Dashboard
               </Text>
-
-              <View className="mt-2 flex-row items-center">
-                <MapPin
-                  size={14}
-                  color={colors.primaryDark}
-                  strokeWidth={2.2}
-                />
-
-                <Text className="ml-1 text-[11px] font-medium text-ink-secondary">
-                  Donsol → Daraga
+              {myJeepney?.plate_number && (
+                <Text className="mt-2 text-[11px] font-medium text-ink-secondary">
+                  {myJeepney.plate_number}
+                  {myJeepney.driver_name ? ` · ${myJeepney.driver_name}` : ""}
                 </Text>
-              </View>
+              )}
             </View>
 
-            {/* NOTIFICATION BELL */}
             <Pressable
               onPress={handleNotifications}
               className="relative h-[48px] w-[48px] items-center justify-center rounded-full border border-white/90 bg-clay-surface shadow-clay-sm"
             >
               <Bell size={21} color={colors.primaryDark} strokeWidth={2.2} />
-
               {unreadNotificationCount > 0 && (
                 <View className="absolute right-[-1px] top-[-2px] min-h-[20px] min-w-[20px] items-center justify-center rounded-full border-2 border-white bg-red-500 px-1">
                   <Text className="text-[9px] font-extrabold text-white">
@@ -424,13 +334,11 @@ export default function CommuterDashboardScreen() {
           {error && (
             <View className="mt-5 rounded-[20px] border border-red-200 bg-red-50 p-4">
               <Text className="text-[12px] font-bold text-red-700">
-                Unable to load some dashboard data
+                Unable to load your dashboard
               </Text>
-
               <Text className="mt-1 text-[10px] leading-[15px] text-red-600">
                 {error}
               </Text>
-
               <Pressable
                 onPress={refresh}
                 className="mt-3 self-start rounded-full bg-red-100 px-4 py-2"
@@ -442,71 +350,13 @@ export default function CommuterDashboardScreen() {
             </View>
           )}
 
-          {/* LIVE TERMINAL */}
-          <View className="mt-6 rounded-[28px] bg-ocean-400 p-5 shadow-clay-floating">
-            <View className="flex-row items-start justify-between">
-              <View>
-                <Text className="text-[10px] font-bold uppercase tracking-[1px] text-white/70">
-                  Terminal Status
-                </Text>
-
-                <View className="mt-2 flex-row items-center">
-                  <View className="mr-2 h-[9px] w-[9px] rounded-full bg-green-300" />
-
-                  <Text className="text-[18px] font-extrabold text-white">
-                    Live
-                  </Text>
-                </View>
-
-                <Text className="mt-1 text-[11px] text-white/75">
-                  Queue information updates automatically.
-                </Text>
-              </View>
-
-              <View className="h-[50px] w-[50px] items-center justify-center rounded-[17px] bg-white/20">
-                <RefreshCw size={22} color="#FFFFFF" strokeWidth={2} />
-              </View>
-            </View>
-
-            <View className="mt-5 h-px bg-white/20" />
-
-            <View className="mt-4 flex-row">
-              <View className="flex-1">
-                <Text className="text-[30px] font-extrabold text-white">
-                  {queueCount}
-                </Text>
-
-                <Text className="text-[10px] font-medium text-white/70">
-                  jeepneys waiting
-                </Text>
-              </View>
-
-              <View className="flex-1 border-l border-white/20 pl-5">
-                <Text className="text-[30px] font-extrabold text-white">
-                  {availableSeats}
-                </Text>
-
-                <Text className="text-[10px] font-medium text-white/70">
-                  seats available
-                </Text>
-              </View>
-            </View>
-          </View>
-
-          {/* NEXT JEEPNEY */}
-          <View className="mt-7 flex-row items-end justify-between">
-            <View>
-              <Text className="text-[19px] font-extrabold text-ink-dark">
-                Next Jeepney
-              </Text>
-
-              <Text className="mt-1 text-[10px] text-ink-secondary">
-                The next jeepney in the terminal queue
-              </Text>
-            </View>
-          </View>
-
-          <NextJeepneyCard jeepney={nextJeepney} />
+          {/* MY JEEPNEY — the highlighted, driver-specific card */}
+          <MyJeepneyCard
+            jeepney={myJeepney}
+            aheadOfMe={aheadOfMe}
+            isNextInLine={isNextInLine}
+            isLoadingNow={isLoadingNow}
+          />
 
           {/* VIEW QUEUE */}
           <Pressable
@@ -514,9 +364,8 @@ export default function CommuterDashboardScreen() {
             className="mt-4 flex-row items-center justify-center rounded-full border border-ocean-200 bg-white px-5 py-4 shadow-clay-sm"
           >
             <Text className="text-[12px] font-extrabold text-ocean-700">
-              View Full Queue
+              View Full Terminal Queue
             </Text>
-
             <ChevronRight
               size={17}
               color={colors.primaryDark}
@@ -524,7 +373,7 @@ export default function CommuterDashboardScreen() {
             />
           </Pressable>
 
-          {/* QUICK STATS */}
+          {/* TERMINAL SNAPSHOT */}
           <View className="mt-7">
             <Text className="mb-3 text-[11px] font-bold uppercase tracking-[1.1px] text-ocean-700">
               Terminal Overview
@@ -539,96 +388,82 @@ export default function CommuterDashboardScreen() {
                     strokeWidth={2.2}
                   />
                 </View>
-
                 <Text className="mt-4 text-[25px] font-extrabold text-ink-dark">
-                  {queueCount}
+                  {totalInQueue}
                 </Text>
-
                 <Text className="mt-0.5 text-[10px] font-semibold text-ink-secondary">
-                  In queue
+                  Jeepneys in queue
                 </Text>
               </View>
 
               <View className="flex-1 rounded-[23px] border border-white/90 bg-clay-surface p-4 shadow-clay-sm">
-                <View className="h-[38px] w-[38px] items-center justify-center rounded-[13px] bg-green-100">
-                  <Users size={19} color="#16A34A" strokeWidth={2.2} />
+                <View className="h-[38px] w-[38px] items-center justify-center rounded-[13px] bg-amber-100">
+                  <Users size={19} color="#B45309" strokeWidth={2.2} />
                 </View>
-
                 <Text className="mt-4 text-[25px] font-extrabold text-ink-dark">
-                  {totalPassengers}
+                  {aheadOfMe}
                 </Text>
-
                 <Text className="mt-0.5 text-[10px] font-semibold text-ink-secondary">
-                  Passengers aboard
+                  Ahead of you
                 </Text>
               </View>
             </View>
           </View>
 
-          {/* RECENT ACTIVITY */}
+          {/* QUEUE LIST WITH "YOU" HIGHLIGHTED */}
           <View className="mt-7">
-            <View className="flex-row items-center justify-between">
-              <View>
-                <Text className="text-[18px] font-extrabold text-ink-dark">
-                  Recent Activity
-                </Text>
+            <Text className="mb-3 text-[18px] font-extrabold text-ink-dark">
+              Queue Order
+            </Text>
 
-                <Text className="mt-1 text-[10px] text-ink-secondary">
-                  Latest terminal updates
-                </Text>
-              </View>
-
-              <View className="rounded-full bg-ocean-100 px-3 py-1.5">
-                <Text className="text-[9px] font-extrabold text-ocean-700">
-                  LIVE
-                </Text>
-              </View>
-            </View>
-
-            <View className="mt-4 overflow-hidden rounded-[25px] border border-white/90 bg-clay-surface shadow-clay">
-              {activityPreview.length === 0 ? (
+            <View className="overflow-hidden rounded-[25px] border border-white/90 bg-clay-surface shadow-clay">
+              {queueJeepneys.length === 0 ? (
                 <View className="items-center px-5 py-7">
                   <Text className="text-[12px] font-bold text-ink-dark">
-                    No recent activity
-                  </Text>
-
-                  <Text className="mt-1 text-center text-[10px] text-ink-secondary">
-                    Terminal activity will appear here.
+                    Queue is empty
                   </Text>
                 </View>
               ) : (
-                activityPreview.map((activity, index) => (
-                  <View
-                    key={activity.id}
-                    className={`flex-row items-center px-5 py-4 ${
-                      index < activityPreview.length - 1
-                        ? "border-b border-ocean-100"
-                        : ""
-                    }`}
-                  >
-                    <View className="h-[38px] w-[38px] items-center justify-center rounded-[13px] bg-ocean-100">
-                      <BusFront
-                        size={18}
-                        color={colors.primaryDark}
-                        strokeWidth={2.2}
-                      />
-                    </View>
+                queueJeepneys.map((jeep, index) => {
+                  const isMe = jeep.id === myJeepney?.id;
+                  return (
+                    <View
+                      key={jeep.id}
+                      className={`flex-row items-center px-5 py-4 ${
+                        index < queueJeepneys.length - 1
+                          ? "border-b border-ocean-100"
+                          : ""
+                      } ${isMe ? "bg-amber-50" : ""}`}
+                    >
+                      <View
+                        className={`h-[32px] w-[32px] items-center justify-center rounded-full ${
+                          isMe ? "bg-amber-400" : "bg-ocean-100"
+                        }`}
+                      >
+                        <Text
+                          className={`text-[11px] font-extrabold ${
+                            isMe ? "text-amber-950" : "text-ocean-700"
+                          }`}
+                        >
+                          {jeep.queue_position ?? "—"}
+                        </Text>
+                      </View>
 
-                    <View className="ml-3 flex-1">
-                      <Text className="text-[11px] font-extrabold text-ink-dark">
-                        {getActivityText(activity.status, activity.plateNumber)}
+                      <View className="ml-3 flex-1">
+                        <Text className="text-[11px] font-extrabold text-ink-dark">
+                          {jeep.plate_number} {isMe ? "(You)" : ""}
+                        </Text>
+                        <Text className="mt-0.5 text-[9px] text-ink-secondary">
+                          {getStatusLabel(jeep.status)}
+                        </Text>
+                      </View>
+
+                      <Text className="text-[9px] font-semibold text-ink-muted">
+                        {jeep.current_occupancy}/{jeep.capacity}
                       </Text>
-
-                      <Text className="mt-1 text-[9px] text-ink-secondary">
-                        Queue position {activity.queuePosition ?? "—"}
-                      </Text>
                     </View>
-
-                    <Text className="text-[9px] font-semibold text-ink-muted">
-                      {formatRelativeTime(activity.timestamp)}
-                    </Text>
-                  </View>
-                ))
+                  );
+                })
               )}
             </View>
           </View>
@@ -636,16 +471,9 @@ export default function CommuterDashboardScreen() {
           {/* NOTIFICATION PREVIEW */}
           <View className="mt-7">
             <View className="flex-row items-center justify-between">
-              <View>
-                <Text className="text-[18px] font-extrabold text-ink-dark">
-                  Notifications
-                </Text>
-
-                <Text className="mt-1 text-[10px] text-ink-secondary">
-                  Important Smart Queue updates
-                </Text>
-              </View>
-
+              <Text className="text-[18px] font-extrabold text-ink-dark">
+                Notifications
+              </Text>
               <Pressable
                 onPress={handleNotifications}
                 className="flex-row items-center"
@@ -653,7 +481,6 @@ export default function CommuterDashboardScreen() {
                 <Text className="text-[10px] font-extrabold text-ocean-700">
                   See all
                 </Text>
-
                 <ChevronRight size={15} color={colors.primaryDark} />
               </Pressable>
             </View>
@@ -662,20 +489,15 @@ export default function CommuterDashboardScreen() {
               {notifications.length === 0 ? (
                 <View className="items-center px-5 py-7">
                   <Bell size={25} color={colors.textMuted} strokeWidth={2} />
-
                   <Text className="mt-3 text-[12px] font-bold text-ink-dark">
                     You're all caught up
-                  </Text>
-
-                  <Text className="mt-1 text-center text-[10px] text-ink-secondary">
-                    No notifications right now.
                   </Text>
                 </View>
               ) : (
                 notifications.slice(0, 2).map((notification) => (
                   <Pressable
                     key={notification.id}
-                    onPress={() => handleNotifications()}
+                    onPress={handleNotifications}
                     className="flex-row items-center border-b border-ocean-100 px-5 py-4"
                   >
                     <View
@@ -683,12 +505,10 @@ export default function CommuterDashboardScreen() {
                         notification.read ? "bg-slate-300" : "bg-ocean-500"
                       }`}
                     />
-
                     <View className="ml-3 flex-1">
                       <Text className="text-[11px] font-extrabold text-ink-dark">
                         {notification.title}
                       </Text>
-
                       <Text
                         numberOfLines={1}
                         className="mt-1 text-[9px] text-ink-secondary"
@@ -696,17 +516,12 @@ export default function CommuterDashboardScreen() {
                         {notification.message}
                       </Text>
                     </View>
-
-                    <Text className="text-[9px] text-ink-muted">
-                      {formatRelativeTime(notification.created_at)}
-                    </Text>
                   </Pressable>
                 ))
               )}
             </View>
           </View>
 
-          {/* LAST UPDATED */}
           <View className="mt-7 items-center">
             <Text className="text-[9px] text-ink-muted">
               {lastUpdated

@@ -97,7 +97,6 @@ export default function CommuterProfileScreen() {
       setMobile(commuter.phone_number ?? "");
       setPushEnabled(!!commuter.expo_push_token);
       setAvatarUri(commuter.avatar_url ?? null);
-      console.log("🖼️ Avatar URL loaded:", commuter.avatar_url);
     } catch (error) {
       console.error("Failed to load commuter profile:", error);
       setProfile(null);
@@ -180,7 +179,7 @@ export default function CommuterProfileScreen() {
           if (profile) {
             setProfile({ ...profile, avatar_url: uploadedUrl });
           }
-          setAvatarUri(uploadedUrl); // ✅ permanent URL
+          setAvatarUri(uploadedUrl); // permanent URL
           showClayAlert("Success", "Avatar updated!", [
             { text: "OK", onPress: () => {} },
           ]);
@@ -345,8 +344,8 @@ export default function CommuterProfileScreen() {
 
   const handleSignOut = () => {
     showClayAlert(
-      "Sign out",
-      "Are you sure you want to sign out of Smart Queue?",
+      "Delete your profile?",
+      "This will permanently delete your Smart Queue profile, saved preferences, and notification settings. This can't be undone — you'll start fresh next time.",
       [
         { text: "Cancel", style: "cancel", onPress: () => {} },
         {
@@ -399,6 +398,7 @@ export default function CommuterProfileScreen() {
               justifyContent: "center",
               paddingHorizontal: 24,
               paddingVertical: 40,
+              paddingBottom: 60,
             }}
             showsVerticalScrollIndicator={false}
           >
@@ -440,8 +440,8 @@ export default function CommuterProfileScreen() {
         <ScrollView
           showsVerticalScrollIndicator={false}
           contentContainerStyle={{
-            paddingHorizontal: 24,
-            paddingTop: 20,
+            paddingHorizontal: 20,
+            paddingTop: 14,
             paddingBottom: 40,
           }}
         >
@@ -633,7 +633,7 @@ export default function CommuterProfileScreen() {
                     onPress={() => {
                       showClayAlert(
                         "Help & Support",
-                        "For assistance with Smart Queue, please contact the terminal administrator.",
+                        "For assistance with Smart Queue, please contact the terminal administrator, or email us at adminjeeepqs@gmail.com",
                         [{ text: "OK", onPress: () => {} }],
                       );
                     }}
@@ -669,11 +669,11 @@ export default function CommuterProfileScreen() {
 
               <Pressable
                 onPress={handleSignOut}
-                className="mt-8 min-h-[56px] flex-row items-center justify-center rounded-full border border-red-200 bg-white active:opacity-80"
+                className="mt-8 mb-10 min-h-[56px] flex-row items-center justify-center rounded-full border border-red-200 bg-white active:opacity-80"
               >
                 <LogOut size={18} color="#DC2626" strokeWidth={2.3} />
                 <Text className="ml-2 text-[14px] font-extrabold text-red-600">
-                  Sign Out
+                  Delete Profile
                 </Text>
               </Pressable>
               <Text className="mt-5 text-center text-[10px] text-ink-muted">

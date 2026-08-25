@@ -1,12 +1,14 @@
-// app/staff/(dispatcher)/queue.tsx
 import { router } from "expo-router";
 import {
   ArrowLeft,
+  Bell,
   Bus,
+  CheckCircle2,
   Clock,
   History,
-  Navigation,
+  MapPin,
   Search,
+  ShieldCheck,
   X,
 } from "lucide-react-native";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -23,234 +25,359 @@ import {
   View,
 } from "react-native";
 
-import { Card } from "../../../../src/shared/components/ui/Card";
-import { StatusPill } from "../../../../src/shared/components/ui/StatusPill";
-import { supabase } from "../../../../src/shared/config/supabase";
-import { theme } from "../../../../src/shared/constants/theme";
-import { useTheme } from "../../../../src/shared/context/ThemeContext";
-import { DispatchService } from "../../../../src/shared/services/DispatchService";
-import { useAuthStore } from "../../../../src/shared/store/authStore";
+import {
+  QueueJeepney,
+  RecentTrip,
+  useDispatcherQueue,
+} from "@/src/shared/hooks/dispatcher/useDispatcherQueue";
 
-// ─── TYPES ──────────────────────────────────────────────────────────
-interface QueueJeepney {
-  id: string;
-  plate_number: string;
-  driver_name: string | null;
-  driver_id: string | null;
-  jeep_name: string | null;
-  status: "waiting" | "loading";
-  terminal_id: 1 | 2;
-  bracket: number;
-  queue_position: number | null;
-  current_occupancy: number;
-  capacity: number;
-  loading_started_at: string | null;
-  loading_ends_at: string | null;
-  entered_geofence_at: string | null;
-}
+import { DispatcherQueueService } from "@/src/shared/services/dispatcher/DispatcherQueueService";
 
-interface RecentTrip {
-  id: string;
-  jeepney_id: string;
-  plate_number: string;
-  driver_name: string | null;
-  route: string;
-  passengers: number;
-  started_at: string;
-}
+import ClayButton from "@/src/shared/components/clay/ClayButton";
+import { ClayCard } from "@/src/shared/components/clay/ClayCard";
+import ClayStatCard from "@/src/shared/components/clay/ClayStatCard";
 
-const LOADING_DURATION_MS = 30 * 60 * 1000; // fallback if loading_ends_at is missing
+import { theme } from "@/src/shared/constants/theme";
+import { useTheme } from "@/src/shared/context/ThemeContext";
+import { useAuthStore } from "@/src/shared/store/authStore";
 
-const terminalName = (id: number) => (id === 1 ? "Donsol" : "Daraga");
-const routeForTerminal = (id: number) =>
-  id === 1 ? "Donsol → Daraga" : "Daraga → Donsol";
+const LOADING_DURATION_MS = 30 * 60 * 1000;
 
-function formatCountdown(ms: number) {
-  if (ms <= 0) return "Ready";
-  const totalSec = Math.floor(ms / 1000);
-  const m = Math.floor(totalSec / 60);
-  const s = totalSec % 60;
-  return `${m}:${s.toString().padStart(2, "0")}`;
-}
-
-// ─── TICK HOOK (drives the live countdown) ──────────────────────────
 function useNowTick(intervalMs = 1000) {
   const [now, setNow] = useState(() => Date.now());
+
   useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), intervalMs);
+    const id = setInterval(() => {
+      setNow(Date.now());
+    }, intervalMs);
+
     return () => clearInterval(id);
   }, [intervalMs]);
+
   return now;
 }
 
-// ─── LOADING TIMER PILL ──────────────────────────────────────────────
+function formatCountdown(ms: number) {
+  if (ms <= 0) {
+    return "Ready";
+  }
+
+  const totalSeconds = Math.floor(ms / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+
+  return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+}
+
 function LoadingTimer({ item, now }: { item: QueueJeepney; now: number }) {
   const { isDark } = useTheme();
 
-  if (item.status !== "loading" || !item.loading_started_at) return null;
+  if (item.status !== "loading" || !item.loading_started_at) {
+    return null;
+  }
 
   const endTime = item.loading_ends_at
     ? new Date(item.loading_ends_at).getTime()
     : new Date(item.loading_started_at).getTime() + LOADING_DURATION_MS;
 
   const remaining = endTime - now;
-  const isUrgent = remaining > 0 && remaining < 5 * 60 * 1000; // last 5 min
+
+  const isUrgent = remaining > 0 && remaining < 5 * 60 * 1000;
+
   const isOverdue = remaining <= 0;
+
+  const backgroundClass = isOverdue
+    ? isDark
+      ? "bg-red-500/15"
+      : "bg-red-50"
+    : isUrgent
+      ? isDark
+        ? "bg-amber-500/15"
+        : "bg-amber-50"
+      : isDark
+        ? "bg-sky-500/15"
+        : "bg-sky-50";
+
+  const textColor = isOverdue ? "#EF4444" : isUrgent ? "#F59E0B" : "#0EA5E9";
 
   return (
     <View
-      className={`flex-row items-center gap-1 px-2 py-1 rounded-full ${
-        isOverdue
-          ? isDark
-            ? "bg-red-500/20"
-            : "bg-red-50"
-          : isUrgent
-            ? isDark
-              ? "bg-amber-500/20"
-              : "bg-amber-50"
-            : isDark
-              ? "bg-blue-500/20"
-              : "bg-blue-50"
-      }`}
+      className={`flex-row items-center gap-1 rounded-full px-2.5 py-1 ${backgroundClass}`}
     >
-      <Clock
-        size={12}
-        color={isOverdue ? "#ef4444" : isUrgent ? "#f59e0b" : "#3b82f6"}
-      />
+      <Clock size={12} color={textColor} />
+
       <Text
-        className={`text-xs font-semibold ${
-          isOverdue
-            ? "text-red-500"
-            : isUrgent
-              ? "text-amber-500"
-              : "text-blue-500"
-        }`}
+        style={{
+          color: textColor,
+          fontSize: 11,
+          fontWeight: "800",
+        }}
       >
-        {isOverdue ? "Overdue to depart" : formatCountdown(remaining)}
+        {isOverdue ? "Ready" : formatCountdown(remaining)}
       </Text>
     </View>
   );
 }
 
-// ─── QUEUE ITEM ───────────────────────────────────────────────────────
-function QueueItemCard({
-  item,
-  now,
-  onDispatch,
-  dispatching,
+function TerminalHeader({
+  title,
+  subtitle,
+  isMine,
 }: {
-  item: QueueJeepney;
-  now: number;
-  onDispatch: (item: QueueJeepney) => void;
-  dispatching: boolean;
+  title: string;
+  subtitle: string;
+  isMine: boolean;
 }) {
   const { isDark } = useTheme();
-  const isLoading = item.status === "loading";
 
   return (
-    <Card className="mb-3 p-4">
-      <View className="flex-row items-center justify-between">
-        <View className="flex-row items-center gap-3 flex-1">
+    <ClayCard
+      padding={12}
+      radiusSize="xl"
+      shadow="small"
+      style={{
+        marginTop: 8,
+        marginBottom: 12,
+      }}
+    >
+      <View className="flex-row items-center">
+        <View
+          className={`h-10 w-10 items-center justify-center rounded-[16px] ${
+            isMine ? "bg-ocean-100" : isDark ? "bg-slate-800" : "bg-slate-100"
+          }`}
+        >
+          {isMine ? (
+            <MapPin size={19} color="#0EA5E9" />
+          ) : (
+            <Bus size={19} color={isDark ? "#94A3B8" : "#64748B"} />
+          )}
+        </View>
+
+        <View className="ml-3 flex-1">
+          <Text
+            className={`text-sm font-extrabold ${
+              isDark ? "text-white" : "text-ink-dark"
+            }`}
+          >
+            {title}
+          </Text>
+
+          <Text
+            className={`mt-0.5 text-[11px] ${
+              isDark ? "text-slate-400" : "text-ink-secondary"
+            }`}
+          >
+            {subtitle}
+          </Text>
+        </View>
+
+        {isMine ? (
+          <View className="flex-row items-center rounded-full bg-ocean-100 px-2.5 py-1">
+            <ShieldCheck size={12} color="#0EA5E9" />
+
+            <Text className="ml-1 text-[10px] font-extrabold text-sky-500">
+              MY TERMINAL
+            </Text>
+          </View>
+        ) : (
           <View
-            className={`w-9 h-9 rounded-full items-center justify-center ${
-              isLoading
-                ? isDark
-                  ? "bg-blue-500/20"
-                  : "bg-blue-50"
-                : isDark
-                  ? "bg-amber-500/20"
-                  : "bg-amber-50"
+            className={`rounded-full px-2.5 py-1 ${
+              isDark ? "bg-slate-800" : "bg-slate-100"
             }`}
           >
             <Text
-              className={`text-sm font-bold ${
-                isLoading ? "text-blue-600" : "text-amber-600"
+              className={`text-[10px] font-extrabold ${
+                isDark ? "text-slate-400" : "text-slate-500"
+              }`}
+            >
+              MONITORING
+            </Text>
+          </View>
+        )}
+      </View>
+    </ClayCard>
+  );
+}
+
+function QueueItemCard({
+  item,
+  now,
+  onAlert,
+  alerting,
+}: {
+  item: QueueJeepney;
+  now: number;
+  onAlert: (item: QueueJeepney) => void;
+  alerting: boolean;
+}) {
+  const { isDark } = useTheme();
+
+  const isLoading = item.status === "loading";
+
+  return (
+    <ClayCard
+      padding={16}
+      radiusSize="xl"
+      shadow="small"
+      style={{
+        marginBottom: 12,
+      }}
+    >
+      <View className="flex-row items-start justify-between">
+        <View className="flex-1 flex-row items-center">
+          <View
+            className={`h-11 w-11 items-center justify-center rounded-[17px] ${
+              item.is_my_terminal
+                ? isLoading
+                  ? "bg-ocean-100"
+                  : "bg-amber-100"
+                : isDark
+                  ? "bg-slate-800"
+                  : "bg-slate-100"
+            }`}
+          >
+            <Text
+              className={`text-sm font-extrabold ${
+                item.is_my_terminal
+                  ? isLoading
+                    ? "text-sky-500"
+                    : "text-amber-500"
+                  : isDark
+                    ? "text-slate-400"
+                    : "text-slate-500"
               }`}
             >
               {item.queue_position ?? "-"}
             </Text>
           </View>
 
-          <View className="flex-1">
+          <View className="ml-3 flex-1">
             <Text
-              className={`font-semibold ${isDark ? "text-white" : "text-slate-900"}`}
+              className={`font-extrabold ${
+                isDark ? "text-white" : "text-ink-dark"
+              }`}
             >
               {item.plate_number}
+
               {item.jeep_name ? `  ·  ${item.jeep_name}` : ""}
             </Text>
+
             <Text
-              className={`text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}
+              className={`mt-0.5 text-xs ${
+                isDark ? "text-slate-400" : "text-ink-secondary"
+              }`}
             >
-              {item.driver_name || "No driver assigned"} · Bracket{" "}
-              {item.bracket}
+              {item.driver_name ?? "No driver assigned"}
             </Text>
+
             <Text
-              className={`text-xs mt-0.5 ${isDark ? "text-slate-500" : "text-slate-400"}`}
+              className={`mt-1 text-[11px] ${
+                isDark ? "text-slate-500" : "text-slate-400"
+              }`}
             >
               {item.current_occupancy}/{item.capacity} passengers
+              {" · "}
+              Bracket {item.assigned_bracket_number}
             </Text>
           </View>
         </View>
 
         <View className="items-end gap-1.5">
-          <StatusPill status={item.status} dot isDark={isDark} />
+          <View
+            className={`rounded-full px-2.5 py-1 ${
+              isLoading ? "bg-sky-500/10" : "bg-amber-500/10"
+            }`}
+          >
+            <Text
+              className={`text-[10px] font-extrabold uppercase ${
+                isLoading ? "text-sky-500" : "text-amber-500"
+              }`}
+            >
+              {item.status}
+            </Text>
+          </View>
+
           <LoadingTimer item={item} now={now} />
         </View>
       </View>
 
-      {isLoading && (
-        <TouchableOpacity
-          className="mt-3 bg-sky-500 rounded-xl py-2.5 items-center flex-row justify-center gap-2"
-          onPress={() => onDispatch(item)}
-          disabled={dispatching}
+      {item.is_my_terminal ? (
+        <ClayButton
+          title="Alert Driver"
+          onPress={() => onAlert(item)}
+          loading={alerting}
+          disabled={alerting}
+          className="mt-4"
+        />
+      ) : (
+        <View
+          className={`mt-4 flex-row items-center justify-center rounded-full border px-4 py-3 ${
+            isDark
+              ? "border-slate-700 bg-slate-800"
+              : "border-white/80 bg-slate-100"
+          }`}
         >
-          {dispatching ? (
-            <ActivityIndicator color="#fff" size="small" />
-          ) : (
-            <>
-              <Navigation size={16} color="white" />
-              <Text className="text-white text-sm font-semibold">
-                Dispatch Now
-              </Text>
-            </>
-          )}
-        </TouchableOpacity>
+          <ShieldCheck size={15} color={isDark ? "#64748B" : "#94A3B8"} />
+
+          <Text
+            className={`ml-2 text-xs font-bold ${
+              isDark ? "text-slate-500" : "text-slate-400"
+            }`}
+          >
+            Monitoring only
+          </Text>
+        </View>
       )}
-    </Card>
+    </ClayCard>
   );
 }
 
-// ─── RECENT TRIP ROW ─────────────────────────────────────────────────
 function RecentTripRow({ item }: { item: RecentTrip }) {
   const { isDark } = useTheme();
+
   return (
     <View
-      className={`px-4 py-3 border-b ${isDark ? "border-slate-700" : "border-slate-100"}`}
+      className={`px-4 py-3 ${
+        isDark ? "border-slate-800" : "border-slate-100"
+      } border-b`}
     >
       <View className="flex-row items-center justify-between">
         <View className="flex-1">
           <Text
-            className={`font-medium ${isDark ? "text-white" : "text-slate-900"}`}
+            className={`font-extrabold ${
+              isDark ? "text-white" : "text-ink-dark"
+            }`}
           >
             {item.plate_number}
           </Text>
+
           <Text
-            className={`text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}
+            className={`mt-0.5 text-xs ${
+              isDark ? "text-slate-400" : "text-ink-secondary"
+            }`}
           >
-            {item.driver_name || "Unknown"} · {item.route}
+            {item.driver_name ?? "Unknown"}
+            {" · "}
+            {item.route}
           </Text>
         </View>
+
         <View className="items-end">
           <Text
-            className={`text-xs ${isDark ? "text-slate-500" : "text-slate-400"}`}
+            className={`text-xs ${
+              isDark ? "text-slate-500" : "text-slate-400"
+            }`}
           >
-            {new Date(item.started_at).toLocaleTimeString([], {
+            {new Date(item.departure_time).toLocaleTimeString([], {
               hour: "2-digit",
               minute: "2-digit",
             })}
           </Text>
+
           <Text
-            className={`text-[10px] ${isDark ? "text-slate-500" : "text-slate-400"}`}
+            className={`mt-0.5 text-[10px] ${
+              isDark ? "text-slate-500" : "text-slate-400"
+            }`}
           >
             {item.passengers} pax
           </Text>
@@ -260,327 +387,517 @@ function RecentTripRow({ item }: { item: RecentTrip }) {
   );
 }
 
-// ─── MAIN SCREEN ──────────────────────────────────────────────────────
 export default function DispatcherQueueScreen() {
   const { isDark } = useTheme();
+
   const { user } = useAuthStore();
+
   const now = useNowTick();
 
-  const [jeepneys, setJeepneys] = useState<QueueJeepney[]>([]);
-  const [recentTrips, setRecentTrips] = useState<RecentTrip[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
+  const {
+    myTerminal,
+    myTerminalQueue,
+    otherTerminalQueue,
+    recentTrips,
+    stats,
+    loading,
+    refreshing,
+    error,
+    refresh,
+  } = useDispatcherQueue();
+
+  const [alertingId, setAlertingId] = useState<string | null>(null);
+
   const [searchQuery, setSearchQuery] = useState("");
-  const [dispatchingId, setDispatchingId] = useState<string | null>(null);
 
-  // ─── FETCH QUEUE ────────────────────────────────────────────────
-  const fetchQueue = useCallback(async () => {
-    const { data, error } = await supabase
-      .from("jeepneys")
-      .select(
-        "id, plate_number, driver_name, driver_id, jeep_name, status, terminal_id, bracket, queue_position, current_occupancy, capacity, loading_started_at, loading_ends_at, entered_geofence_at",
-      )
-      .in("status", ["waiting", "loading"])
-      .order("terminal_id", { ascending: true })
-      .order("bracket", { ascending: true })
-      .order("queue_position", { ascending: true });
-
-    if (error) {
-      console.error("Failed to load queue:", error.message);
-      return;
-    }
-    setJeepneys((data as QueueJeepney[]) || []);
-  }, []);
-
-  // ─── FETCH RECENT TRIPS ─────────────────────────────────────────
-  const fetchRecentTrips = useCallback(async () => {
-    const { data, error } = await supabase
-      .from("trips")
-      .select(
-        "id, jeepney_id, route, passengers, started_at, jeepneys:jeepney_id (plate_number, driver_name)",
-      )
-      .order("started_at", { ascending: false })
-      .limit(8);
-
-    if (error) {
-      console.error("Failed to load recent trips:", error.message);
-      return;
-    }
-
-    setRecentTrips(
-      (data || []).map((t: any) => ({
-        id: t.id,
-        jeepney_id: t.jeepney_id,
-        plate_number: t.jeepneys?.plate_number || "Unknown",
-        driver_name: t.jeepneys?.driver_name || null,
-        route: t.route || "—",
-        passengers: t.passengers || 0,
-        started_at: t.started_at,
-      })),
-    );
-  }, []);
-
-  const loadAll = useCallback(async () => {
-    await Promise.all([fetchQueue(), fetchRecentTrips()]);
-  }, [fetchQueue, fetchRecentTrips]);
-
-  useEffect(() => {
-    setLoading(true);
-    loadAll().finally(() => setLoading(false));
-  }, [loadAll]);
-
-  // ─── REALTIME ───────────────────────────────────────────────────
-  useEffect(() => {
-    const channel = supabase
-      .channel("dispatcher-queue")
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "jeepneys" },
-        () => fetchQueue(),
-      )
-      .on(
-        "postgres_changes",
-        { event: "INSERT", schema: "public", table: "trips" },
-        () => fetchRecentTrips(),
-      )
-      .subscribe();
-
-    return () => {
-      channel?.unsubscribe();
-    };
-  }, [fetchQueue, fetchRecentTrips]);
-
-  const handleRefresh = useCallback(async () => {
-    setRefreshing(true);
-    await loadAll();
-    setRefreshing(false);
-  }, [loadAll]);
-
-  // ─── DISPATCH ───────────────────────────────────────────────────
-  const handleDispatch = useCallback(
+  const handleAlert = useCallback(
     (item: QueueJeepney) => {
-      Alert.alert(
-        "Dispatch Jeepney",
-        `Dispatch ${item.plate_number} (${item.driver_name || "no driver"}) on ${routeForTerminal(item.terminal_id)}?`,
-        [
-          { text: "Cancel", style: "cancel" },
-          {
-            text: "Dispatch",
-            onPress: async () => {
-              setDispatchingId(item.id);
-              const result = await DispatchService.dispatchJeepney(
-                item.id,
-                (user as any)?.id,
-              );
-              setDispatchingId(null);
+      if (!user?.id) {
+        Alert.alert(
+          "Unable to Alert",
+          "Your dispatcher account could not be identified.",
+        );
 
-              if (result.success) {
-                await loadAll();
-              } else {
-                Alert.alert(
-                  "Dispatch Failed",
-                  result.error || "Please try again.",
+        return;
+      }
+
+      if (!item.is_my_terminal) {
+        Alert.alert(
+          "Not Allowed",
+          "You can only alert jeepneys assigned to your terminal.",
+        );
+
+        return;
+      }
+
+      Alert.alert(
+        "Alert Driver",
+        `Send a queue alert to ${item.plate_number}${
+          item.driver_name ? ` (${item.driver_name})` : ""
+        }?`,
+        [
+          {
+            text: "Cancel",
+            style: "cancel",
+          },
+          {
+            text: "Send Alert",
+            onPress: async () => {
+              try {
+                setAlertingId(item.id);
+
+                const result = await DispatcherQueueService.alertDriver(
+                  user.id,
+                  item.id,
                 );
+
+                if (!result.success) {
+                  Alert.alert(
+                    "Alert Failed",
+                    result.error ?? "Unable to send alert.",
+                  );
+
+                  return;
+                }
+
+                Alert.alert(
+                  "Alert Sent",
+                  `${item.plate_number} has been alerted.`,
+                );
+              } catch (err: any) {
+                Alert.alert(
+                  "Alert Failed",
+                  err?.message ?? "Unable to send alert.",
+                );
+              } finally {
+                setAlertingId(null);
               }
             },
           },
         ],
       );
     },
-    [loadAll],
+    [user?.id],
   );
 
-  // ─── FILTER + GROUP BY TERMINAL ─────────────────────────────────
-  const sections = useMemo(() => {
-    const q = searchQuery.toLowerCase();
-    const filtered = jeepneys.filter(
-      (j) =>
-        j.plate_number.toLowerCase().includes(q) ||
-        (j.driver_name || "").toLowerCase().includes(q),
-    );
+  const filteredMyQueue = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
 
-    const byTerminal: Record<number, QueueJeepney[]> = {};
-    filtered.forEach((j) => {
-      byTerminal[j.terminal_id] = byTerminal[j.terminal_id] || [];
-      byTerminal[j.terminal_id].push(j);
+    if (!query) {
+      return Array.isArray(myTerminalQueue) ? myTerminalQueue : [];
+    }
+
+    return (Array.isArray(myTerminalQueue) ? myTerminalQueue : []).filter(
+      (item) =>
+        item.plate_number.toLowerCase().includes(query) ||
+        (item.driver_name ?? "").toLowerCase().includes(query),
+    );
+  }, [myTerminalQueue, searchQuery]);
+
+  const filteredOtherQueue = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+
+    const queue = Array.isArray(otherTerminalQueue) ? otherTerminalQueue : [];
+
+    if (!query) {
+      return queue;
+    }
+
+    return queue.filter(
+      (item) =>
+        item.plate_number.toLowerCase().includes(query) ||
+        (item.driver_name ?? "").toLowerCase().includes(query),
+    );
+  }, [otherTerminalQueue, searchQuery]);
+
+  const sections = useMemo(() => {
+    const result: {
+      title: string;
+      subtitle: string;
+      isMine: boolean;
+      data: QueueJeepney[];
+    }[] = [];
+
+    if (myTerminal) {
+      result.push({
+        title: myTerminal.name,
+
+        subtitle:
+          `Terminal ${myTerminal.terminal_number} · ` +
+          `Bracket ${myTerminal.bracket_number}`,
+
+        isMine: true,
+
+        data: filteredMyQueue,
+      });
+    }
+
+    const otherTerminals = new Map<string, QueueJeepney[]>();
+
+    filteredOtherQueue.forEach((item) => {
+      const terminalId = item.assigned_terminal_id;
+
+      const existing = otherTerminals.get(terminalId) ?? [];
+
+      existing.push(item);
+
+      otherTerminals.set(terminalId, existing);
     });
 
-    return Object.entries(byTerminal)
-      .sort(([a], [b]) => Number(a) - Number(b))
-      .map(([terminalId, data]) => ({
-        title: terminalName(Number(terminalId)),
-        data,
-      }));
-  }, [jeepneys, searchQuery]);
+    Array.from(otherTerminals.entries())
+      .sort((a, b) => {
+        const aNumber = a[1][0]?.assigned_terminal_number ?? 0;
 
-  const waitingCount = jeepneys.filter((j) => j.status === "waiting").length;
-  const loadingCount = jeepneys.filter((j) => j.status === "loading").length;
+        const bNumber = b[1][0]?.assigned_terminal_number ?? 0;
+
+        return aNumber - bNumber;
+      })
+      .forEach(([, data]) => {
+        const first = data[0];
+
+        if (!first) {
+          return;
+        }
+
+        result.push({
+          title: first.assigned_terminal_name,
+
+          subtitle:
+            `Terminal ${first.assigned_terminal_number} · ` +
+            `Bracket ${first.assigned_bracket_number}`,
+
+          isMine: false,
+
+          data,
+        });
+      });
+
+    return result;
+  }, [myTerminal, filteredMyQueue, filteredOtherQueue]);
 
   if (loading) {
     return (
       <SafeAreaView
-        className={`flex-1 items-center justify-center ${isDark ? "bg-slate-900" : "bg-slate-50"}`}
+        className={`flex-1 items-center justify-center ${
+          isDark ? "bg-slate-950" : "bg-clay-background"
+        }`}
       >
         <ActivityIndicator size="large" color={theme.colors.primary[500]} />
+
+        <Text
+          className={`mt-3 text-sm ${
+            isDark ? "text-slate-400" : "text-ink-secondary"
+          }`}
+        >
+          Loading queue...
+        </Text>
       </SafeAreaView>
     );
   }
 
   return (
     <SafeAreaView
-      className={`flex-1 ${isDark ? "bg-slate-900" : "bg-slate-50"}`}
+      className={`flex-1 ${isDark ? "bg-slate-950" : "bg-clay-background"}`}
     >
-      {/* Header */}
-      <View
-        className={`flex-row items-center px-4 py-3 border-b ${
-          isDark ? "bg-slate-800 border-slate-700" : "bg-white border-slate-200"
-        }`}
-      >
-        <TouchableOpacity onPress={() => router.back()} className="mr-3 p-1">
-          <ArrowLeft size={24} color={isDark ? "#94a3b8" : "#0f172a"} />
-        </TouchableOpacity>
-        <Text
-          className={`text-xl font-bold flex-1 ${isDark ? "text-white" : "text-slate-900"}`}
+      <View className="px-4 pt-3">
+        <ClayCard padding={14} radiusSize="xl" shadow="small">
+          <View className="flex-row items-center">
+            <TouchableOpacity
+              onPress={() => router.back()}
+              className="mr-3 h-10 w-10 items-center justify-center rounded-full bg-ocean-100"
+              activeOpacity={0.8}
+            >
+              <ArrowLeft size={21} color="#0EA5E9" />
+            </TouchableOpacity>
+
+            <View className="flex-1">
+              <Text
+                className={`text-xl font-extrabold ${
+                  isDark ? "text-white" : "text-ink-dark"
+                }`}
+              >
+                Queue Management
+              </Text>
+
+              <Text
+                className={`mt-0.5 text-xs ${
+                  isDark ? "text-slate-400" : "text-ink-secondary"
+                }`}
+              >
+                Monitor both terminals
+              </Text>
+            </View>
+
+            <View className="flex-row items-center rounded-full bg-emerald-500/10 px-2.5 py-1.5">
+              <CheckCircle2 size={13} color="#10B981" />
+
+              <Text className="ml-1 text-[10px] font-extrabold text-emerald-500">
+                AUTO
+              </Text>
+            </View>
+          </View>
+        </ClayCard>
+      </View>
+
+      <View className="px-4 pt-3">
+        <View className="flex-row gap-3">
+          <ClayStatCard
+            label="My Queue"
+            value={stats.myTerminal}
+            subtitle="My terminal"
+            icon={<MapPin size={19} color="#0EA5E9" />}
+          />
+
+          <ClayStatCard
+            label="Waiting"
+            value={stats.waiting}
+            subtitle="Awaiting load"
+            icon={<Clock size={19} color="#F59E0B" />}
+          />
+        </View>
+
+        <View className="mt-3 flex-row gap-3">
+          <ClayStatCard
+            label="Loading"
+            value={stats.loading}
+            subtitle="Currently loading"
+            icon={<Bus size={19} color="#0EA5E9" />}
+          />
+
+          <ClayStatCard
+            label="Other"
+            value={stats.otherTerminal}
+            subtitle="Monitoring"
+            icon={<ShieldCheck size={19} color="#64748B" />}
+          />
+        </View>
+      </View>
+
+      <View className="px-4 pt-3">
+        <ClayCard padding={12} radiusSize="xl" shadow="small">
+          <View className="flex-row items-center">
+            <View className="h-9 w-9 items-center justify-center rounded-[14px] bg-ocean-100">
+              <ShieldCheck size={18} color="#0EA5E9" />
+            </View>
+
+            <View className="ml-3 flex-1">
+              <Text
+                className={`text-sm font-extrabold ${
+                  isDark ? "text-white" : "text-ink-dark"
+                }`}
+              >
+                {myTerminal?.name ?? "Unassigned Terminal"}
+              </Text>
+
+              <Text
+                className={`mt-0.5 text-[11px] ${
+                  isDark ? "text-slate-400" : "text-ink-secondary"
+                }`}
+              >
+                Terminal {myTerminal?.terminal_number ?? "-"} · Bracket{" "}
+                {myTerminal?.bracket_number ?? "-"}
+              </Text>
+            </View>
+          </View>
+        </ClayCard>
+
+        <View className="mt-3 flex-row items-center rounded-[20px] border border-white/70 bg-ocean-100 px-3 py-2.5">
+          <Bell size={15} color="#0EA5E9" />
+
+          <Text className="ml-2 flex-1 text-xs font-semibold text-sky-600">
+            You can alert drivers in your terminal. Dispatching is fully
+            automatic.
+          </Text>
+        </View>
+
+        <ClayCard
+          padding={11}
+          radiusSize="xl"
+          shadow="small"
+          style={{
+            marginTop: 12,
+          }}
         >
-          Queue Management
-        </Text>
+          <View className="flex-row items-center">
+            <Search size={17} color="#94A3B8" />
+
+            <TextInput
+              className={`ml-2 flex-1 text-sm ${
+                isDark ? "text-white" : "text-ink-dark"
+              }`}
+              placeholder="Search plate or driver..."
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              placeholderTextColor={isDark ? "#64748B" : "#94A3B8"}
+            />
+
+            {searchQuery.length > 0 && (
+              <TouchableOpacity onPress={() => setSearchQuery("")}>
+                <X size={17} color="#94A3B8" />
+              </TouchableOpacity>
+            )}
+          </View>
+        </ClayCard>
       </View>
 
-      {/* Search */}
-      <View
-        className={`flex-row items-center mx-4 mt-4 mb-3 px-3 py-2.5 rounded-xl border ${
-          isDark ? "bg-slate-800 border-slate-700" : "bg-white border-slate-200"
-        }`}
-      >
-        <Search size={18} color="#94a3b8" />
-        <TextInput
-          className={`flex-1 text-base ml-2 ${isDark ? "text-white" : "text-slate-900"}`}
-          placeholder="Search by plate or driver..."
-          value={searchQuery}
-          onChangeText={setSearchQuery}
-          placeholderTextColor={isDark ? "#64748b" : "#94a3b8"}
-        />
-        {searchQuery.length > 0 && (
-          <TouchableOpacity onPress={() => setSearchQuery("")}>
-            <X size={18} color="#94a3b8" />
+      {error && (
+        <View className="mx-4 mt-3 rounded-[20px] border border-red-500/20 bg-red-500/10 p-3">
+          <Text className="text-sm font-semibold text-red-500">{error}</Text>
+
+          <TouchableOpacity
+            onPress={refresh}
+            className="mt-2 self-start rounded-full bg-red-500 px-4 py-2"
+          >
+            <Text className="text-xs font-bold text-white">Retry</Text>
           </TouchableOpacity>
-        )}
-      </View>
+        </View>
+      )}
 
-      {/* Stats */}
-      <View className="flex-row justify-around mx-4 mb-3">
-        <View className="items-center">
-          <Text
-            className={`text-lg font-bold ${isDark ? "text-white" : "text-slate-900"}`}
-          >
-            {waitingCount}
-          </Text>
-          <Text
-            className={`text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}
-          >
-            Waiting
-          </Text>
-        </View>
-        <View className="items-center">
-          <Text
-            className={`text-lg font-bold ${isDark ? "text-white" : "text-slate-900"}`}
-          >
-            {loadingCount}
-          </Text>
-          <Text
-            className={`text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}
-          >
-            Loading
-          </Text>
-        </View>
-        <View className="items-center">
-          <Text
-            className={`text-lg font-bold ${isDark ? "text-white" : "text-slate-900"}`}
-          >
-            {recentTrips.length}
-          </Text>
-          <Text
-            className={`text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}
-          >
-            Recent trips
-          </Text>
-        </View>
-      </View>
-
-      {/* Queue list, grouped by terminal */}
       <SectionList
         sections={sections}
-        keyExtractor={(item) => item.id}
+        keyExtractor={(item) => `${item.id}-${item.assigned_terminal_id}`}
+        renderSectionHeader={({ section }) => (
+          <TerminalHeader
+            title={section.title}
+            subtitle={section.subtitle}
+            isMine={section.isMine}
+          />
+        )}
         renderItem={({ item }) => (
           <QueueItemCard
             item={item}
             now={now}
-            onDispatch={handleDispatch}
-            dispatching={dispatchingId === item.id}
+            onAlert={handleAlert}
+            alerting={alertingId === item.id}
           />
-        )}
-        renderSectionHeader={({ section }) => (
-          <Text
-            className={`text-xs font-bold tracking-wide mb-2 mt-1 ${isDark ? "text-slate-400" : "text-slate-500"}`}
-          >
-            {section.title.toUpperCase()} TERMINAL
-          </Text>
         )}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
-            onRefresh={handleRefresh}
+            onRefresh={refresh}
             tintColor={theme.colors.primary[500]}
           />
         }
-        contentContainerStyle={{ padding: 16, paddingBottom: 8 }}
+        contentContainerStyle={{
+          paddingHorizontal: 16,
+          paddingTop: 8,
+          paddingBottom: 30,
+        }}
+        stickySectionHeadersEnabled={false}
         ListEmptyComponent={
-          <View className="items-center py-10">
-            <Bus size={48} color={isDark ? "#475569" : "#cbd5e1"} />
+          <ClayCard
+            padding={24}
+            radiusSize="xxl"
+            shadow="small"
+            style={{
+              marginTop: 12,
+              alignItems: "center",
+            }}
+          >
+            <View className="h-20 w-20 items-center justify-center rounded-[28px] bg-ocean-100">
+              <Bus size={40} color="#94A3B8" />
+            </View>
+
             <Text
-              className={`mt-3 text-base ${isDark ? "text-slate-500" : "text-slate-400"}`}
+              className={`mt-4 text-base font-extrabold ${
+                isDark ? "text-slate-300" : "text-ink-dark"
+              }`}
             >
               No jeepneys in queue
             </Text>
-          </View>
+
+            <Text
+              className={`mt-1 text-center text-xs ${
+                isDark ? "text-slate-500" : "text-ink-secondary"
+              }`}
+            >
+              Both terminals currently have no waiting or loading jeepneys.
+            </Text>
+          </ClayCard>
         }
         ListFooterComponent={
           <View className="mt-2">
-            <View className="flex-row items-center justify-between mb-2">
-              <View className="flex-row items-center gap-2">
-                <History size={16} color={isDark ? "#94a3b8" : "#64748b"} />
+            <View className="mb-3 flex-row items-center justify-between">
+              <View className="flex-row items-center">
+                <View className="mr-2 h-9 w-9 items-center justify-center rounded-[14px] bg-ocean-100">
+                  <History size={16} color="#64748B" />
+                </View>
+
                 <Text
-                  className={`text-sm font-semibold ${isDark ? "text-white" : "text-slate-900"}`}
+                  className={`text-sm font-extrabold ${
+                    isDark ? "text-white" : "text-ink-dark"
+                  }`}
                 >
-                  Recent trips
+                  Recent Trips
                 </Text>
               </View>
+
               <TouchableOpacity
                 onPress={() =>
                   router.push("/staff/(dispatcher)/reports" as any)
                 }
               >
-                <Text className="text-xs text-sky-500 font-medium">
-                  View all reports
+                <Text className="text-xs font-extrabold text-sky-500">
+                  View reports
                 </Text>
               </TouchableOpacity>
             </View>
-            <Card style={{ padding: 0 }}>
+
+            <ClayCard padding={0} radiusSize="xl" shadow="small">
               {recentTrips.length === 0 ? (
-                <Text
-                  className={`text-center py-4 ${isDark ? "text-slate-400" : "text-slate-400"}`}
-                >
-                  No recent trips
-                </Text>
+                <View className="items-center py-7">
+                  <History size={28} color={isDark ? "#475569" : "#CBD5E1"} />
+
+                  <Text
+                    className={`mt-2 text-xs ${
+                      isDark ? "text-slate-500" : "text-ink-secondary"
+                    }`}
+                  >
+                    No recent trips
+                  </Text>
+                </View>
               ) : (
                 <FlatList
                   data={recentTrips}
-                  keyExtractor={(t) => t.id}
+                  keyExtractor={(item) => item.id}
                   renderItem={({ item }) => <RecentTripRow item={item} />}
                   scrollEnabled={false}
                 />
               )}
-            </Card>
+            </ClayCard>
+
+            <ClayCard
+              padding={15}
+              radiusSize="xl"
+              shadow="small"
+              style={{
+                marginTop: 12,
+              }}
+            >
+              <View className="flex-row items-center">
+                <View className="h-9 w-9 items-center justify-center rounded-[14px] bg-emerald-500/10">
+                  <CheckCircle2 size={16} color="#10B981" />
+                </View>
+
+                <Text
+                  className={`ml-2 text-xs font-extrabold ${
+                    isDark ? "text-slate-300" : "text-ink-dark"
+                  }`}
+                >
+                  Automatic dispatch is active
+                </Text>
+              </View>
+
+              <Text
+                className={`mt-2 text-[11px] leading-4 ${
+                  isDark ? "text-slate-500" : "text-ink-secondary"
+                }`}
+              >
+                Queue order and dispatch decisions are controlled by the
+                automated dispatch system. Dispatcher alerts do not change queue
+                order or dispatch status.
+              </Text>
+            </ClayCard>
           </View>
         }
       />

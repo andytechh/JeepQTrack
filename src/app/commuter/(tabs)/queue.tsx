@@ -1,4 +1,3 @@
-// app/commuter/(tabs)/queue.tsx
 import {
   ArrowRight,
   BusFront,
@@ -227,7 +226,7 @@ function JeepneyCard({
 
       <TouchableOpacity
         onPress={onPressDetails}
-        className="mt-4 flex-row items-center justify-end"
+        className="mt-4 flex-row items-center justify-end gap-1"
       >
         <Text className="text-[10px] text-ocean-500 font-semibold">
           View details

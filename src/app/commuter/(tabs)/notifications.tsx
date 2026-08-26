@@ -333,6 +333,7 @@ function NotificationCard({
                 fontWeight: "500",
               }}
             >
+              Jeep Name:
               {notification.message}
             </Text>
 

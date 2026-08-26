@@ -21,22 +21,17 @@ export interface Notification {
 }
 
 export class NotificationService {
-  static async getNotifications(): Promise<{
+  static async getNotifications(userId: string): Promise<{
     success: boolean;
     data: Notification[];
     error?: string;
   }> {
     try {
-      const {
-        data: { user },
-        error: authError,
-      } = await supabase.auth.getUser();
-
-      if (authError || !user) {
+      if (!userId) {
         return {
           success: false,
           data: [],
-          error: "No authenticated commuter session.",
+          error: "No authenticated staff session.",
         };
       }
 
@@ -55,7 +50,7 @@ export class NotificationService {
             updated_at
           `,
         )
-        .eq("user_id", user.id)
+        .eq("user_id", userId)
         .order("created_at", { ascending: false });
 
       if (error) {
@@ -83,13 +78,9 @@ export class NotificationService {
     }
   }
 
-  static async getUnreadCount(): Promise<number> {
+  static async getUnreadCount(userId: string): Promise<number> {
     try {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-
-      if (!user) return 0;
+      if (!userId) return 0;
 
       const { count, error } = await supabase
         .from("notifications")
@@ -97,7 +88,7 @@ export class NotificationService {
           count: "exact",
           head: true,
         })
-        .eq("user_id", user.id)
+        .eq("user_id", userId)
         .eq("read", false);
 
       if (error) {
@@ -112,13 +103,12 @@ export class NotificationService {
     }
   }
 
-  static async markAsRead(notificationId: string): Promise<boolean> {
+  static async markAsRead(
+    notificationId: string,
+    userId: string,
+  ): Promise<boolean> {
     try {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-
-      if (!user) return false;
+      if (!userId) return false;
 
       const { error } = await supabase
         .from("notifications")
@@ -126,7 +116,7 @@ export class NotificationService {
           read: true,
         })
         .eq("id", notificationId)
-        .eq("user_id", user.id);
+        .eq("user_id", userId);
 
       if (error) {
         console.error("❌ Failed to mark notification as read:", error);
@@ -141,20 +131,16 @@ export class NotificationService {
     }
   }
 
-  static async markAllAsRead(): Promise<boolean> {
+  static async markAllAsRead(userId: string): Promise<boolean> {
     try {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-
-      if (!user) return false;
+      if (!userId) return false;
 
       const { error } = await supabase
         .from("notifications")
         .update({
           read: true,
         })
-        .eq("user_id", user.id)
+        .eq("user_id", userId)
         .eq("read", false);
 
       if (error) {

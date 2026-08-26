@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 
+import { useState } from "react";
 import { supabase } from "../../config/supabase";
 import { useAuthStore } from "../../store/authStore";
+import { useNotifications } from "../useNotification";
 
 export interface DriverJeepney {
   id: string;
@@ -19,16 +21,6 @@ export interface DriverJeepney {
   updated_at: string;
 }
 
-interface NotificationItem {
-  id: string;
-  title: string;
-  message: string;
-  type: string;
-  read: boolean;
-  data: Record<string, unknown> | null;
-  created_at: string;
-}
-
 export function useDriverDashboard() {
   const user = useAuthStore((state) => state.user);
   const jeepneyId = user?.jeepneyId ?? null;
@@ -36,13 +28,25 @@ export function useDriverDashboard() {
 
   const [myJeepney, setMyJeepney] = useState<DriverJeepney | null>(null);
   const [queueJeepneys, setQueueJeepneys] = useState<DriverJeepney[]>([]);
-  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
-  const fetchData = useCallback(async () => {
+  // Single source of truth for notifications — same hook the
+  // notifications screen uses, so read/unread state can never
+  // drift between the two screens.
+  const {
+    notifications,
+    unreadCount: unreadNotificationCount,
+    loading: notificationsLoading,
+    refreshing: notificationsRefreshing,
+    refresh: refreshNotifications,
+    markAsRead,
+    markAllAsRead,
+  } = useNotifications(driverId);
+
+  const fetchJeepneyData = useCallback(async () => {
     if (!driverId) {
       setLoading(false);
       return;
@@ -52,8 +56,6 @@ export function useDriverDashboard() {
 
     try {
       // 1. My own jeepney row.
-      // Prefer the users.jeepney_id link (direct PK lookup);
-      // fall back to jeepneys.driver_id in case it isn't set yet.
       let mine: DriverJeepney | null = null;
 
       if (jeepneyId) {
@@ -78,7 +80,7 @@ export function useDriverDashboard() {
 
       setMyJeepney(mine);
 
-      // 2. Rest of the terminal queue, so we can show "3 jeeps ahead of you"
+      // 2. Rest of the terminal queue.
       if (mine?.terminal_id) {
         const { data: terminalJeeps, error: terminalError } = await supabase
           .from("jeepneys")
@@ -93,17 +95,6 @@ export function useDriverDashboard() {
         setQueueJeepneys([]);
       }
 
-      // 3. Notifications addressed to this driver (notifications.user_id)
-      const { data: notifs, error: notifError } = await supabase
-        .from("notifications")
-        .select("*")
-        .eq("user_id", driverId)
-        .order("created_at", { ascending: false })
-        .limit(10);
-
-      if (notifError) throw notifError;
-      setNotifications((notifs ?? []) as NotificationItem[]);
-
       setLastUpdated(new Date());
     } catch (err: any) {
       setError(err?.message ?? "Unable to load your dashboard");
@@ -114,42 +105,33 @@ export function useDriverDashboard() {
   }, [driverId, jeepneyId]);
 
   useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+    fetchJeepneyData();
+  }, [fetchJeepneyData]);
 
-  // Realtime: any change to jeepneys (queue reshuffles affect everyone),
-  // scoped refetch keeps it simple and correct.
+  // Realtime: only jeepneys now — notifications realtime is owned
+  // entirely by useNotifications.
   useEffect(() => {
     if (!driverId) return;
 
     const channel = supabase
-      .channel(`driver-dashboard-${driverId}`)
+      .channel(`driver-dashboard-jeepneys-${driverId}`)
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "jeepneys" },
-        () => fetchData(),
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "notifications",
-          filter: `user_id=eq.${driverId}`,
-        },
-        () => fetchData(),
+        () => fetchJeepneyData(),
       )
       .subscribe();
 
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [driverId, fetchData]);
+  }, [driverId, fetchJeepneyData]);
 
   const refresh = useCallback(() => {
     setRefreshing(true);
-    fetchData();
-  }, [fetchData]);
+    fetchJeepneyData();
+    refreshNotifications();
+  }, [fetchJeepneyData, refreshNotifications]);
 
   const aheadOfMe = useMemo(() => {
     if (!myJeepney?.queue_position) return 0;
@@ -161,12 +143,8 @@ export function useDriverDashboard() {
   const isDispatchedOrEnRoute =
     myJeepney?.status === "dispatched" || myJeepney?.status === "en_route";
 
-  const unreadNotificationCount = useMemo(
-    () => notifications.filter((n) => !n.read).length,
-    [notifications],
-  );
-
   return {
+    driverId,
     myJeepney,
     queueJeepneys,
     totalInQueue: queueJeepneys.length,
@@ -176,10 +154,12 @@ export function useDriverDashboard() {
     isDispatchedOrEnRoute,
     notifications,
     unreadNotificationCount,
-    loading,
-    refreshing,
+    loading: loading || notificationsLoading,
+    refreshing: refreshing || notificationsRefreshing,
     error,
     lastUpdated,
     refresh,
+    markAsRead,
+    markAllAsRead,
   };
 }

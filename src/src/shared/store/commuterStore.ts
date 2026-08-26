@@ -20,15 +20,19 @@ interface CommuterState {
   hasHydrated: boolean;
 
   setHasHydrated: (value: boolean) => void;
-
   completeOnboarding: (data: CompleteOnboardingData) => void;
-
   updateProfile: (data: Partial<CommuterProfile>) => void;
-
   clearProfile: () => void;
-
   resetOnboarding: () => void;
 }
+
+// No-op storage used during static export / SSR, where `window` doesn't
+// exist and AsyncStorage's web shim would otherwise crash.
+const noopStorage = {
+  getItem: async () => null,
+  setItem: async () => {},
+  removeItem: async () => {},
+};
 
 export const useCommuterStore = create<CommuterState>()(
   persist(
@@ -79,10 +83,16 @@ export const useCommuterStore = create<CommuterState>()(
         });
       },
     }),
+
     {
       name: "jeepqtrack-commuter",
 
-      storage: createJSONStorage(() => AsyncStorage),
+      // Only use AsyncStorage on the client; fall back to the no-op storage
+      // during static export / any environment without `window`, so the
+      // Supabase/Zustand hydration never touches localStorage in Node.
+      storage: createJSONStorage(() =>
+        typeof window === "undefined" ? noopStorage : AsyncStorage,
+      ),
 
       partialize: (state) => ({
         profile: state.profile,

@@ -1,7 +1,6 @@
-// app/_layout.tsx
 import Constants from "expo-constants";
 import * as Notifications from "expo-notifications";
-import { Slot, router, useSegments } from "expo-router"; // ✅ removed expo-router ThemeProvider
+import { Slot, router, useSegments } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AppState, Platform } from "react-native";
@@ -9,7 +8,7 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import Toast from "react-native-toast-message";
 import "../../global.css";
 import { supabase } from "../src/shared/config/supabase";
-import { ThemeProvider as AppThemeProvider } from "../src/shared/context/ThemeContext"; // ✅ local ThemeProvider
+import { ThemeProvider as AppThemeProvider } from "../src/shared/context/ThemeContext";
 import { useGlobalChatListener } from "../src/shared/hooks/useGlobalChatListener";
 import { AuthService } from "../src/shared/services/AuthService";
 import { useAuthStore } from "../src/shared/store/authStore";
@@ -85,9 +84,10 @@ export default function RootLayout() {
   const APP_FLAVOR = getAppFlavor();
   useGlobalChatListener();
 
-  // ─── INITIALIZE NOTIFICATION CHANNELS ──────────────────────────────
   useEffect(() => {
-    createNotificationChannels();
+    if (Platform.OS !== "web") {
+      createNotificationChannels();
+    }
   }, []);
 
   // ─── CHECK AUTH ON APP START ──────────────────────────────────────
@@ -139,13 +139,14 @@ export default function RootLayout() {
 
   // ─── REGISTER PUSH TOKEN WHEN USER LOGS IN ────────────────────────
   useEffect(() => {
-    if (user?.id && isReady) {
+    if (user?.uid && isReady) {
       registerPushToken();
     }
   }, [user?.id, isReady]);
 
-  // ─── SETUP NOTIFICATION LISTENERS ─────────────────────────────────
   useEffect(() => {
+    if (Platform.OS === "web") return;
+
     if (user?.id && isReady) {
       const cleanup = setupNotificationListeners();
       cleanupRef.current = cleanup;

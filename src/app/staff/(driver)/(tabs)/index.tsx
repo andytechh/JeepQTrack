@@ -60,10 +60,6 @@ function formatTime(timestamp: string | null) {
   }
 }
 
-/**
- * The centerpiece of the driver dashboard: their own jeep, made obvious
- * with a big queue-position number and a banner state when it's their turn.
- */
 function MyJeepneyCard({
   jeepney,
   aheadOfMe,
@@ -135,7 +131,7 @@ function MyJeepneyCard({
 
         <View className="mt-5 flex-row items-end">
           <Text className="text-[52px] font-extrabold leading-[52px] text-white">
-            {jeepney.queue_position ?? "—"}
+            {jeepney.queue_position ?? "#"}
           </Text>
           <Text className="mb-1.5 ml-2 text-[13px] font-semibold text-white/75">
             queue position
@@ -262,7 +258,7 @@ export default function DriverDashboardScreen() {
   };
 
   const handleQueue = () => {
-    router.push("/driver/(tabs)/queue");
+    router.push("/staff/(driver)/(tabs)/queue");
   };
 
   if (loading && !myJeepney) {

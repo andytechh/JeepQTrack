@@ -3,19 +3,43 @@
     "version": ">= 21.3.0",
     "appVersionSource": "remote"
   },
+
   "build": {
-    "development": {
-      "developmentClient": true,
-      "distribution": "internal"
+    "commuter-apk": {
+      "distribution": "internal",
+      "channel": "commuter-preview",
+      "env": {
+        "APP_VARIANT": "commuter"
+      }
     },
-    "preview": {
-      "distribution": "internal"
+
+    "staff-apk": {
+      "distribution": "internal",
+      "channel": "staff-preview",
+      "env": {
+        "APP_VARIANT": "staff"
+      }
     },
-    "production": {
-      "autoIncrement": true
+
+    "commuter-production": {
+      "autoIncrement": true,
+      "channel": "commuter-production",
+      "env": {
+        "APP_VARIANT": "commuter"
+      }
+    },
+
+    "staff-production": {
+      "autoIncrement": true,
+      "channel": "staff-production",
+      "env": {
+        "APP_VARIANT": "staff"
+      }
     }
   },
+
   "submit": {
-    "production": {}
+    "commuter-production": {},
+    "staff-production": {}
   }
 }

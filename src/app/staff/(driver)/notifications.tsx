@@ -12,7 +12,6 @@ import {
   Users,
   X,
 } from "lucide-react-native";
-import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -25,14 +24,17 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import OceanBackground from "../../../src/shared/components/clay/OceanBackground";
-import { supabase } from "../../../src/shared/config/supabase";
 import { useNotifications } from "../../../src/shared/hooks/useNotification";
+import { useAuthStore } from "../../../src/shared/store/authStore";
 
 type NotificationType =
   "arrival" | "dispatch" | "occupancy" | "eta" | "status" | "queue" | "system";
 
 export default function CommuterNotificationsScreen() {
-  const userId = useCurrentUserId();
+  // Was: const userId = useCurrentUserId();  (relied on supabase.auth.getUser(),
+  // which is always null for staff — this app authenticates against the
+  // custom `users` table via authStore, not Supabase Auth sessions.)
+  const userId = useAuthStore((state) => state.user?.uid ?? null);
 
   const {
     notifications,
@@ -157,60 +159,6 @@ export default function CommuterNotificationsScreen() {
       </SafeAreaView>
     </OceanBackground>
   );
-}
-
-function useCurrentUserId(): string | null {
-  const [userId, setUserId] = useState<string | null>(null);
-
-  useEffect(() => {
-    let mounted = true;
-
-    const loadUser = async () => {
-      try {
-        const {
-          data: { user },
-          error,
-        } = await supabase.auth.getUser();
-
-        if (error) {
-          console.error("❌ Failed to get current user:", error);
-
-          if (mounted) {
-            setUserId(null);
-          }
-
-          return;
-        }
-
-        if (mounted) {
-          setUserId(user?.id ?? null);
-        }
-      } catch (error) {
-        console.error("❌ Current user error:", error);
-
-        if (mounted) {
-          setUserId(null);
-        }
-      }
-    };
-
-    loadUser();
-
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (mounted) {
-        setUserId(session?.user?.id ?? null);
-      }
-    });
-
-    return () => {
-      mounted = false;
-      subscription.unsubscribe();
-    };
-  }, []);
-
-  return userId;
 }
 
 function NotificationCard({

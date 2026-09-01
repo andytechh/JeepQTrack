@@ -1,6 +1,6 @@
 import {
-  Activity,
   AlertTriangle,
+  Bell,
   BusFront,
   CheckCircle2,
   Clock3,
@@ -33,6 +33,9 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import OceanBackground from "../../../../src/shared/components/clay/OceanBackground";
 import { colors } from "../../../../src/shared/constants/theme";
 import { useDispatcherDashboard } from "../../../../src/shared/hooks/dispatcher/useDispatcherDashboard";
+import { useNotifications } from "../../../../src/shared/hooks/useNotification";
+import { useAuthStore } from "../../../../src/shared/store/authStore";
+import { useNotificationPanel } from "../../../../src/shared/store/notificationPanelStore";
 
 export default function DispatcherDashboardScreen() {
   const router = useRouter();
@@ -49,6 +52,11 @@ export default function DispatcherDashboardScreen() {
     refresh,
     notifyNextDriver,
   } = useDispatcherDashboard();
+
+  // Same notifications source the driver/commuter screens use — the
+  // notifications table is keyed by user_id, so this works for any role.
+  const userId = useAuthStore((state) => state.user?.uid ?? null);
+  const { unreadCount } = useNotifications(userId);
 
   const [notifying, setNotifying] = useState(false);
 
@@ -95,6 +103,12 @@ export default function DispatcherDashboardScreen() {
     );
   };
 
+  const openNotifications = useNotificationPanel((state) => state.open);
+
+  const handleNotifications = () => {
+    openNotifications();
+  };
+
   if (loading) {
     return (
       <OceanBackground intensity={0.28}>
@@ -134,7 +148,11 @@ export default function DispatcherDashboardScreen() {
             paddingBottom: 135,
           }}
         >
-          <DashboardHeader terminalName={terminalName} />
+          <DashboardHeader
+            terminalName={terminalName}
+            unreadCount={unreadCount}
+            onNotifications={handleNotifications}
+          />
 
           {error && <ErrorCard message={error} onRetry={refresh} />}
 
@@ -250,7 +268,7 @@ export default function DispatcherDashboardScreen() {
               title="Settings"
               subtitle="Preferences"
               icon={<Settings size={20} color="#64748B" strokeWidth={2.4} />}
-              onPress={() => router.push("/staff/(dispatcher)/(tabs)/settings")}
+              onPress={() => router.push("/staff/(dispatcher)/(tabs)/profile")}
             />
           </View>
 
@@ -352,7 +370,15 @@ export default function DispatcherDashboardScreen() {
   );
 }
 
-function DashboardHeader({ terminalName }: { terminalName: string }) {
+function DashboardHeader({
+  terminalName,
+  unreadCount,
+  onNotifications,
+}: {
+  terminalName: string;
+  unreadCount: number;
+  onNotifications: () => void;
+}) {
   return (
     <View className="pt-3">
       <View className="flex-row items-center justify-between">
@@ -366,9 +392,20 @@ function DashboardHeader({ terminalName }: { terminalName: string }) {
           </Text>
         </View>
 
-        <View className="h-[50px] w-[50px] items-center justify-center rounded-[18px] border border-white/90 bg-clay-surface shadow-clay-sm">
-          <Activity size={22} color={colors.primaryDark} strokeWidth={2.4} />
-        </View>
+        <Pressable
+          onPress={onNotifications}
+          className="relative h-[48px] w-[48px] items-center justify-center rounded-full border border-white/90 bg-clay-surface shadow-clay-sm"
+        >
+          <Bell size={21} color={colors.primaryDark} strokeWidth={2.2} />
+
+          {unreadCount > 0 && (
+            <View className="absolute right-[-1px] top-[-2px] min-h-[20px] min-w-[20px] items-center justify-center rounded-full border-2 border-white bg-red-500 px-1">
+              <Text className="text-[9px] font-extrabold text-white">
+                {unreadCount > 9 ? "9+" : unreadCount}
+              </Text>
+            </View>
+          )}
+        </Pressable>
       </View>
 
       <View className="mt-3 flex-row items-center">

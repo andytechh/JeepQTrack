@@ -33,16 +33,17 @@ type TerminalAssignment = {
 
 type Jeepney = {
   id: string;
-  plate_number?: string | null;
-  status?: string | null;
-  capacity?: number | null;
-  front_count?: number | null;
-  rear_count?: number | null;
-  driver_name?: string | null;
-  queue_position?: number | null;
-  terminal_id?: string;
-  terminal_number?: number;
-  bracket?: number;
+  plate_number: string;
+  jeep_name: string | null;
+  status: string | null;
+  capacity: number | null;
+  current_occupancy: number | null;
+  driver_name: string | null;
+  driver_id: string | null;
+  queue_position: number | null;
+  terminal_id: number | null;
+  bracket: number | null;
+  last_location_update: string | null;
   [key: string]: any;
 };
 
@@ -205,70 +206,32 @@ export function useDispatcherDashboard() {
         throw new Error("The assigned terminal could not be found.");
       }
 
-      const { data: terminalJeepneys, error: terminalJeepneysError } =
-        await supabase
-          .from("terminal_jeepneys")
-          .select(
-            `
-              id,
-              terminal_id,
-              jeepney_id,
-              is_active,
-              assigned_at
-            `,
-          )
-          .eq("terminal_id", terminal.id)
-          .eq("is_active", true)
-          .order("assigned_at", {
-            ascending: true,
-          });
+      // jeepneys.terminal_id is the terminal's integer NUMBER (1 or 2),
+      // not the terminals.id uuid — match against terminal_number.
+      const { data: jeepneyRows, error: jeepneysError } = await supabase
+        .from("jeepneys")
+        .select("*")
+        .eq("terminal_id", terminal.terminal_number)
+        .order("queue_position", { ascending: true, nullsFirst: false });
 
-      if (terminalJeepneysError) {
-        throw terminalJeepneysError;
+      if (jeepneysError) {
+        throw jeepneysError;
       }
 
-      const jeepneyIds = terminalJeepneys?.map((item) => item.jeepney_id) ?? [];
-
-      let jeepneys: Jeepney[] = [];
-
-      if (jeepneyIds.length > 0) {
-        const { data: jeepneyRows, error: jeepneysError } = await supabase
-          .from("jeepneys")
-          .select("*")
-          .in("id", jeepneyIds);
-
-        if (jeepneysError) {
-          throw jeepneysError;
-        }
-
-        jeepneys = (jeepneyRows ?? []).map((jeepney: any) => {
-          const assignment = terminalJeepneys?.find(
-            (item) => item.jeepney_id === jeepney.id,
-          );
-
-          return {
-            ...jeepney,
-            terminal_id: assignment?.terminal_id,
-            terminal_number: terminal.terminal_number,
-            bracket: terminal.bracket_number,
-          };
-        });
-      }
+      const jeepneys: Jeepney[] = (jeepneyRows ?? []).map((jeepney: any) => ({
+        ...jeepney,
+        bracket: jeepney.bracket ?? terminal.bracket_number,
+      }));
 
       const sortedJeepneys = [...jeepneys].sort((a, b) => {
         const aPosition = a.queue_position ?? Number.MAX_SAFE_INTEGER;
-
         const bPosition = b.queue_position ?? Number.MAX_SAFE_INTEGER;
-
         return aPosition - bPosition;
       });
 
       const queue = sortedJeepneys.filter((jeepney) => {
         const status = jeepney.status?.toLowerCase();
-
-        return (
-          status === "waiting" || status === "queued" || status === "in_queue"
-        );
+        return status === "waiting" || status === "loading";
       });
 
       const nextToDispatch = queue.length > 0 ? queue[0] : null;
@@ -311,22 +274,24 @@ export function useDispatcherDashboard() {
     loadDashboard();
   }, [loadDashboard]);
 
+  // Subscribe directly to jeepneys for this terminal — no more
+  // terminal_jeepneys join table in the loop.
   useEffect(() => {
-    if (!state.terminal?.id) {
+    const terminalNumber = state.terminal?.terminal_number;
+
+    if (!terminalNumber) {
       return;
     }
 
-    const terminalId = state.terminal.id;
-
-    const terminalJeepneysChannel = supabase
-      .channel(`dispatcher-terminal-jeepneys-${terminalId}`)
+    const jeepneysChannel = supabase
+      .channel(`dispatcher-jeepneys-${terminalNumber}`)
       .on(
         "postgres_changes",
         {
           event: "*",
           schema: "public",
-          table: "terminal_jeepneys",
-          filter: `terminal_id=eq.${terminalId}`,
+          table: "jeepneys",
+          filter: `terminal_id=eq.${terminalNumber}`,
         },
         () => {
           loadDashboard();
@@ -335,9 +300,9 @@ export function useDispatcherDashboard() {
       .subscribe();
 
     return () => {
-      supabase.removeChannel(terminalJeepneysChannel);
+      supabase.removeChannel(jeepneysChannel);
     };
-  }, [state.terminal?.id, loadDashboard]);
+  }, [state.terminal?.terminal_number, loadDashboard]);
 
   const notifyNextDriver = useCallback(async () => {
     if (!state.nextToDispatch) {
@@ -440,8 +405,6 @@ function calculateStats(
 
     switch (status) {
       case "waiting":
-      case "queued":
-      case "in_queue":
         waiting += 1;
         online += 1;
         break;
@@ -452,22 +415,16 @@ function calculateStats(
         break;
 
       case "en_route":
-      case "enroute":
-      case "on_trip":
-      case "on-trip":
+      case "dispatched":
         enRoute += 1;
         online += 1;
         break;
 
-      case "active":
-      case "available":
-      case "ready":
+      case "arrived":
         online += 1;
         break;
 
       case "inactive":
-      case "offline":
-      case "maintenance":
         inactive += 1;
         break;
 

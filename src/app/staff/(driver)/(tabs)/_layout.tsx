@@ -1,12 +1,19 @@
-// app/commuter/(tabs)/_layout.tsx
-
 import { Tabs } from "expo-router";
 
-import { House, Map, Ticket, UserRound } from "lucide-react-native";
+import {
+  House,
+  Map,
+  MessageCircle,
+  Ticket,
+  UserRound,
+} from "lucide-react-native";
 
 import ClayTabBar from "../../../../src/shared/components/clay/ClayTabBar";
+import { useChatStore } from "../../../../src/shared/store/chatStore";
 
 export default function CommuterTabsLayout() {
+  const { unreadCount } = useChatStore();
+
   return (
     <Tabs
       tabBar={(props) => {
@@ -16,7 +23,7 @@ export default function CommuterTabsLayout() {
           return null;
         }
 
-        return <ClayTabBar {...(props as any)} />;
+        return <ClayTabBar {...(props as any)} chatUnreadCount={unreadCount} />;
       }}
       screenOptions={{
         headerShown: false,
@@ -48,13 +55,20 @@ export default function CommuterTabsLayout() {
           tabBarIcon: ({ color, size }) => <Map size={size} color={color} />,
         }}
       />
-
       <Tabs.Screen
         name="chat"
         options={{
           title: "Chat",
-
-          tabBarIcon: ({ color, size }) => <Map size={size} color={color} />,
+          headerShown: false,
+          tabBarIcon: ({ color, size }) => (
+            <MessageCircle size={size} color={color} />
+          ),
+          tabBarBadge:
+            unreadCount > 0
+              ? unreadCount > 99
+                ? "99+"
+                : String(unreadCount)
+              : undefined,
         }}
       />
 

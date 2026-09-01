@@ -333,8 +333,7 @@ function NotificationCard({
                 fontWeight: "500",
               }}
             >
-              Jeep Name:
-              {notification.message}
+              Jeep Name :{notification.message}
             </Text>
 
             <View className="mt-3 flex-row items-center">

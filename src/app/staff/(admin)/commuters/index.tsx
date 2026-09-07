@@ -1,6 +1,7 @@
 import { useRouter } from "expo-router";
 import {
   AlertTriangle,
+  ArrowLeft,
   ChevronRight,
   Mail,
   MapPin,
@@ -14,6 +15,7 @@ import {
 import { useMemo, useState } from "react";
 import {
   ActivityIndicator,
+  Image,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -25,7 +27,6 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import OceanBackground from "@/src/shared/components/clay/OceanBackground";
 import { colors } from "@/src/shared/constants/theme";
-
 import {
   AdminCommuterRecord,
   useAdminCommuters,
@@ -58,7 +59,6 @@ export default function AdminCommutersScreen() {
     useAdminCommuters();
 
   const [search, setSearch] = useState("");
-
   const [filter, setFilter] = useState<Filter>("all");
 
   const filteredCommuters = useMemo(() => {
@@ -69,7 +69,7 @@ export default function AdminCommutersScreen() {
         !query ||
         commuter.display_name.toLowerCase().includes(query) ||
         commuter.email.toLowerCase().includes(query) ||
-        commuter.phone_number?.toLowerCase().includes(query);
+        Boolean(commuter.phone_number?.toLowerCase().includes(query));
 
       let matchesFilter = true;
 
@@ -134,9 +134,13 @@ export default function AdminCommutersScreen() {
           {/* HEADER */}
 
           <View className="flex-row items-center">
-            <View className="h-[50px] w-[50px] items-center justify-center rounded-[18px] bg-ocean-100">
-              <Users size={24} color={colors.primaryDark} strokeWidth={2.4} />
-            </View>
+            <Pressable
+              onPress={() => router.back()}
+              className="h-[44px] w-[44px] items-center justify-center rounded-[16px] border border-white/90 bg-clay-surface"
+              hitSlop={8}
+            >
+              <ArrowLeft size={20} color="#475569" strokeWidth={2.5} />
+            </Pressable>
 
             <View className="ml-3 flex-1">
               <Text className="text-[10px] font-extrabold uppercase tracking-[1.3px] text-ocean-700">
@@ -196,10 +200,13 @@ export default function AdminCommutersScreen() {
               placeholder="Search commuter, email, or phone"
               placeholderTextColor="#94A3B8"
               className="ml-3 flex-1 py-4 text-[12px] font-medium text-ink-dark"
+              autoCapitalize="none"
+              autoCorrect={false}
+              returnKeyType="search"
             />
 
             {search.length > 0 && (
-              <Pressable onPress={() => setSearch("")}>
+              <Pressable onPress={() => setSearch("")} hitSlop={8}>
                 <XCircle size={18} color="#94A3B8" strokeWidth={2.2} />
               </Pressable>
             )}
@@ -305,10 +312,6 @@ export default function AdminCommutersScreen() {
   );
 }
 
-/* ============================================================
-   SUMMARY CARD
-============================================================ */
-
 function SummaryCard({
   label,
   value,
@@ -332,10 +335,6 @@ function SummaryCard({
     </View>
   );
 }
-
-/* ============================================================
-   COMMUTER CARD
-============================================================ */
 
 function CommuterCard({
   commuter,
@@ -362,15 +361,10 @@ function CommuterCard({
       {/* TOP */}
 
       <View className="flex-row items-center">
-        <View className="h-[50px] w-[50px] items-center justify-center overflow-hidden rounded-[16px] bg-ocean-100">
-          {commuter.avatar_url ? (
-            <Text className="text-[18px] font-extrabold text-ocean-700">
-              {getInitials(commuter.display_name)}
-            </Text>
-          ) : (
-            <UserRound size={24} color={colors.primaryDark} strokeWidth={2.3} />
-          )}
-        </View>
+        <CommuterAvatar
+          uri={commuter.avatar_url}
+          name={commuter.display_name}
+        />
 
         <View className="ml-3 flex-1">
           <Text
@@ -472,9 +466,34 @@ function CommuterCard({
   );
 }
 
-/* ============================================================
-   INFO BLOCK
-============================================================ */
+function CommuterAvatar({ uri, name }: { uri: string | null; name: string }) {
+  const [imageError, setImageError] = useState(false);
+
+  const hasImage = Boolean(uri) && !imageError;
+
+  return (
+    <View className="h-[50px] w-[50px] overflow-hidden rounded-[16px] bg-ocean-100">
+      {hasImage ? (
+        <Image
+          source={{ uri: uri! }}
+          className="h-full w-full"
+          resizeMode="cover"
+          onError={() => setImageError(true)}
+        />
+      ) : (
+        <View className="h-full w-full items-center justify-center">
+          {uri && imageError ? (
+            <Text className="text-[18px] font-extrabold text-ocean-700">
+              {getInitials(name)}
+            </Text>
+          ) : (
+            <UserRound size={24} color={colors.primaryDark} strokeWidth={2.3} />
+          )}
+        </View>
+      )}
+    </View>
+  );
+}
 
 function InfoBlock({
   icon,
@@ -505,10 +524,6 @@ function InfoBlock({
   );
 }
 
-/* ============================================================
-   EMPTY STATE
-============================================================ */
-
 function EmptyCommuters({ search }: { search: string }) {
   return (
     <View className="items-center rounded-[25px] border border-white/90 bg-white/70 px-6 py-8">
@@ -528,10 +543,6 @@ function EmptyCommuters({ search }: { search: string }) {
     </View>
   );
 }
-
-/* ============================================================
-   HELPERS
-============================================================ */
 
 function getInitials(name: string) {
   const parts = name.trim().split(/\s+/).filter(Boolean);

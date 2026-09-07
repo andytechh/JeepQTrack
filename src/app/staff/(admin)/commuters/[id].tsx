@@ -14,6 +14,7 @@ import {
 import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
+  Image,
   Pressable,
   ScrollView,
   Text,
@@ -27,20 +28,14 @@ import { colors } from "@/src/shared/constants/theme";
 
 interface CommuterDetails {
   id: string;
-
   email: string;
   phone_number: string | null;
   display_name: string;
-
   role: "commuter";
-
   is_active: boolean;
-
   avatar_url: string | null;
-
   preferred_terminal: number | null;
   preferred_bracket: number | null;
-
   created_at: string;
   updated_at: string;
 }
@@ -209,19 +204,10 @@ export default function AdminCommuterDetailsScreen() {
           {/* PROFILE */}
 
           <View className="mt-5 items-center rounded-[28px] border border-white/90 bg-clay-surface px-5 py-7">
-            <View className="h-[82px] w-[82px] items-center justify-center rounded-[26px] bg-ocean-100">
-              {commuter.avatar_url ? (
-                <Text className="text-[25px] font-extrabold text-ocean-700">
-                  {getInitials(commuter.display_name)}
-                </Text>
-              ) : (
-                <UserRound
-                  size={38}
-                  color={colors.primaryDark}
-                  strokeWidth={2.2}
-                />
-              )}
-            </View>
+            <ProfileAvatar
+              uri={commuter.avatar_url}
+              name={commuter.display_name}
+            />
 
             <Text
               numberOfLines={1}
@@ -435,9 +421,34 @@ export default function AdminCommuterDetailsScreen() {
   );
 }
 
-/* ============================================================
-   HEADER
-============================================================ */
+function ProfileAvatar({ uri, name }: { uri: string | null; name: string }) {
+  const [imageError, setImageError] = useState(false);
+
+  const hasImage = Boolean(uri) && !imageError;
+
+  return (
+    <View className="h-[82px] w-[82px] overflow-hidden rounded-[26px] bg-ocean-100">
+      {hasImage ? (
+        <Image
+          source={{ uri: uri! }}
+          className="h-full w-full"
+          resizeMode="cover"
+          onError={() => setImageError(true)}
+        />
+      ) : (
+        <View className="h-full w-full items-center justify-center">
+          {uri && imageError ? (
+            <Text className="text-[25px] font-extrabold text-ocean-700">
+              {getInitials(name)}
+            </Text>
+          ) : (
+            <UserRound size={38} color={colors.primaryDark} strokeWidth={2.2} />
+          )}
+        </View>
+      )}
+    </View>
+  );
+}
 
 function Header({ onBack }: { onBack: () => void }) {
   return (
@@ -463,10 +474,6 @@ function Header({ onBack }: { onBack: () => void }) {
   );
 }
 
-/* ============================================================
-   SECTION TITLE
-============================================================ */
-
 function SectionTitle({
   icon,
   title,
@@ -486,10 +493,6 @@ function SectionTitle({
     </View>
   );
 }
-
-/* ============================================================
-   DETAIL ROW
-============================================================ */
 
 function DetailRow({
   icon,
@@ -522,10 +525,6 @@ function DetailRow({
   );
 }
 
-/* ============================================================
-   PREFERENCE
-============================================================ */
-
 function PreferenceBlock({
   icon,
   label,
@@ -554,10 +553,6 @@ function PreferenceBlock({
   );
 }
 
-/* ============================================================
-   TIMESTAMP
-============================================================ */
-
 function TimestampRow({ label, value }: { label: string; value: string }) {
   return (
     <View>
@@ -571,10 +566,6 @@ function TimestampRow({ label, value }: { label: string; value: string }) {
     </View>
   );
 }
-
-/* ============================================================
-   HELPERS
-============================================================ */
 
 function getInitials(name: string) {
   const parts = name.trim().split(/\s+/).filter(Boolean);

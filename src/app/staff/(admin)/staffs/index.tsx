@@ -1,8 +1,8 @@
 import { useRouter } from "expo-router";
 import {
   AlertTriangle,
+  ArrowLeft,
   CheckCircle2,
-  ChevronLeft,
   ChevronRight,
   Eye,
   EyeOff,
@@ -97,9 +97,9 @@ export default function AdminStaffScreen() {
         !query ||
         member.display_name.toLowerCase().includes(query) ||
         member.email.toLowerCase().includes(query) ||
-        member.phone_number?.toLowerCase().includes(query) ||
-        member.jeepney_plate_number?.toLowerCase().includes(query) ||
-        member.jeepney_name?.toLowerCase().includes(query);
+        Boolean(member.phone_number?.toLowerCase().includes(query)) ||
+        Boolean(member.jeepney_plate_number?.toLowerCase().includes(query)) ||
+        Boolean(member.jeepney_name?.toLowerCase().includes(query));
 
       let matchesFilter = true;
 
@@ -191,6 +191,8 @@ export default function AdminStaffScreen() {
             paddingBottom: 140,
           }}
         >
+          {/* HEADER */}
+
           <View className="flex-row items-center">
             <Pressable
               onPress={() => {
@@ -198,7 +200,8 @@ export default function AdminStaffScreen() {
                   router.back();
                 }
               }}
-              className="mr-3 h-[42px] w-[42px] items-center justify-center rounded-full bg-white/80"
+              className="h-[44px] w-[44px] items-center justify-center rounded-[16px] border border-white/90 bg-clay-surface"
+              hitSlop={8}
               style={{
                 shadowColor: "#000",
                 shadowOffset: {
@@ -210,16 +213,8 @@ export default function AdminStaffScreen() {
                 elevation: 1,
               }}
             >
-              <ChevronLeft
-                size={20}
-                color={colors.primaryDark}
-                strokeWidth={2.5}
-              />
+              <ArrowLeft size={20} color="#475569" strokeWidth={2.5} />
             </Pressable>
-
-            <View className="h-[50px] w-[50px] items-center justify-center rounded-[18px] bg-ocean-100">
-              <Users size={24} color={colors.primaryDark} strokeWidth={2.4} />
-            </View>
 
             <View className="ml-3 flex-1">
               <Text className="text-[10px] font-extrabold uppercase tracking-[1.3px] text-ocean-700">
@@ -261,6 +256,8 @@ export default function AdminStaffScreen() {
             Manage drivers, dispatchers, and administrators.
           </Text>
 
+          {/* SEARCH */}
+
           <View className="mt-5 flex-row items-center rounded-[20px] border border-white/90 bg-clay-surface px-4">
             <Search size={18} color="#64748B" strokeWidth={2.2} />
 
@@ -270,14 +267,18 @@ export default function AdminStaffScreen() {
               placeholder="Search staff, email, plate, or jeepney"
               placeholderTextColor="#94A3B8"
               className="ml-3 flex-1 py-4 text-[12px] font-medium text-ink-dark"
+              autoCapitalize="none"
+              autoCorrect={false}
             />
 
             {search.length > 0 && (
-              <Pressable onPress={() => setSearch("")}>
+              <Pressable onPress={() => setSearch("")} hitSlop={8}>
                 <XCircle size={18} color="#94A3B8" strokeWidth={2.2} />
               </Pressable>
             )}
           </View>
+
+          {/* FILTERS */}
 
           <ScrollView
             horizontal
@@ -306,6 +307,8 @@ export default function AdminStaffScreen() {
               );
             })}
           </ScrollView>
+
+          {/* ERROR */}
 
           {error && (
             <View className="mt-5 rounded-[24px] border border-red-100 bg-white/90 p-5">
@@ -337,6 +340,8 @@ export default function AdminStaffScreen() {
               </Pressable>
             </View>
           )}
+
+          {/* DIRECTORY */}
 
           <View className="mb-3 mt-7">
             <Text className="text-[16px] font-extrabold text-ink-dark">
@@ -383,6 +388,10 @@ export default function AdminStaffScreen() {
     </OceanBackground>
   );
 }
+
+/* =========================================================
+   ADD STAFF MODAL
+========================================================= */
 
 function AddStaffModal({
   visible,
@@ -534,6 +543,7 @@ function AddStaffModal({
 
       reset();
     } catch {
+      // Parent handles the error.
     } finally {
       setSaving(false);
     }
@@ -677,8 +687,8 @@ function AddStaffModal({
                 </Text>
 
                 <Text className="mt-1 text-[9px] leading-[15px] text-ink-secondary">
-                  This email and password will be used for the staff member's
-                  Supabase Auth login.
+                  This email and password will be used for the staff
+                  member&apos;s Supabase Auth login.
                 </Text>
               </View>
 
@@ -738,6 +748,10 @@ function AddStaffModal({
     </Modal>
   );
 }
+
+/* =========================================================
+   SUCCESS MODAL
+========================================================= */
 
 function StaffCreatedSuccessModal({
   visible,
@@ -864,6 +878,10 @@ function StaffCreatedSuccessModal({
   );
 }
 
+/* =========================================================
+   INPUT FIELD
+========================================================= */
+
 function ModalField({
   label,
   icon,
@@ -903,6 +921,10 @@ function ModalField({
     </View>
   );
 }
+
+/* =========================================================
+   PASSWORD FIELD
+========================================================= */
 
 function PasswordField({
   label,
@@ -953,6 +975,10 @@ function PasswordField({
   );
 }
 
+/* =========================================================
+   STAFF AVATAR
+========================================================= */
+
 function StaffAvatar({
   uri,
   size = 52,
@@ -991,6 +1017,10 @@ function StaffAvatar({
     </View>
   );
 }
+
+/* =========================================================
+   STAFF CARD
+========================================================= */
 
 function StaffCard({
   member,
@@ -1121,6 +1151,10 @@ function StaffCard({
   );
 }
 
+/* =========================================================
+   INFO BLOCK
+========================================================= */
+
 function InfoBlock({
   icon,
   label,
@@ -1150,6 +1184,10 @@ function InfoBlock({
   );
 }
 
+/* =========================================================
+   EMPTY STATE
+========================================================= */
+
 function EmptyStaff({ search }: { search: string }) {
   return (
     <View className="items-center rounded-[25px] border border-white/90 bg-white/70 px-6 py-8">
@@ -1169,6 +1207,10 @@ function EmptyStaff({ search }: { search: string }) {
     </View>
   );
 }
+
+/* =========================================================
+   ROLE HELPERS
+========================================================= */
 
 function formatRole(role: AdminStaffRole) {
   switch (role) {

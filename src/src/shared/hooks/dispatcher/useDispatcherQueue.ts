@@ -4,6 +4,11 @@ import { supabase } from "../../config/supabase";
 import { DispatchService } from "../../services/DispatchService";
 import { useAuthStore } from "../../store/authStore";
 
+import {
+  getOutsideHoursMessage,
+  isWithinOperatingHours,
+} from "../../utils/operatingHours";
+
 export interface QueueJeepney {
   id: string;
   plate_number: string;
@@ -22,6 +27,11 @@ export interface QueueJeepney {
   loading_started_at: string | null;
   loading_ends_at: string | null;
   departed_at: string | null;
+
+  // Live door counter values
+  front_count: number;
+  rear_count: number;
+  occupancy_updated_at: string | null;
 }
 
 export interface RecentTrip {
@@ -63,11 +73,22 @@ interface UseDispatcherQueueResult {
 
   dispatchingId: string | null;
 
+  isOperatingHours: boolean;
+  operatingHoursMessage: string;
+
   refresh: () => Promise<void>;
+
   dispatchJeepney: (jeepney: QueueJeepney) => Promise<{
     success: boolean;
     message: string;
   }>;
+}
+
+interface DoorCountRow {
+  jeepney_id: string;
+  front_count: number | null;
+  rear_count: number | null;
+  updated_at: string | null;
 }
 
 const TERMINAL_NAMES = {
@@ -93,9 +114,96 @@ export function useDispatcherQueue(): UseDispatcherQueueResult {
 
   const [dispatchingId, setDispatchingId] = useState<string | null>(null);
 
+  const [isOperatingHours, setIsOperatingHours] = useState(
+    isWithinOperatingHours(),
+  );
+
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
 
+  const realtimeInstanceRef = useRef(0);
+
+  /**
+   * Get the latest door-count row for every jeepney.
+   *
+   * Live occupancy source:
+   *
+   * front_count + rear_count
+   *
+   * NOTE:
+   * This assumes the door_counts table contains:
+   * jeepney_id
+   * front_count
+   * rear_count
+   * updated_at
+   */
+  const fetchDoorCounts = useCallback(async (jeepneyIds: string[]) => {
+    const result = new Map<
+      string,
+      {
+        front_count: number;
+        rear_count: number;
+        occupancy_updated_at: string | null;
+      }
+    >();
+
+    if (jeepneyIds.length === 0) {
+      return result;
+    }
+
+    const { data, error: doorError } = await supabase
+      .from("door_counts")
+      .select(
+        `
+          jeepney_id,
+          front_count,
+          rear_count,
+          updated_at
+        `,
+      )
+      .in("jeepney_id", jeepneyIds)
+      .order("updated_at", {
+        ascending: false,
+        nullsLast: true,
+      });
+
+    if (doorError) {
+      throw doorError;
+    }
+
+    for (const row of (data ?? []) as DoorCountRow[]) {
+      if (!row.jeepney_id) {
+        continue;
+      }
+
+      // Keep only the newest row for each jeepney.
+      if (result.has(row.jeepney_id)) {
+        continue;
+      }
+
+      result.set(row.jeepney_id, {
+        front_count: Math.max(0, Number(row.front_count ?? 0)),
+        rear_count: Math.max(0, Number(row.rear_count ?? 0)),
+        occupancy_updated_at: row.updated_at ?? null,
+      });
+    }
+
+    return result;
+  }, []);
+
+  /**
+   * Fetch the current dispatcher queue.
+   *
+   * Operating hours:
+   * 5:00 AM - 9:00 PM
+   *
+   * Outside operating hours we do NOT update the database.
+   * We only hide the active queue locally.
+   */
   const fetchQueue = useCallback(async () => {
+    const currentlyOperating = isWithinOperatingHours();
+
+    setIsOperatingHours(currentlyOperating);
+
     const { data, error: queueError } = await supabase
       .from("jeepneys")
       .select(
@@ -136,9 +244,66 @@ export function useDispatcherQueue(): UseDispatcherQueueResult {
       throw queueError;
     }
 
-    setJeepneys((data ?? []) as QueueJeepney[]);
-  }, []);
+    const rows = (data ?? []) as QueueJeepney[];
 
+    /**
+     * After 9 PM / before 5 AM:
+     * hide active queue from the dispatcher.
+     *
+     * IMPORTANT:
+     * No Supabase status is changed.
+     */
+    if (!currentlyOperating) {
+      setJeepneys([]);
+      return;
+    }
+
+    const doorCounts = await fetchDoorCounts(rows.map((jeepney) => jeepney.id));
+
+    const normalized: QueueJeepney[] = rows.map((jeepney) => {
+      const door = doorCounts.get(jeepney.id);
+
+      /**
+       * If a door-count row has not been created yet,
+       * preserve the existing jeepney.current_occupancy.
+       */
+      if (!door) {
+        return {
+          ...jeepney,
+          current_occupancy: Math.max(
+            0,
+            Number(jeepney.current_occupancy ?? 0),
+          ),
+          front_count: 0,
+          rear_count: 0,
+          occupancy_updated_at: null,
+        };
+      }
+
+      const occupancy = door.front_count + door.rear_count;
+
+      return {
+        ...jeepney,
+
+        front_count: door.front_count,
+        rear_count: door.rear_count,
+
+        // Door counts are now the authoritative live occupancy.
+        current_occupancy: occupancy,
+
+        occupancy_updated_at: door.occupancy_updated_at,
+      };
+    });
+
+    setJeepneys(normalized);
+  }, [fetchDoorCounts]);
+
+  /**
+   * Fetch recent trips.
+   *
+   * Historical passenger totals continue to come from:
+   * trips.total_passengers
+   */
   const fetchRecentTrips = useCallback(async () => {
     const { data, error: tripsError } = await supabase
       .from("trips")
@@ -195,6 +360,9 @@ export function useDispatcherQueue(): UseDispatcherQueueResult {
     setRecentTrips(normalized);
   }, []);
 
+  /**
+   * Fetch everything.
+   */
   const fetchAll = useCallback(async () => {
     setError(null);
 
@@ -210,6 +378,9 @@ export function useDispatcherQueue(): UseDispatcherQueueResult {
     }
   }, [fetchQueue, fetchRecentTrips]);
 
+  /**
+   * Manual refresh.
+   */
   const refresh = useCallback(async () => {
     setRefreshing(true);
 
@@ -220,8 +391,21 @@ export function useDispatcherQueue(): UseDispatcherQueueResult {
     }
   }, [fetchAll]);
 
+  /**
+   * Dispatch a jeepney.
+   */
   const dispatchJeepney = useCallback(
     async (jeepney: QueueJeepney) => {
+      /**
+       * Do not allow dispatch outside service hours.
+       */
+      if (!isWithinOperatingHours()) {
+        return {
+          success: false,
+          message: getOutsideHoursMessage(),
+        };
+      }
+
       if (!user?.uid) {
         return {
           success: false,
@@ -275,11 +459,16 @@ export function useDispatcherQueue(): UseDispatcherQueueResult {
     [fetchQueue, fetchRecentTrips, user?.uid],
   );
 
+  /**
+   * Initial load.
+   */
   useEffect(() => {
     let mounted = true;
 
     const initialize = async () => {
-      if (!mounted) return;
+      if (!mounted) {
+        return;
+      }
 
       setLoading(true);
 
@@ -299,14 +488,68 @@ export function useDispatcherQueue(): UseDispatcherQueueResult {
     };
   }, [fetchAll]);
 
+  /**
+   * Re-check service hours every minute.
+   *
+   * This is LOCAL UI logic only.
+   * It never changes jeepneys.status.
+   */
   useEffect(() => {
+    const checkOperatingHours = () => {
+      const nextOperatingState = isWithinOperatingHours();
+
+      setIsOperatingHours((previous) => {
+        if (previous !== nextOperatingState) {
+          void fetchAll();
+        }
+
+        return nextOperatingState;
+      });
+    };
+
+    checkOperatingHours();
+
+    const interval = setInterval(checkOperatingHours, 60_000);
+
+    return () => {
+      clearInterval(interval);
+    };
+  }, [fetchAll]);
+
+  /**
+   * Supabase Realtime.
+   *
+   * jeepneys:
+   *   queue/status changes
+   *
+   * trips:
+   *   recent trip changes
+   *
+   * door_counts:
+   *   live passenger count
+   */
+  useEffect(() => {
+    const instanceId = ++realtimeInstanceRef.current;
+
+    let cancelled = false;
+
+    /**
+     * Remove previous channel safely.
+     */
     if (channelRef.current) {
-      channelRef.current.unsubscribe();
+      const previousChannel = channelRef.current;
+
       channelRef.current = null;
+
+      void supabase.removeChannel(previousChannel);
     }
 
     const channel = supabase
-      .channel("dispatcher-queue-realtime")
+      .channel(`dispatcher-queue-realtime-${instanceId}`)
+
+      /**
+       * Jeepney changes
+       */
       .on(
         "postgres_changes",
         {
@@ -315,9 +558,17 @@ export function useDispatcherQueue(): UseDispatcherQueueResult {
           table: "jeepneys",
         },
         () => {
-          fetchQueue();
+          if (cancelled) {
+            return;
+          }
+
+          void fetchQueue();
         },
       )
+
+      /**
+       * Trip changes
+       */
       .on(
         "postgres_changes",
         {
@@ -326,23 +577,164 @@ export function useDispatcherQueue(): UseDispatcherQueueResult {
           table: "trips",
         },
         () => {
-          fetchRecentTrips();
+          if (cancelled) {
+            return;
+          }
+
+          void fetchRecentTrips();
         },
       )
-      .subscribe((status) => {
+
+      /**
+       * New door-count record.
+       *
+       * Example:
+       *
+       * front_count = 6
+       * rear_count  = 4
+       *
+       * occupancy = 10
+       */
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "door_counts",
+        },
+        (payload) => {
+          if (cancelled || !isWithinOperatingHours()) {
+            return;
+          }
+
+          const row = payload.new as Partial<DoorCountRow>;
+
+          if (!row.jeepney_id) {
+            return;
+          }
+
+          const frontCount = Math.max(0, Number(row.front_count ?? 0));
+
+          const rearCount = Math.max(0, Number(row.rear_count ?? 0));
+
+          const occupancy = frontCount + rearCount;
+
+          setJeepneys((current) =>
+            current.map((jeepney) =>
+              jeepney.id === row.jeepney_id
+                ? {
+                    ...jeepney,
+
+                    front_count: frontCount,
+                    rear_count: rearCount,
+
+                    current_occupancy: occupancy,
+
+                    occupancy_updated_at:
+                      row.updated_at ?? new Date().toISOString(),
+                  }
+                : jeepney,
+            ),
+          );
+        },
+      )
+
+      /**
+       * Existing door-count record changed.
+       *
+       * This is the important part for:
+       *
+       * 10 passengers
+       *      ↓
+       * passenger exits
+       *      ↓
+       * 9 passengers
+       *
+       * The UI updates immediately.
+       */
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "door_counts",
+        },
+        (payload) => {
+          if (cancelled || !isWithinOperatingHours()) {
+            return;
+          }
+
+          const row = payload.new as Partial<DoorCountRow>;
+
+          if (!row.jeepney_id) {
+            return;
+          }
+
+          const frontCount = Math.max(0, Number(row.front_count ?? 0));
+
+          const rearCount = Math.max(0, Number(row.rear_count ?? 0));
+
+          const occupancy = frontCount + rearCount;
+
+          setJeepneys((current) =>
+            current.map((jeepney) =>
+              jeepney.id === row.jeepney_id
+                ? {
+                    ...jeepney,
+
+                    front_count: frontCount,
+                    rear_count: rearCount,
+
+                    current_occupancy: occupancy,
+
+                    occupancy_updated_at:
+                      row.updated_at ?? new Date().toISOString(),
+                  }
+                : jeepney,
+            ),
+          );
+        },
+      )
+
+      .subscribe((status, err) => {
+        if (cancelled) {
+          return;
+        }
+
         console.log("📡 Dispatcher queue realtime:", status);
+
+        if (status === "SUBSCRIBED") {
+          console.log("✅ Dispatcher queue realtime connected");
+        }
+
+        if (status === "CHANNEL_ERROR") {
+          console.error("❌ Dispatcher queue realtime channel error:", err);
+        }
+
+        if (status === "TIMED_OUT") {
+          console.error("⏱️ Dispatcher queue realtime timed out:", err);
+        }
       });
 
     channelRef.current = channel;
 
+    /**
+     * Cleanup.
+     */
     return () => {
-      if (channelRef.current) {
-        channelRef.current.unsubscribe();
+      cancelled = true;
+
+      if (channelRef.current === channel) {
         channelRef.current = null;
       }
+
+      void supabase.removeChannel(channel);
     };
   }, [fetchQueue, fetchRecentTrips]);
 
+  /**
+   * Split the queue by terminal.
+   */
   const sections = useMemo<QueueTerminalSection[]>(() => {
     const terminalOne = jeepneys.filter((item) => item.terminal_id === 1);
 
@@ -364,16 +756,25 @@ export function useDispatcherQueue(): UseDispatcherQueueResult {
     ];
   }, [jeepneys]);
 
+  /**
+   * Waiting count.
+   */
   const waitingCount = useMemo(
     () => jeepneys.filter((item) => item.status === "waiting").length,
     [jeepneys],
   );
 
+  /**
+   * Loading count.
+   */
   const loadingCount = useMemo(
     () => jeepneys.filter((item) => item.status === "loading").length,
     [jeepneys],
   );
 
+  /**
+   * En-route count from recent trips.
+   */
   const enRouteCount = useMemo(
     () =>
       recentTrips.filter(
@@ -400,6 +801,10 @@ export function useDispatcherQueue(): UseDispatcherQueueResult {
     error,
 
     dispatchingId,
+
+    isOperatingHours,
+
+    operatingHoursMessage: isOperatingHours ? "" : getOutsideHoursMessage(),
 
     refresh,
     dispatchJeepney,

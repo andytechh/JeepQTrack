@@ -84,8 +84,9 @@ export class AuthService {
   }
   static async resetPassword(email: string): Promise<void> {
     const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
-      redirectTo: "yourapp://reset-password", // Replace with your app's deep link
+      redirectTo: "smartqs-staff://reset-password",
     });
+
     if (error) throw error;
   }
 

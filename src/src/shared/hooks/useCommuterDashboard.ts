@@ -1,9 +1,6 @@
-// src/shared/hooks/useCommuterDashboard.ts
-
 import { supabase } from "@/src/shared/config/supabase";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNotifications } from "./useNotification";
-
 /* ============================================================
    TYPES
 ============================================================ */
@@ -18,6 +15,8 @@ export interface CommuterProfile {
 export interface CommuterDashboardJeepney {
   id: string;
   plate_number: string;
+  front_count: number;
+  rear_count: number;
 
   bracket: number | null;
 
@@ -345,6 +344,8 @@ export function useCommuterDashboard(): UseCommuterDashboardReturn {
               plate_number,
               bracket,
               status,
+              front_count,
+              rear_count,
               current_occupancy,
               last_occupancy_update,
               queue_position,

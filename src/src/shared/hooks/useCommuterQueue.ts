@@ -47,17 +47,11 @@ export function useCommuterQueue() {
         .order("bracket", { ascending: true });
 
       if (fetchError) {
-        console.error("❌ Supabase error:", fetchError);
+        console.error("Supabase error:", fetchError);
         setError(fetchError.message);
         setLoading(false);
         return;
       }
-
-      console.log("✅ Raw data count:", data?.length || 0);
-      if (data && data.length > 0) {
-        console.log("📦 Sample:", data[0]);
-      }
-
       const mapped: CommuterJeepney[] = (data || []).map((item) => {
         let status: CommuterJeepney["status"] = "DEPARTED";
         if (item.status === "loading") status = "LOADING";

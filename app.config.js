@@ -1,6 +1,7 @@
 import "dotenv/config";
 
-const variant = process.env.APP_VARIANT || "commuter";
+const variant =
+  process.env.APP_VARIANT || process.env.EXPO_PUBLIC_APP_FLAVOR || "commuter";
 const isStaff = variant === "staff";
 
 export default {
@@ -9,7 +10,7 @@ export default {
 
     slug: "JeepQTrack",
 
-    version: "1.0.0",
+    version: "1.0.1",
 
     orientation: "portrait",
 
@@ -28,7 +29,7 @@ export default {
 
     android: {
       adaptiveIcon: {
-        backgroundColor: "#E6F4FE",
+        backgroundColor: "#EAF7FF",
         foregroundImage: "./assets/images/logo.png",
         backgroundImage: "./assets/images/android-icon-background.png",
         monochromeImage: "./assets/images/android-icon-monochrome.png",
@@ -66,11 +67,7 @@ export default {
       [
         "expo-splash-screen",
         {
-          backgroundColor: "#208AEF",
-          android: {
-            image: "./assets/images/logo.png",
-            imageWidth: 76,
-          },
+          backgroundColor: "#0B6FA4",
         },
       ],
 

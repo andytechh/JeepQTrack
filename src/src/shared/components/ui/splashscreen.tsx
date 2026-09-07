@@ -1,347 +1,216 @@
-// src/shared/components/SplashScreen.tsx
-import { LinearGradient } from "expo-linear-gradient";
-import { useEffect, useRef } from "react";
-import {
-  Animated,
-  Dimensions,
-  Easing,
-  StyleSheet,
-  Text,
-  View,
-} from "react-native";
-import Svg, { Circle, Path } from "react-native-svg";
+import { useEffect, useRef, useState } from "react";
+import { Animated, Easing, StyleSheet, Text, View } from "react-native";
 
-const { width, height } = Dimensions.get("window");
-
-// ─── WAVE DECORATION ──────────────────────────────────────────────
-const WaveDecoration = ({ color, style }: any) => (
-  <View
-    style={[
-      {
-        position: "absolute",
-        left: 0,
-        right: 0,
-        height: 60,
-        overflow: "hidden",
-      },
-      style,
-    ]}
-  >
-    <Svg
-      viewBox="0 0 400 60"
-      style={{ width: "100%", height: "100%" }}
-      preserveAspectRatio="none"
-    >
-      <Path
-        d="M0,30 C60,60 120,0 200,30 C280,60 340,0 400,30 L400,60 L0,60 Z"
-        fill={color || "rgba(255,255,255,0.06)"}
-      />
-    </Svg>
-  </View>
-);
-
-// ─── SPLASH COMPONENT ─────────────────────────────────────────────
-interface SplashScreenProps {
+interface JeepQLaunchSplashProps {
+  isAppReady: boolean;
   onComplete?: () => void;
-  duration?: number;
-  appName?: string;
-  subtitle?: string;
+  minimumDuration?: number;
 }
 
-export default function SplashScreen({
+/** A wordmark-only launch screen that waits for app startup before leaving. */
+export default function JeepQLaunchSplash({
+  isAppReady,
   onComplete,
-  duration = 3000,
-  appName = "Smart JeepQ Track",
-  subtitle = "Donsol – Daraga Terminal",
-}: SplashScreenProps) {
-  const fadeAnim = useRef(new Animated.Value(0)).current;
-  const scaleAnim = useRef(new Animated.Value(0.9)).current;
-  const logoAnim = useRef(new Animated.Value(0.8)).current;
+  minimumDuration = 5200,
+}: JeepQLaunchSplashProps) {
+  const completionRef = useRef(onComplete);
+  const hasCompleted = useRef(false);
+  const opacity = useRef(new Animated.Value(0)).current;
+  const logoScale = useRef(new Animated.Value(0.76)).current;
+  const logoTranslateY = useRef(new Animated.Value(30)).current;
+  const jeepProgress = useRef(new Animated.Value(0)).current;
+  const [minimumDurationElapsed, setMinimumDurationElapsed] = useState(false);
+
+  completionRef.current = onComplete;
 
   useEffect(() => {
-    // Entrance animations
     Animated.parallel([
-      Animated.timing(fadeAnim, {
+      Animated.timing(opacity, {
         toValue: 1,
-        duration: 800,
+        duration: 320,
         useNativeDriver: true,
       }),
-      Animated.spring(scaleAnim, {
+      Animated.spring(logoScale, {
         toValue: 1,
-        friction: 8,
-        tension: 40,
+        damping: 14,
+        stiffness: 165,
+        mass: 0.85,
         useNativeDriver: true,
       }),
-      Animated.spring(logoAnim, {
-        toValue: 1,
-        friction: 6,
-        tension: 50,
+      Animated.spring(logoTranslateY, {
+        toValue: 0,
+        damping: 15,
+        stiffness: 135,
+        mass: 0.9,
         useNativeDriver: true,
       }),
     ]).start();
 
-    // Auto-dismiss after duration
-    if (onComplete) {
-      const timer = setTimeout(() => {
-        Animated.timing(fadeAnim, {
-          toValue: 0,
-          duration: 400,
+    const jeepLoop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(jeepProgress, {
+          toValue: 1,
+          duration: 4600,
+          easing: Easing.inOut(Easing.cubic),
           useNativeDriver: true,
-        }).start(() => {
-          onComplete();
-        });
-      }, duration);
-
-      return () => clearTimeout(timer);
-    }
-  }, []);
-
-  // ─── LOADING DOTS ──────────────────────────────────────────────
-  const LoadingDots = () => {
-    const dotAnim = useRef(new Animated.Value(0)).current;
-
-    useEffect(() => {
-      Animated.loop(
-        Animated.sequence([
-          Animated.timing(dotAnim, {
-            toValue: 1,
-            duration: 600,
-            useNativeDriver: true,
-            easing: Easing.ease,
-          }),
-          Animated.timing(dotAnim, {
-            toValue: 0,
-            duration: 600,
-            useNativeDriver: true,
-            easing: Easing.ease,
-          }),
-        ]),
-      ).start();
-    }, []);
-
-    return (
-      <View style={{ flexDirection: "row", gap: 6, alignItems: "center" }}>
-        {[0, 1, 2, 3].map((i) => {
-          const isActive = i === 1;
-          return (
-            <Animated.View
-              key={i}
-              style={{
-                width: isActive ? 24 : 8,
-                height: 8,
-                borderRadius: 4,
-                backgroundColor: isActive ? "white" : "rgba(255,255,255,0.3)",
-                transform: [
-                  {
-                    scale: isActive
-                      ? dotAnim.interpolate({
-                          inputRange: [0, 0.5, 1],
-                          outputRange: [1, 1.2, 1],
-                        })
-                      : 1,
-                  },
-                ],
-              }}
-            />
-          );
-        })}
-      </View>
+        }),
+        Animated.delay(450),
+        Animated.timing(jeepProgress, {
+          toValue: 0,
+          duration: 0,
+          useNativeDriver: true,
+        }),
+      ]),
     );
-  };
+    jeepLoop.start();
+
+    const timer = setTimeout(
+      () => setMinimumDurationElapsed(true),
+      minimumDuration,
+    );
+
+    return () => {
+      clearTimeout(timer);
+      jeepLoop.stop();
+    };
+  }, [jeepProgress, logoScale, logoTranslateY, minimumDuration, opacity]);
+
+  useEffect(() => {
+    if (!isAppReady || !minimumDurationElapsed || hasCompleted.current) return;
+
+    hasCompleted.current = true;
+    Animated.timing(opacity, {
+      toValue: 0,
+      duration: 420,
+      easing: Easing.inOut(Easing.quad),
+      useNativeDriver: true,
+    }).start(({ finished }) => {
+      if (finished) completionRef.current?.();
+    });
+  }, [isAppReady, minimumDurationElapsed, opacity]);
+
+  const jeepTranslateX = jeepProgress.interpolate({
+    inputRange: [0, 1],
+    outputRange: [-126, 126],
+  });
 
   return (
-    <Animated.View
-      style={[
-        styles.container,
-        {
-          opacity: fadeAnim,
-          transform: [{ scale: scaleAnim }],
-        },
-      ]}
-    >
-      {/* ─── BACKGROUND ───────────────────────────────────────────── */}
-      <LinearGradient
-        colors={["#0c4a6e", "#0369a1", "#0ea5e9", "#38bdf8"]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={styles.gradient}
-      />
-
-      {/* ─── AMBIENT CIRCLES ──────────────────────────────────────── */}
-      <View style={[styles.circle, styles.circle1]} />
-      <View style={[styles.circle, styles.circle2]} />
-      <View style={[styles.circle, styles.circle3]} />
-
-      {/* ─── WHALE SHARK SILHOUETTE ────────────────────────────────── */}
-      <Svg
-        width="200"
-        height="90"
-        viewBox="0 0 200 90"
-        style={styles.sharkIcon}
-      >
-        <Path
-          d="M10,45 C20,20 50,10 100,12 C150,14 175,30 188,45 C175,60 150,76 100,78 C50,80 20,70 10,45 Z"
-          fill="white"
-          opacity={0.18}
-        />
-        <Path
-          d="M188,45 L200,30 L190,45 L200,60 Z"
-          fill="white"
-          opacity={0.18}
-        />
-        <Circle cx="155" cy="35" r="3" fill="rgba(0,0,0,0.3)" />
-        <Circle cx="80" cy="42" r="4" fill="rgba(255,255,255,0.3)" />
-        <Circle cx="100" cy="35" r="3" fill="rgba(255,255,255,0.3)" />
-        <Circle cx="115" cy="50" r="5" fill="rgba(255,255,255,0.3)" />
-        <Circle cx="65" cy="52" r="3" fill="rgba(255,255,255,0.3)" />
-        <Circle cx="90" cy="58" r="4" fill="rgba(255,255,255,0.3)" />
-        <Circle cx="130" cy="42" r="3" fill="rgba(255,255,255,0.3)" />
-      </Svg>
-
-      {/* ─── LOGO ──────────────────────────────────────────────────── */}
+    <Animated.View pointerEvents="none" style={[styles.container, { opacity }]}>
       <Animated.View
         style={[
-          styles.logoContainer,
+          styles.brandPlate,
           {
-            transform: [{ scale: logoAnim }],
+            transform: [{ translateY: logoTranslateY }, { scale: logoScale }],
           },
         ]}
       >
-        <View style={styles.logo}>
-          <Svg width="48" height="48" viewBox="0 0 48 48" fill="none">
-            <Path
-              d="M6 36 L6 28 C6 26 7 24 9 24 L24 24 L24 16 C24 14 25 12 27 12 L42 12"
-              stroke="white"
-              strokeWidth="3"
-              strokeLinecap="round"
-            />
-            <Circle cx="12" cy="36" r="5" fill="white" />
-            <Circle cx="28" cy="36" r="5" fill="white" />
-            <Path
-              d="M6 36 L42 36"
-              stroke="white"
-              strokeWidth="3"
-              strokeLinecap="round"
-            />
-            <Circle cx="35" cy="20" r="3" fill="rgba(255,255,255,0.7)" />
-            <Circle cx="35" cy="28" r="3" fill="rgba(255,255,255,0.7)" />
-          </Svg>
-        </View>
+        <Text accessibilityRole="header" style={styles.wordmark}>
+          JeepQ
+        </Text>
       </Animated.View>
 
-      {/* ─── BRAND TEXT ───────────────────────────────────────────── */}
-      <View style={styles.textContainer}>
-        <Text style={styles.title}>{appName}</Text>
-        <Text style={styles.subtitle}>{subtitle}</Text>
+      <View style={styles.routeSection}>
+        <Text style={styles.loadingLabel}>Preparing your route</Text>
+        <View style={styles.routeLabels}>
+          <Text style={styles.routeLabel}>Donsol</Text>
+          <Text style={styles.routeLabel}>Daraga</Text>
+        </View>
+        <View style={styles.routeTrack}>
+          <View style={styles.routeLine} />
+          <View style={[styles.stop, styles.startStop]} />
+          <View style={[styles.stop, styles.endStop]} />
+          <Animated.View
+            accessibilityLabel="JeepQ travelling from Donsol to Daraga"
+            style={[
+              styles.routeMarker,
+              { transform: [{ translateX: jeepTranslateX }] },
+            ]}
+          >
+            <Text style={styles.routeMarkerText}>JeepQ</Text>
+          </Animated.View>
+        </View>
       </View>
-
-      <Text style={styles.footer}>
-        Powered by Computers Arts and Technological College
-      </Text>
-
-      {/* ─── LOADING INDICATOR ────────────────────────────────────── */}
-      <LoadingDots />
-
-      {/* ─── WAVE DECORATIONS ─────────────────────────────────────── */}
-      <WaveDecoration color="rgba(255,255,255,0.06)" style={{ bottom: 0 }} />
-      <WaveDecoration color="rgba(255,255,255,0.04)" style={{ bottom: 20 }} />
     </Animated.View>
   );
 }
 
-// ─── STYLES ──────────────────────────────────────────────────────
 const styles = StyleSheet.create({
   container: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
+    ...StyleSheet.absoluteFill,
     alignItems: "center",
     justifyContent: "center",
-    overflow: "hidden",
+    backgroundColor: "#0B6FA4",
   },
-  gradient: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
+  brandPlate: {
+    paddingHorizontal: 34,
+    paddingVertical: 17,
+    borderRadius: 10,
+    borderWidth: 2,
+    borderColor: "rgba(255,255,255,0.94)",
+    backgroundColor: "rgba(5, 68, 105, 0.28)",
   },
-  circle: {
-    position: "absolute",
-    borderRadius: 999,
+  wordmark: {
+    color: "#FFFFFF",
+    fontSize: 54,
+    fontWeight: "900",
+    letterSpacing: -3.4,
+    lineHeight: 62,
+    textShadowColor: "rgba(0, 27, 45, 0.32)",
+    textShadowOffset: { width: 0, height: 5 },
+    textShadowRadius: 10,
   },
-  circle1: {
-    top: -60,
-    right: -60,
-    width: 280,
-    height: 280,
-    backgroundColor: "rgba(255,255,255,0.04)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.08)",
+  routeSection: {
+    width: 272,
+    marginTop: 74,
   },
-  circle2: {
-    top: 40,
-    right: -80,
-    width: 180,
-    height: 180,
-    backgroundColor: "rgba(255,255,255,0.04)",
+  loadingLabel: {
+    color: "rgba(255,255,255,0.78)",
+    fontSize: 13,
+    fontWeight: "600",
+    letterSpacing: 0.15,
+    marginBottom: 13,
+    textAlign: "center",
   },
-  circle3: {
-    bottom: -40,
-    left: -60,
-    width: 240,
-    height: 240,
-    backgroundColor: "rgba(255,255,255,0.05)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.08)",
+  routeLabels: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: 7,
   },
-  sharkIcon: {
-    marginBottom: 8,
-    opacity: 0.18,
-  },
-  logoContainer: {
-    marginBottom: 24,
-  },
-  logo: {
-    width: 88,
-    height: 88,
-    borderRadius: 28,
-    backgroundColor: "rgba(255,255,255,0.15)",
-    borderWidth: 1.5,
-    borderColor: "rgba(255,255,255,0.3)",
-    alignItems: "center",
-    justifyContent: "center",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 16 },
-    shadowOpacity: 0.2,
-    shadowRadius: 48,
-    elevation: 16,
-  },
-  textContainer: {
-    alignItems: "center",
-    marginBottom: 12,
-  },
-  title: {
-    color: "white",
-    fontSize: 28,
-    fontWeight: "800",
-    letterSpacing: -0.84,
-    lineHeight: 32,
-  },
-  subtitle: {
-    color: "rgba(255,255,255,0.65)",
+  routeLabel: {
+    color: "rgba(255,255,255,0.88)",
     fontSize: 12,
-    fontWeight: "500",
-    marginTop: 6,
-    letterSpacing: 1.44,
-    textTransform: "uppercase",
+    fontWeight: "700",
   },
-  footer: {
-    color: "rgba(255,255,255,0.4)",
-    fontSize: 11,
-    marginBottom: 64,
-    letterSpacing: 0.88,
+  routeTrack: {
+    height: 30,
+    justifyContent: "center",
+  },
+  routeLine: {
+    height: 3,
+    borderRadius: 99,
+    backgroundColor: "rgba(255,255,255,0.42)",
+  },
+  stop: {
+    position: "absolute",
+    width: 9,
+    height: 9,
+    borderRadius: 5,
+    backgroundColor: "#FFFFFF",
+  },
+  startStop: { left: 0 },
+  endStop: { right: 0 },
+  routeMarker: {
+    position: "absolute",
+    left: 109,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 5,
+    backgroundColor: "#FFFFFF",
+  },
+  routeMarkerText: {
+    color: "#0B6FA4",
+    fontSize: 10,
+    fontWeight: "900",
+    letterSpacing: -0.4,
   },
 });

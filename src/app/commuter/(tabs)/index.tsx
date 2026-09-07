@@ -22,11 +22,13 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import ServiceClosedState from "@/src/shared/components/clay/ClayServiceClosedState";
 import OceanBackground from "../../../src/shared/components/clay/OceanBackground";
 import { colors } from "../../../src/shared/constants/theme";
 import { useCommuterDashboard } from "../../../src/shared/hooks/useCommuterDashboard";
 import { useCurrentUserId } from "../../../src/shared/hooks/useCurrentUserId";
 import { useNotifications } from "../../../src/shared/hooks/useNotification";
+import { useOperatingSchedule } from "../../../src/shared/hooks/useOperatingSchedule";
 
 /* ============================================================
    HELPERS
@@ -457,6 +459,7 @@ function NotificationPreview({
 
 export default function CommuterDashboardScreen() {
   const router = useRouter();
+  const { isOpen, nextOpenLabel } = useOperatingSchedule();
 
   const {
     profile,
@@ -470,7 +473,17 @@ export default function CommuterDashboardScreen() {
     lastUpdated,
     refresh,
     terminalNames,
-  } = useCommuterDashboard();
+  } = useCommuterDashboard(isOpen);
+
+  if (!isOpen) {
+    return (
+      <OceanBackground intensity={0.2}>
+        <SafeAreaView className="flex-1">
+          <ServiceClosedState nextOpenLabel={nextOpenLabel} />
+        </SafeAreaView>
+      </OceanBackground>
+    );
+  }
 
   /* ==========================================================
      NOTIFICATIONS

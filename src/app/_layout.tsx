@@ -1,12 +1,15 @@
 import Constants from "expo-constants";
 import * as Notifications from "expo-notifications";
 import { Slot, router, useSegments } from "expo-router";
+import * as NativeSplashScreen from "expo-splash-screen";
 import { StatusBar } from "expo-status-bar";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AppState, Platform } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import Toast from "react-native-toast-message";
 import "../../global.css";
+import ConnectivityStatus from "../src/shared/components/ui/ConnectivityStatus";
+import JeepQLaunchSplash from "../src/shared/components/ui/splashscreen";
 import { supabase } from "../src/shared/config/supabase";
 import { ThemeProvider as AppThemeProvider } from "../src/shared/context/ThemeContext";
 import { useGlobalChatListener } from "../src/shared/hooks/useGlobalChatListener";
@@ -14,6 +17,12 @@ import { AuthService } from "../src/shared/services/AuthService";
 import { useAuthStore } from "../src/shared/store/authStore";
 import { useChatStore } from "../src/shared/store/chatStore";
 import { getAppFlavor, isStaffApp } from "../src/shared/utils/flavor";
+
+// Keep the native splash up until the animated JeepQ launch screen is mounted.
+NativeSplashScreen.preventAutoHideAsync().catch(() => {
+  // It may already be hidden during Fast Refresh.
+});
+NativeSplashScreen.setOptions({ duration: 300, fade: true });
 
 // ─── NOTIFICATION CHANNEL SETUP ──────────────────────────────────────
 const createNotificationChannels = async () => {
@@ -85,6 +94,13 @@ export default function RootLayout() {
   useGlobalChatListener();
 
   useEffect(() => {
+    // The launch overlay mounts on the first React render, avoiding a blank
+    // frame between the native splash and the animated wordmark.
+    const frame = requestAnimationFrame(() => NativeSplashScreen.hide());
+    return () => cancelAnimationFrame(frame);
+  }, []);
+
+  useEffect(() => {
     if (Platform.OS !== "web") {
       createNotificationChannels();
     }
@@ -101,9 +117,6 @@ export default function RootLayout() {
           console.log("✅ User found in store:", user.email);
           if (mounted) {
             setIsReady(true);
-            setTimeout(() => {
-              if (mounted) setShowSplash(false);
-            }, 1500);
           }
           return;
         }
@@ -123,9 +136,6 @@ export default function RootLayout() {
       } finally {
         if (mounted) {
           setIsReady(true);
-          setTimeout(() => {
-            if (mounted) setShowSplash(false);
-          }, 2000);
         }
       }
     };
@@ -278,36 +288,6 @@ export default function RootLayout() {
       });
     }
   }, [user?.id]);
-
-  // ─── SEND TEST PUSH ─────────────────────────────────────────────────
-  const sendTestPush = async (token: string) => {
-    try {
-      console.log("📤 Sending test push...");
-
-      const response = await fetch("https://exp.host/--/api/v2/push/send", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          to: token,
-          title: "🧪 Push Notification Test",
-          body: "Push notifications are working! 🎉",
-          sound: "default",
-          priority: "high",
-          data: { type: "test" },
-        }),
-      });
-
-      const result = await response.json();
-
-      if (response.ok) {
-        console.log("✅ Test push sent successfully!");
-      } else {
-        console.log("❌ Test push failed:", result);
-      }
-    } catch (error) {
-      console.error("❌ Error sending test push:", error);
-    }
-  };
 
   // ─── SETUP NOTIFICATION LISTENERS ─────────────────────────────────
   const setupNotificationListeners = () => {
@@ -468,6 +448,13 @@ export default function RootLayout() {
       <AppThemeProvider>
         <Slot />
         <Toast />
+        <ConnectivityStatus />
+        {showSplash ? (
+          <JeepQLaunchSplash
+            isAppReady={isReady}
+            onComplete={() => setShowSplash(false)}
+          />
+        ) : null}
       </AppThemeProvider>
     </SafeAreaProvider>
   );

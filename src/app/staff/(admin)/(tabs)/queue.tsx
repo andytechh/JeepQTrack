@@ -41,6 +41,8 @@ export default function AdminQueueScreen() {
     refreshing,
     error,
     refresh,
+    isOperatingHours,
+    operatingHoursMessage,
   } = useAdminQueue();
 
   if (loading) {
@@ -51,7 +53,11 @@ export default function AdminQueueScreen() {
     <OceanBackground intensity={0.32}>
       <SafeAreaView className="flex-1">
         <View className="flex-1">
-          <Header totalWaiting={totalWaiting} loading={loadingJeepney} />
+          <Header
+            totalWaiting={isOperatingHours ? totalWaiting : 0}
+            loading={isOperatingHours ? loadingJeepney : null}
+            isOperatingHours={isOperatingHours}
+          />
 
           <ScrollView
             className="flex-1"
@@ -74,18 +80,32 @@ export default function AdminQueueScreen() {
               <ErrorState message={error} onRetry={refresh} />
             ) : (
               <>
+                {!isOperatingHours && (
+                  <ServiceEndedCard message={operatingHoursMessage} />
+                )}
+
                 <QueueSummary
-                  loading={loadingJeepney}
-                  waiting={totalWaiting}
-                  enRoute={enRouteJeepneys.length}
+                  loading={isOperatingHours ? loadingJeepney : null}
+                  waiting={isOperatingHours ? totalWaiting : 0}
+                  enRoute={isOperatingHours ? enRouteJeepneys.length : 0}
                 />
 
-                <CurrentLoadingCard jeepney={loadingJeepney} />
+                <CurrentLoadingCard
+                  jeepney={isOperatingHours ? loadingJeepney : null}
+                  serviceEnded={!isOperatingHours}
+                />
 
-                <WaitingQueueSection jeepneys={waitingJeepneys} />
+                <WaitingQueueSection
+                  jeepneys={isOperatingHours ? waitingJeepneys : []}
+                  serviceEnded={!isOperatingHours}
+                />
 
-                <EnRouteSection jeepneys={enRouteJeepneys} />
+                <EnRouteSection
+                  jeepneys={isOperatingHours ? enRouteJeepneys : []}
+                  serviceEnded={!isOperatingHours}
+                />
 
+                {/* Queue history is intentionally NOT gated by operating hours. */}
                 <ArrivedSection jeepneys={arrivedJeepneys} />
               </>
             )}
@@ -105,9 +125,11 @@ export default function AdminQueueScreen() {
 function Header({
   totalWaiting,
   loading,
+  isOperatingHours,
 }: {
   totalWaiting: number;
   loading: AdminQueueJeepney | null;
+  isOperatingHours: boolean;
 }) {
   return (
     <View className="px-6 pb-3 pt-3">
@@ -151,10 +173,14 @@ function Header({
         <Radio size={13} color={colors.primaryDark} strokeWidth={2.5} />
 
         <Text className="ml-1.5 text-[11px] font-semibold text-ink-secondary">
-          Live queue status
+          {isOperatingHours ? "Live queue status" : "Service ended for today"}
         </Text>
 
-        <View className="ml-2 h-[6px] w-[6px] rounded-full bg-emerald-400" />
+        <View
+          className={`ml-2 h-[6px] w-[6px] rounded-full ${
+            isOperatingHours ? "bg-emerald-400" : "bg-slate-400"
+          }`}
+        />
       </View>
 
       <View className="mt-3 h-px bg-white/70" />
@@ -237,6 +263,35 @@ function TerminalButton({
 
 /*
  * ============================================================
+ * SERVICE ENDED
+ * ============================================================
+ */
+
+function ServiceEndedCard({ message }: { message: string }) {
+  return (
+    <View className="mt-4 rounded-[24px] border border-white/90 bg-white/75 p-4 shadow-clay-sm">
+      <View className="flex-row items-center">
+        <View className="h-[46px] w-[46px] items-center justify-center rounded-[15px] bg-slate-100">
+          <Clock3 size={21} color={colors.primaryDark} strokeWidth={2.3} />
+        </View>
+
+        <View className="ml-3 flex-1">
+          <Text className="text-[14px] font-extrabold text-ink-dark">
+            Service has ended for today
+          </Text>
+
+          <Text className="mt-1 text-[11px] leading-[17px] text-ink-secondary">
+            {message ||
+              "Jeepney operations are currently closed. Live queue activity will resume at 5:00 AM."}
+          </Text>
+        </View>
+      </View>
+    </View>
+  );
+}
+
+/*
+ * ============================================================
  * SUMMARY
  * ============================================================
  */
@@ -311,8 +366,10 @@ function SummaryCard({
 
 function CurrentLoadingCard({
   jeepney,
+  serviceEnded = false,
 }: {
   jeepney: AdminQueueJeepney | null;
+  serviceEnded?: boolean;
 }) {
   return (
     <View className="mt-5">
@@ -395,7 +452,13 @@ function CurrentLoadingCard({
  * ============================================================
  */
 
-function WaitingQueueSection({ jeepneys }: { jeepneys: AdminQueueJeepney[] }) {
+function WaitingQueueSection({
+  jeepneys,
+  serviceEnded = false,
+}: {
+  jeepneys: AdminQueueJeepney[];
+  serviceEnded?: boolean;
+}) {
   return (
     <View className="mt-6">
       <SectionTitle
@@ -404,7 +467,13 @@ function WaitingQueueSection({ jeepneys }: { jeepneys: AdminQueueJeepney[] }) {
       />
 
       {jeepneys.length === 0 ? (
-        <EmptySection message="No jeepneys are currently waiting." />
+        <EmptySection
+          message={
+            serviceEnded
+              ? "Service ended for today. No active jeepneys are waiting."
+              : "No jeepneys are currently waiting."
+          }
+        />
       ) : (
         <View className="mt-3">
           {jeepneys.map((jeepney, index) => (
@@ -517,13 +586,25 @@ function QueueCard({
  * ============================================================
  */
 
-function EnRouteSection({ jeepneys }: { jeepneys: AdminQueueJeepney[] }) {
+function EnRouteSection({
+  jeepneys,
+  serviceEnded = false,
+}: {
+  jeepneys: AdminQueueJeepney[];
+  serviceEnded?: boolean;
+}) {
   return (
     <View className="mt-3">
       <SectionTitle title="En Route" subtitle="Dispatched jeepneys" />
 
       {jeepneys.length === 0 ? (
-        <EmptySection message="No jeepneys are currently en route." />
+        <EmptySection
+          message={
+            serviceEnded
+              ? "Service ended for today. No active trips are in progress."
+              : "No jeepneys are currently en route."
+          }
+        />
       ) : (
         <View className="mt-3">
           {jeepneys.map((jeepney) => (
@@ -634,10 +715,13 @@ function EnRouteCard({ jeepney }: { jeepney: AdminQueueJeepney }) {
 function ArrivedSection({ jeepneys }: { jeepneys: AdminQueueJeepney[] }) {
   return (
     <View className="mt-3">
-      <SectionTitle title="Arrived" subtitle="Recently arrived jeepneys" />
+      <SectionTitle
+        title="Queue History"
+        subtitle="Recently completed queue activity"
+      />
 
       {jeepneys.length === 0 ? (
-        <EmptySection message="No recently arrived jeepneys." />
+        <EmptySection message="No queue history is available yet." />
       ) : (
         <View className="mt-3">
           {jeepneys.map((jeepney) => (

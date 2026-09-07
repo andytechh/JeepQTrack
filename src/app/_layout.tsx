@@ -1,4 +1,5 @@
 import Constants from "expo-constants";
+import { NavigationBar } from "expo-navigation-bar";
 import * as Notifications from "expo-notifications";
 import { Slot, router, useSegments } from "expo-router";
 import * as NativeSplashScreen from "expo-splash-screen";
@@ -104,6 +105,12 @@ export default function RootLayout() {
     if (Platform.OS !== "web") {
       createNotificationChannels();
     }
+  }, []);
+
+  // ─── ANDROID NAVIGATION BAR (hide; OS handles swipe-to-reveal) ────
+  useEffect(() => {
+    if (Platform.OS !== "android") return;
+    NavigationBar.setHidden(true);
   }, []);
 
   // ─── CHECK AUTH ON APP START ──────────────────────────────────────

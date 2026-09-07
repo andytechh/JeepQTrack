@@ -16,6 +16,8 @@ import { useRouter } from "expo-router";
 
 import {
   ActivityIndicator,
+  Animated,
+  Easing,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -25,7 +27,7 @@ import {
 
 import { SafeAreaView } from "react-native-safe-area-context";
 
-import { useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import ClayAdminDrawer from "../../../../src/shared/components/clay/ClayAdminDrawer";
 import OceanBackground from "../../../../src/shared/components/clay/OceanBackground";
@@ -37,22 +39,295 @@ import {
   useAdminDashboard,
 } from "../../../../src/shared/hooks/admin/useAdminDashboard";
 
+import { supabase } from "../../../../src/shared/config/supabase";
+
+/* ============================================================
+   TYPES
+============================================================ */
+
+type UserRole = "driver" | "dispatcher" | "admin" | "commuter" | string;
+
+interface UserAnalytics {
+  total: number;
+  commuters: number;
+  drivers: number;
+  dispatchers: number;
+  admins: number;
+  active: number;
+  inactive: number;
+}
+
+interface BarItem {
+  label: string;
+  value: number;
+  icon?: React.ReactNode;
+  iconBackground?: string;
+}
+
+/* ============================================================
+   CONSTANTS
+============================================================ */
+
+const STATUS_COLORS = {
+  waiting: "#0284C7",
+  loading: "#D97706",
+  enRoute: "#4F46E5",
+  arrived: "#0891B2",
+  dispatched: "#7C3AED",
+  inactive: "#64748B",
+};
+
+const ROLE_COLORS = {
+  commuters: "#0284C7",
+  drivers: "#059669",
+  dispatchers: "#D97706",
+  admins: "#7C3AED",
+};
+
+/* ============================================================
+   MAIN DASHBOARD
+============================================================ */
+
 export default function AdminDashboardScreen() {
   const router = useRouter();
 
   const [drawerOpen, setDrawerOpen] = useState(false);
+
+  const [userAnalytics, setUserAnalytics] = useState<UserAnalytics>({
+    total: 0,
+    commuters: 0,
+    drivers: 0,
+    dispatchers: 0,
+    admins: 0,
+    active: 0,
+    inactive: 0,
+  });
+
+  const [analyticsLoading, setAnalyticsLoading] = useState(true);
 
   const {
     jeepneys,
     waitingJeepneys,
     loadingJeepney,
     enRouteJeepneys,
-    stats,
     loading,
     refreshing,
     error,
     refresh,
+    isOperatingHours,
+    operatingHoursMessage,
   } = useAdminDashboard();
+
+  /* ==========================================================
+     LOAD USER ANALYTICS
+  ========================================================== */
+
+  useEffect(() => {
+    let mounted = true;
+
+    const loadUserAnalytics = async () => {
+      try {
+        setAnalyticsLoading(true);
+
+        const { data, error: usersError } = await supabase
+          .from("users")
+          .select("role, is_active");
+
+        if (usersError) {
+          console.error("❌ Admin dashboard users query failed:", usersError);
+          return;
+        }
+
+        if (!mounted) {
+          return;
+        }
+
+        const users = data ?? [];
+
+        const commuters = users.filter(
+          (user) => user.role === "commuter",
+        ).length;
+
+        const drivers = users.filter((user) => user.role === "driver").length;
+
+        const dispatchers = users.filter(
+          (user) => user.role === "dispatcher",
+        ).length;
+
+        const admins = users.filter((user) => user.role === "admin").length;
+
+        const active = users.filter((user) => user.is_active === true).length;
+
+        const inactive = users.filter((user) => user.is_active !== true).length;
+
+        setUserAnalytics({
+          total: users.length,
+          commuters,
+          drivers,
+          dispatchers,
+          admins,
+          active,
+          inactive,
+        });
+      } catch (err) {
+        console.error("❌ Admin dashboard user analytics error:", err);
+      } finally {
+        if (mounted) {
+          setAnalyticsLoading(false);
+        }
+      }
+    };
+
+    loadUserAnalytics();
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  /* ==========================================================
+     JEEPNEY OVERVIEW
+
+     Outside operating hours ALL jeepneys are treated as
+     inactive for dashboard purposes.
+
+     This does NOT modify the Supabase records.
+  ========================================================== */
+
+  const jeepneyOverview = useMemo(() => {
+    const total = jeepneys.length;
+
+    if (!isOperatingHours) {
+      return {
+        total,
+        active: 0,
+        waiting: 0,
+        loading: 0,
+        enRoute: 0,
+        arrived: 0,
+        dispatched: 0,
+        inactive: total,
+      };
+    }
+
+    const waiting = jeepneys.filter(
+      (jeepney) => jeepney.status === "waiting",
+    ).length;
+
+    const loading = jeepneys.filter(
+      (jeepney) => jeepney.status === "loading",
+    ).length;
+
+    const enRoute = jeepneys.filter(
+      (jeepney) => jeepney.status === "en_route",
+    ).length;
+
+    const arrived = jeepneys.filter(
+      (jeepney) => jeepney.status === "arrived",
+    ).length;
+
+    const dispatched = jeepneys.filter(
+      (jeepney) => jeepney.status === "dispatched",
+    ).length;
+
+    const active = waiting + loading + enRoute + arrived + dispatched;
+
+    const inactive = Math.max(0, total - active);
+
+    return {
+      total,
+      active,
+      waiting,
+      loading,
+      enRoute,
+      arrived,
+      dispatched,
+      inactive,
+    };
+  }, [jeepneys, isOperatingHours]);
+
+  /* ==========================================================
+     USER ANALYTICS DATA
+  ========================================================== */
+
+  const userChartData = useMemo<BarItem[]>(
+    () => [
+      {
+        label: "Commuters",
+        value: userAnalytics.commuters,
+        icon: (
+          <Users size={16} color={ROLE_COLORS.commuters} strokeWidth={2.4} />
+        ),
+        iconBackground: "#E0F2FE",
+      },
+      {
+        label: "Drivers",
+        value: userAnalytics.drivers,
+        icon: (
+          <BusFront size={16} color={ROLE_COLORS.drivers} strokeWidth={2.4} />
+        ),
+        iconBackground: "#D1FAE5",
+      },
+      {
+        label: "Dispatchers",
+        value: userAnalytics.dispatchers,
+        icon: (
+          <Radio size={16} color={ROLE_COLORS.dispatchers} strokeWidth={2.4} />
+        ),
+        iconBackground: "#FEF3C7",
+      },
+      {
+        label: "Admins",
+        value: userAnalytics.admins,
+        icon: (
+          <CheckCircle2
+            size={16}
+            color={ROLE_COLORS.admins}
+            strokeWidth={2.4}
+          />
+        ),
+        iconBackground: "#EDE9FE",
+      },
+    ],
+    [userAnalytics],
+  );
+
+  /* ==========================================================
+     STAFF ANALYTICS DATA
+
+     Staff = driver + dispatcher + admin.
+  ========================================================== */
+
+  const staffChartData = useMemo<BarItem[]>(
+    () => [
+      {
+        label: "Drivers",
+        value: userAnalytics.drivers,
+        icon: <BusFront size={16} color="#059669" strokeWidth={2.4} />,
+        iconBackground: "#D1FAE5",
+      },
+      {
+        label: "Dispatchers",
+        value: userAnalytics.dispatchers,
+        icon: <Radio size={16} color="#D97706" strokeWidth={2.4} />,
+        iconBackground: "#FEF3C7",
+      },
+      {
+        label: "Admins",
+        value: userAnalytics.admins,
+        icon: <CheckCircle2 size={16} color="#7C3AED" strokeWidth={2.4} />,
+        iconBackground: "#EDE9FE",
+      },
+    ],
+    [userAnalytics.drivers, userAnalytics.dispatchers, userAnalytics.admins],
+  );
+
+  const totalStaff =
+    userAnalytics.drivers + userAnalytics.dispatchers + userAnalytics.admins;
+
+  /* ==========================================================
+     LOADING
+  ========================================================== */
 
   if (loading) {
     return (
@@ -76,6 +351,10 @@ export default function AdminDashboardScreen() {
     );
   }
 
+  /* ==========================================================
+     SCREEN
+  ========================================================== */
+
   return (
     <OceanBackground intensity={0.28}>
       <SafeAreaView className="flex-1">
@@ -94,7 +373,9 @@ export default function AdminDashboardScreen() {
               paddingBottom: 130,
             }}
           >
-            {/* HEADER */}
+            {/* ==================================================
+                HEADER
+            ================================================== */}
 
             <View className="pt-3">
               <View className="flex-row items-center justify-between">
@@ -131,15 +412,23 @@ export default function AdminDashboardScreen() {
               </View>
 
               <View className="mt-3 flex-row items-center">
-                <View className="h-[8px] w-[8px] rounded-full bg-emerald-500" />
+                <View
+                  className={`h-[8px] w-[8px] rounded-full ${
+                    isOperatingHours ? "bg-emerald-500" : "bg-slate-400"
+                  }`}
+                />
 
                 <Text className="ml-2 text-[11px] font-semibold text-ink-secondary">
-                  Terminal monitoring active
+                  {isOperatingHours
+                    ? "Terminal monitoring active"
+                    : "Terminal service closed"}
                 </Text>
               </View>
             </View>
 
-            {/* ERROR */}
+            {/* ==================================================
+                ERROR
+            ================================================== */}
 
             {error && (
               <View className="mt-5 rounded-[24px] border border-red-100 bg-white/90 p-5">
@@ -176,14 +465,16 @@ export default function AdminDashboardScreen() {
               </View>
             )}
 
-            {/* STAT CARDS */}
+            {/* ==================================================
+                TOP STAT CARDS
+            ================================================== */}
 
             <View className="mt-5">
               <View className="flex-row">
                 <View className="flex-1">
                   <ClayStatCard
                     title="Total"
-                    value={stats.total}
+                    value={jeepneyOverview.total}
                     subtitle="Jeepneys"
                     icon={
                       <BusFront
@@ -198,13 +489,17 @@ export default function AdminDashboardScreen() {
 
                 <View className="ml-3 flex-1">
                   <ClayStatCard
-                    title="Waiting"
-                    value={stats.waiting}
-                    subtitle="In queue"
+                    title="Active"
+                    value={jeepneyOverview.active}
+                    subtitle="Fleet today"
                     icon={
-                      <Clock3 size={19} color="#0369A1" strokeWidth={2.4} />
+                      <CheckCircle2
+                        size={19}
+                        color="#059669"
+                        strokeWidth={2.4}
+                      />
                     }
-                    iconBackground="#DBEAFE"
+                    iconBackground="#D1FAE5"
                   />
                 </View>
               </View>
@@ -212,18 +507,20 @@ export default function AdminDashboardScreen() {
               <View className="mt-3 flex-row">
                 <View className="flex-1">
                   <ClayStatCard
-                    title="Loading"
-                    value={stats.loading}
-                    subtitle="At terminal"
-                    icon={<Users size={19} color="#B45309" strokeWidth={2.4} />}
-                    iconBackground="#FEF3C7"
+                    title="Waiting"
+                    value={jeepneyOverview.waiting}
+                    subtitle="In queue"
+                    icon={
+                      <Clock3 size={19} color="#0369A1" strokeWidth={2.4} />
+                    }
+                    iconBackground="#DBEAFE"
                   />
                 </View>
 
                 <View className="ml-3 flex-1">
                   <ClayStatCard
                     title="En Route"
-                    value={stats.enRoute}
+                    value={jeepneyOverview.enRoute}
                     subtitle="On trip"
                     icon={<Route size={19} color="#4338CA" strokeWidth={2.4} />}
                     iconBackground="#E0E7FF"
@@ -232,105 +529,191 @@ export default function AdminDashboardScreen() {
               </View>
             </View>
 
-            {/* CURRENT LOADING */}
+            {/* ==================================================
+                SERVICE CLOSED
+            ================================================== */}
 
-            <SectionHeader
-              title="Current Loading"
-              subtitle="Jeepney being prepared for departure"
-            />
+            {!isOperatingHours && (
+              <View className="mt-6 rounded-[25px] border border-white/90 bg-clay-surface p-5">
+                <View className="flex-row items-center">
+                  <View className="h-[48px] w-[48px] items-center justify-center rounded-[16px] bg-slate-100">
+                    <Clock3 size={23} color="#64748B" strokeWidth={2.3} />
+                  </View>
 
-            {loadingJeepney ? (
-              <LoadingJeepneyCard jeepney={loadingJeepney} />
-            ) : (
-              <EmptyCard
-                icon={
-                  <BusFront
-                    size={23}
-                    color={colors.primaryDark}
-                    strokeWidth={2.3}
-                  />
-                }
-                title="No jeepney is loading"
-                message="There is currently no jeepney in the loading state."
-              />
-            )}
-
-            {/* QUEUE */}
-
-            <SectionHeader
-              title="Jeepney Queue"
-              subtitle="Based on jeepney queue position"
-              count={waitingJeepneys.length}
-            />
-
-            {waitingJeepneys.length === 0 ? (
-              <EmptyCard
-                icon={
-                  <CheckCircle2 size={23} color="#059669" strokeWidth={2.3} />
-                }
-                title="Queue is clear"
-                message="There are no jeepneys currently waiting in the queue."
-              />
-            ) : (
-              <View>
-                {waitingJeepneys.slice(0, 5).map((jeepney, index) => (
-                  <QueueJeepneyCard
-                    key={jeepney.id}
-                    jeepney={jeepney}
-                    index={index}
-                  />
-                ))}
-
-                {waitingJeepneys.length > 5 && (
-                  <Pressable
-                    onPress={() => router.push("/staff/(admin)/(tabs)/queue")}
-                    className="mt-2 h-[46px] items-center justify-center rounded-full bg-white/80"
-                  >
-                    <Text className="text-[12px] font-extrabold text-ocean-700">
-                      View all {waitingJeepneys.length} jeepneys
+                  <View className="ml-3 flex-1">
+                    <Text className="text-[14px] font-extrabold text-ink-dark">
+                      Service has ended for today
                     </Text>
-                  </Pressable>
-                )}
+
+                    <Text className="mt-1 text-[11px] leading-[17px] text-ink-secondary">
+                      {operatingHoursMessage ||
+                        "Jeepney operations are currently closed. Please come back tomorrow."}
+                    </Text>
+                  </View>
+                </View>
               </View>
             )}
 
-            {/* EN ROUTE */}
+            {/* ==================================================
+                LIVE OPERATIONS
+            ================================================== */}
 
-            <SectionHeader
-              title="Currently En Route"
-              subtitle="Jeepneys outside the terminal"
-              count={enRouteJeepneys.length}
-            />
+            {isOperatingHours && (
+              <>
+                {/* CURRENT LOADING */}
 
-            {enRouteJeepneys.length === 0 ? (
-              <EmptyCard
-                icon={
-                  <MapPin
-                    size={23}
-                    color={colors.primaryDark}
-                    strokeWidth={2.3}
+                <SectionHeader
+                  title="Current Loading"
+                  subtitle="Jeepney being prepared for departure"
+                />
+
+                {loadingJeepney ? (
+                  <LoadingJeepneyCard jeepney={loadingJeepney} />
+                ) : (
+                  <EmptyCard
+                    icon={
+                      <BusFront
+                        size={23}
+                        color={colors.primaryDark}
+                        strokeWidth={2.3}
+                      />
+                    }
+                    title="No jeepney is loading"
+                    message="There is currently no jeepney in the loading state."
                   />
-                }
-                title="No active trips"
-                message="No jeepney is currently marked as en route."
-              />
-            ) : (
-              <View>
-                {enRouteJeepneys.slice(0, 4).map((jeepney) => (
-                  <EnRouteCard key={jeepney.id} jeepney={jeepney} />
-                ))}
-              </View>
+                )}
+
+                {/* QUEUE */}
+
+                <SectionHeader
+                  title="Jeepney Queue"
+                  subtitle="Based on jeepney queue position"
+                  count={waitingJeepneys.length}
+                />
+
+                {waitingJeepneys.length === 0 ? (
+                  <EmptyCard
+                    icon={
+                      <CheckCircle2
+                        size={23}
+                        color="#059669"
+                        strokeWidth={2.3}
+                      />
+                    }
+                    title="Queue is clear"
+                    message="There are no jeepneys currently waiting in the queue."
+                  />
+                ) : (
+                  <View>
+                    {waitingJeepneys.slice(0, 5).map((jeepney, index) => (
+                      <QueueJeepneyCard
+                        key={jeepney.id}
+                        jeepney={jeepney}
+                        index={index}
+                      />
+                    ))}
+
+                    {waitingJeepneys.length > 5 && (
+                      <Pressable
+                        onPress={() =>
+                          router.push("/staff/(admin)/(tabs)/queue")
+                        }
+                        className="mt-2 h-[46px] items-center justify-center rounded-full bg-white/80"
+                      >
+                        <Text className="text-[12px] font-extrabold text-ocean-700">
+                          View all {waitingJeepneys.length} jeepneys
+                        </Text>
+                      </Pressable>
+                    )}
+                  </View>
+                )}
+
+                {/* EN ROUTE */}
+
+                <SectionHeader
+                  title="Currently En Route"
+                  subtitle="Jeepneys outside the terminal"
+                  count={enRouteJeepneys.length}
+                />
+
+                {enRouteJeepneys.length === 0 ? (
+                  <EmptyCard
+                    icon={
+                      <MapPin
+                        size={23}
+                        color={colors.primaryDark}
+                        strokeWidth={2.3}
+                      />
+                    }
+                    title="No active trips"
+                    message="No jeepney is currently marked as en route."
+                  />
+                ) : (
+                  <View>
+                    {enRouteJeepneys.slice(0, 4).map((jeepney) => (
+                      <EnRouteCard key={jeepney.id} jeepney={jeepney} />
+                    ))}
+                  </View>
+                )}
+              </>
             )}
 
-            {/* TERMINAL SUMMARY */}
+            {/* ==================================================
+                JEEPNEY OVERVIEW
+            ================================================== */}
 
             <SectionHeader
-              title="Terminal Overview"
-              subtitle="Fleet status summary"
+              title="Jeepney Overview"
+              subtitle={
+                isOperatingHours
+                  ? "Current fleet status"
+                  : "All fleet is inactive after service hours"
+              }
             />
 
-            <TerminalSummary stats={stats} />
+            <JeepneyOverview
+              stats={jeepneyOverview}
+              isOperatingHours={isOperatingHours}
+            />
+
+            {/* ==================================================
+                DASHBOARD ANALYTICS
+
+                Jeepney Fleet graph removed because the same
+                information is already shown above.
+            ================================================== */}
+
+            <SectionHeader
+              title="Dashboard Analytics"
+              subtitle="Registered users and staff distribution"
+            />
+
+            {/* USERS GRAPH */}
+
+            <AnimatedBarChart
+              title="Users"
+              subtitle="Registered accounts by role"
+              total={userAnalytics.total}
+              data={userChartData}
+              loading={analyticsLoading}
+            />
+
+            {/* STAFF GRAPH */}
+
+            <View className="mt-4">
+              <AnimatedBarChart
+                title="Staff"
+                subtitle="Drivers, dispatchers, and administrators"
+                total={totalStaff}
+                data={staffChartData}
+                loading={analyticsLoading}
+              />
+            </View>
           </ScrollView>
+
+          {/* ====================================================
+              ADMIN DRAWER
+          ==================================================== */}
 
           <ClayAdminDrawer
             visible={drawerOpen}
@@ -377,15 +760,13 @@ function ClayStatCard({
         elevation: 2,
       }}
     >
-      <View className="flex-row items-center justify-between">
-        <View
-          className="h-[40px] w-[40px] items-center justify-center rounded-[14px]"
-          style={{
-            backgroundColor: iconBackground,
-          }}
-        >
-          {icon}
-        </View>
+      <View
+        className="h-[40px] w-[40px] items-center justify-center rounded-[14px]"
+        style={{
+          backgroundColor: iconBackground,
+        }}
+      >
+        {icon}
       </View>
 
       <Text className="mt-4 text-[10px] font-bold uppercase tracking-[0.8px] text-ink-muted">
@@ -437,6 +818,223 @@ function SectionHeader({
       )}
     </View>
   );
+}
+
+/* ============================================================
+   ANIMATED BAR CHART
+============================================================ */
+
+function AnimatedBarChart({
+  title,
+  subtitle,
+  total,
+  data,
+  loading,
+}: {
+  title: string;
+  subtitle: string;
+  total: number;
+  data: BarItem[];
+  loading: boolean;
+}) {
+  const maxValue = Math.max(1, ...data.map((item) => item.value));
+
+  return (
+    <View
+      className="rounded-[25px] border border-white/90 bg-clay-surface p-5"
+      style={{
+        shadowColor: "#000",
+        shadowOffset: {
+          width: 0,
+          height: 4,
+        },
+        shadowOpacity: 0.045,
+        shadowRadius: 9,
+        elevation: 2,
+      }}
+    >
+      {/* HEADER */}
+
+      <View className="flex-row items-start justify-between">
+        <View className="flex-1">
+          <Text className="text-[15px] font-extrabold text-ink-dark">
+            {title}
+          </Text>
+
+          <Text className="mt-0.5 text-[10px] font-medium text-ink-muted">
+            {subtitle}
+          </Text>
+        </View>
+
+        <View className="items-end">
+          <Text className="text-[21px] font-extrabold text-ink-dark">
+            {total}
+          </Text>
+
+          <Text className="text-[9px] font-semibold uppercase tracking-[0.5px] text-ink-muted">
+            Total
+          </Text>
+        </View>
+      </View>
+
+      {/* CHART */}
+
+      <View className="mt-5">
+        {loading ? (
+          <View className="py-7">
+            <ActivityIndicator size="small" color={colors.primaryDark} />
+
+            <Text className="mt-2 text-center text-[10px] font-medium text-ink-muted">
+              Loading analytics...
+            </Text>
+          </View>
+        ) : data.length === 0 ? (
+          <View className="items-center py-7">
+            <Text className="text-[11px] font-semibold text-ink-muted">
+              No data available
+            </Text>
+          </View>
+        ) : (
+          data.map((item, index) => (
+            <AnimatedBarRow
+              key={item.label}
+              item={item}
+              maxValue={maxValue}
+              index={index}
+            />
+          ))
+        )}
+      </View>
+    </View>
+  );
+}
+
+/* ============================================================
+   ANIMATED BAR ROW
+============================================================ */
+
+function AnimatedBarRow({
+  item,
+  maxValue,
+  index,
+}: {
+  item: BarItem;
+  maxValue: number;
+  index: number;
+}) {
+  const progress = useRef(new Animated.Value(0)).current;
+
+  const percentage = maxValue > 0 ? item.value / maxValue : 0;
+
+  useEffect(() => {
+    progress.stopAnimation();
+    progress.setValue(0);
+
+    const animation = Animated.timing(progress, {
+      toValue: percentage,
+      duration: 1000,
+      delay: index * 140,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: false,
+    });
+
+    animation.start();
+
+    return () => {
+      animation.stop();
+    };
+  }, [item.value, percentage, index, progress]);
+
+  const animatedWidth = progress.interpolate({
+    inputRange: [0, 1],
+    outputRange: ["0%", "100%"],
+  });
+
+  const animatedOpacity = progress.interpolate({
+    inputRange: [0, 0.08, 1],
+    outputRange: [0.35, 1, 1],
+  });
+
+  const barColor = getBarColor(item.label);
+
+  return (
+    <View className="mb-4">
+      {/* LABEL */}
+
+      <View className="mb-1.5 flex-row items-center">
+        <View
+          className="h-[30px] w-[30px] items-center justify-center rounded-[10px]"
+          style={{
+            backgroundColor: item.iconBackground ?? "#E0F2FE",
+          }}
+        >
+          {item.icon}
+        </View>
+
+        <Text className="ml-2 flex-1 text-[11px] font-bold text-ink-secondary">
+          {item.label}
+        </Text>
+
+        <Text className="text-[12px] font-extrabold text-ink-dark">
+          {item.value}
+        </Text>
+      </View>
+
+      {/* BAR */}
+
+      <View className="ml-[38px] h-[10px] overflow-hidden rounded-full bg-slate-100">
+        <Animated.View
+          className="h-full rounded-full"
+          style={{
+            width: animatedWidth,
+            opacity: animatedOpacity,
+            backgroundColor: barColor,
+          }}
+        />
+      </View>
+    </View>
+  );
+}
+
+/* ============================================================
+   BAR COLOR
+============================================================ */
+
+function getBarColor(label: string) {
+  switch (label) {
+    case "Waiting":
+      return STATUS_COLORS.waiting;
+
+    case "Loading":
+      return STATUS_COLORS.loading;
+
+    case "En Route":
+      return STATUS_COLORS.enRoute;
+
+    case "Arrived":
+      return STATUS_COLORS.arrived;
+
+    case "Dispatched":
+      return STATUS_COLORS.dispatched;
+
+    case "Inactive":
+      return STATUS_COLORS.inactive;
+
+    case "Commuters":
+      return ROLE_COLORS.commuters;
+
+    case "Drivers":
+      return ROLE_COLORS.drivers;
+
+    case "Dispatchers":
+      return ROLE_COLORS.dispatchers;
+
+    case "Admins":
+      return ROLE_COLORS.admins;
+
+    default:
+      return colors.primaryDark;
+  }
 }
 
 /* ============================================================
@@ -669,11 +1267,12 @@ function EmptyCard({
 }
 
 /* ============================================================
-   TERMINAL SUMMARY
+   JEEPNEY OVERVIEW
 ============================================================ */
 
-function TerminalSummary({
+function JeepneyOverview({
   stats,
+  isOperatingHours,
 }: {
   stats: {
     total: number;
@@ -685,13 +1284,54 @@ function TerminalSummary({
     dispatched: number;
     inactive: number;
   };
+  isOperatingHours: boolean;
 }) {
   return (
-    <View className="rounded-[25px] border border-white/90 bg-clay-surface p-5">
+    <View
+      className="rounded-[25px] border border-white/90 bg-clay-surface p-5"
+      style={{
+        shadowColor: "#000",
+        shadowOffset: {
+          width: 0,
+          height: 4,
+        },
+        shadowOpacity: 0.045,
+        shadowRadius: 9,
+        elevation: 2,
+      }}
+    >
+      {/* ACTIVE FLEET TODAY */}
+
+      <View className="mb-1 rounded-[18px] bg-ocean-50 px-4 py-3">
+        <View className="flex-row items-center">
+          <View className="h-[38px] w-[38px] items-center justify-center rounded-[12px] bg-emerald-100">
+            <CheckCircle2 size={19} color="#059669" strokeWidth={2.4} />
+          </View>
+
+          <View className="ml-3 flex-1">
+            <Text className="text-[11px] font-bold uppercase tracking-[0.5px] text-ink-muted">
+              Active Fleet Today
+            </Text>
+
+            <Text className="mt-0.5 text-[10px] font-medium text-ink-secondary">
+              {isOperatingHours
+                ? "Jeepneys currently participating in service"
+                : "No active fleet after service hours"}
+            </Text>
+          </View>
+
+          <Text className="text-[22px] font-extrabold text-ink-dark">
+            {stats.active}
+          </Text>
+        </View>
+      </View>
+
       <SummaryRow
-        icon={<CheckCircle2 size={17} color="#059669" strokeWidth={2.3} />}
-        label="Active fleet"
-        value={stats.active}
+        icon={
+          <BusFront size={17} color={colors.primaryDark} strokeWidth={2.3} />
+        }
+        label="Total Jeepneys"
+        value={stats.total}
       />
 
       <SummaryRow
@@ -708,8 +1348,20 @@ function TerminalSummary({
 
       <SummaryRow
         icon={<Route size={17} color="#4338CA" strokeWidth={2.3} />}
-        label="En route"
+        label="En Route"
         value={stats.enRoute}
+      />
+
+      <SummaryRow
+        icon={<MapPin size={17} color="#0891B2" strokeWidth={2.3} />}
+        label="Arrived"
+        value={stats.arrived}
+      />
+
+      <SummaryRow
+        icon={<Radio size={17} color="#7C3AED" strokeWidth={2.3} />}
+        label="Dispatched"
+        value={stats.dispatched}
       />
 
       <SummaryRow

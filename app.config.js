@@ -67,12 +67,19 @@ export default {
       [
         "expo-splash-screen",
         {
-          backgroundColor: "#0B6FA4",
+          backgroundColor: "#171A1C",
         },
       ],
 
       "expo-secure-store",
       "expo-web-browser",
+
+      [
+        "expo-navigation-bar",
+        {
+          hidden: true,
+        },
+      ],
     ],
 
     experiments: {

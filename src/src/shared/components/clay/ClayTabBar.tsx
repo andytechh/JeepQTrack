@@ -6,7 +6,8 @@ import {
   Ticket,
   UserRound,
 } from "lucide-react-native";
-import { Platform, Text, TouchableOpacity, View } from "react-native";
+import { Text, TouchableOpacity, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTheme } from "../../../shared/context/ThemeContext";
 
 type ClayTabBarProps = {
@@ -21,12 +22,7 @@ type ClayTabBarProps = {
   notificationBadge?: number;
   chatUnreadCount?: number;
 
-  descriptors: Record<
-    string,
-    {
-      options: any;
-    }
-  >;
+  descriptors: Record<string, { options: any }>;
 
   navigation: {
     emit: (event: {
@@ -49,6 +45,7 @@ export function ClayTabBar({
   chatUnreadCount = 0,
 }: ClayTabBarProps) {
   const { isDark } = useTheme();
+  const insets = useSafeAreaInsets();
 
   const backgroundColor = isDark ? "#172033" : "#F8FCFF";
   const borderColor = isDark ? "#263449" : "rgba(255,255,255,0.95)";
@@ -99,7 +96,7 @@ export function ClayTabBar({
     <View
       className="absolute bottom-0 left-0 right-0 px-4 pt-2"
       style={{
-        paddingBottom: Platform.OS === "ios" ? 20 : 10,
+        paddingBottom: Math.max(insets.bottom, 10) + 10,
       }}
     >
       <View

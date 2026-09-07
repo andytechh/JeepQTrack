@@ -2,6 +2,7 @@ import { useRouter } from "expo-router";
 import {
   AlertTriangle,
   CheckCircle2,
+  ChevronLeft,
   ChevronRight,
   Eye,
   EyeOff,
@@ -20,6 +21,7 @@ import { useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Image,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -84,9 +86,7 @@ export default function AdminStaffScreen() {
   const [filter, setFilter] = useState<StaffFilter>("all");
 
   const [showAddModal, setShowAddModal] = useState(false);
-
   const [showSuccessModal, setShowSuccessModal] = useState(false);
-
   const [createdStaffName, setCreatedStaffName] = useState("");
 
   const filteredStaff = useMemo(() => {
@@ -137,7 +137,6 @@ export default function AdminStaffScreen() {
       await createStaff(data);
 
       setShowAddModal(false);
-
       setCreatedStaffName(data.display_name);
 
       setTimeout(() => {
@@ -192,11 +191,32 @@ export default function AdminStaffScreen() {
             paddingBottom: 140,
           }}
         >
-          {/* =====================================================
-              HEADER
-          ====================================================== */}
-
           <View className="flex-row items-center">
+            <Pressable
+              onPress={() => {
+                if (router.canGoBack()) {
+                  router.back();
+                }
+              }}
+              className="mr-3 h-[42px] w-[42px] items-center justify-center rounded-full bg-white/80"
+              style={{
+                shadowColor: "#000",
+                shadowOffset: {
+                  width: 0,
+                  height: 2,
+                },
+                shadowOpacity: 0.05,
+                shadowRadius: 5,
+                elevation: 1,
+              }}
+            >
+              <ChevronLeft
+                size={20}
+                color={colors.primaryDark}
+                strokeWidth={2.5}
+              />
+            </Pressable>
+
             <View className="h-[50px] w-[50px] items-center justify-center rounded-[18px] bg-ocean-100">
               <Users size={24} color={colors.primaryDark} strokeWidth={2.4} />
             </View>
@@ -210,8 +230,6 @@ export default function AdminStaffScreen() {
                 Staff
               </Text>
             </View>
-
-            {/* STAFF COUNT + ADD BUTTON */}
 
             <View className="flex-row items-center">
               <View className="rounded-full bg-ocean-100 px-3 py-2">
@@ -243,10 +261,6 @@ export default function AdminStaffScreen() {
             Manage drivers, dispatchers, and administrators.
           </Text>
 
-          {/* =====================================================
-              SEARCH
-          ====================================================== */}
-
           <View className="mt-5 flex-row items-center rounded-[20px] border border-white/90 bg-clay-surface px-4">
             <Search size={18} color="#64748B" strokeWidth={2.2} />
 
@@ -264,10 +278,6 @@ export default function AdminStaffScreen() {
               </Pressable>
             )}
           </View>
-
-          {/* =====================================================
-              FILTERS
-          ====================================================== */}
 
           <ScrollView
             horizontal
@@ -296,10 +306,6 @@ export default function AdminStaffScreen() {
               );
             })}
           </ScrollView>
-
-          {/* =====================================================
-              ERROR
-          ====================================================== */}
 
           {error && (
             <View className="mt-5 rounded-[24px] border border-red-100 bg-white/90 p-5">
@@ -332,10 +338,6 @@ export default function AdminStaffScreen() {
             </View>
           )}
 
-          {/* =====================================================
-              DIRECTORY
-          ====================================================== */}
-
           <View className="mb-3 mt-7">
             <Text className="text-[16px] font-extrabold text-ink-dark">
               Staff Directory
@@ -363,19 +365,11 @@ export default function AdminStaffScreen() {
           )}
         </ScrollView>
 
-        {/* =====================================================
-            ADD STAFF MODAL
-        ====================================================== */}
-
         <AddStaffModal
           visible={showAddModal}
           onClose={() => setShowAddModal(false)}
           onSubmit={handleCreateStaff}
         />
-
-        {/* =====================================================
-            SUCCESS MODAL
-        ====================================================== */}
 
         <StaffCreatedSuccessModal
           visible={showSuccessModal}
@@ -389,10 +383,6 @@ export default function AdminStaffScreen() {
     </OceanBackground>
   );
 }
-
-/* =========================================================
-   ADD STAFF MODAL
-========================================================= */
 
 function AddStaffModal({
   visible,
@@ -415,11 +405,9 @@ function AddStaffModal({
   const [bracket, setBracket] = useState("");
 
   const [showPassword, setShowPassword] = useState(false);
-
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
   const [saving, setSaving] = useState(false);
-
   const [validationError, setValidationError] = useState<string | null>(null);
 
   const reset = () => {
@@ -523,10 +511,10 @@ function AddStaffModal({
   const submit = async () => {
     setValidationError(null);
 
-    const error = validate();
+    const validationError = validate();
 
-    if (error) {
-      setValidationError(error);
+    if (validationError) {
+      setValidationError(validationError);
       return;
     }
 
@@ -535,25 +523,17 @@ function AddStaffModal({
 
       await onSubmit({
         display_name: displayName.trim(),
-
         email: email.trim().toLowerCase(),
-
         password,
-
         phone_number: phone.trim() || null,
-
         role,
-
         preferred_terminal: terminal.trim() ? Number(terminal) : null,
-
         preferred_bracket: bracket.trim() ? Number(bracket) : null,
-
         jeepney_id: null,
       });
 
       reset();
     } catch {
-      // Parent handles creation error.
     } finally {
       setSaving(false);
     }
@@ -572,8 +552,6 @@ function AddStaffModal({
       >
         <View className="flex-1 justify-end bg-slate-900/35">
           <View className="max-h-[92%] rounded-t-[32px] border border-white/90 bg-clay-surface">
-            {/* HEADER */}
-
             <View className="flex-row items-center border-b border-slate-200/50 px-5 py-4">
               <View className="h-[44px] w-[44px] items-center justify-center rounded-[15px] bg-ocean-100">
                 <Plus size={21} color={colors.primaryDark} strokeWidth={2.5} />
@@ -724,8 +702,6 @@ function AddStaffModal({
                 keyboardType="numeric"
               />
 
-              {/* ACTIONS */}
-
               <View className="mt-6 flex-row">
                 <Pressable
                   onPress={close}
@@ -763,10 +739,6 @@ function AddStaffModal({
   );
 }
 
-/* =========================================================
-   SUCCESS MODAL
-========================================================= */
-
 function StaffCreatedSuccessModal({
   visible,
   staffName,
@@ -797,8 +769,6 @@ function StaffCreatedSuccessModal({
             elevation: 10,
           }}
         >
-          {/* SUCCESS ICON */}
-
           <View className="items-center">
             <View
               className="h-[78px] w-[78px] items-center justify-center rounded-[27px] bg-emerald-50"
@@ -828,8 +798,6 @@ function StaffCreatedSuccessModal({
             </Text>
           </View>
 
-          {/* STAFF INFORMATION */}
-
           <View className="mt-5 rounded-[22px] border border-white/90 bg-white/60 p-4">
             <View className="flex-row items-center">
               <View className="h-[42px] w-[42px] items-center justify-center rounded-[14px] bg-ocean-100">
@@ -855,8 +823,6 @@ function StaffCreatedSuccessModal({
             </View>
           </View>
 
-          {/* LOGIN INFORMATION */}
-
           <View className="mt-3 rounded-[22px] bg-ocean-50/70 p-4">
             <View className="flex-row items-center">
               <ShieldCheck
@@ -875,8 +841,6 @@ function StaffCreatedSuccessModal({
               assigned during account creation.
             </Text>
           </View>
-
-          {/* DONE */}
 
           <Pressable
             onPress={onClose}
@@ -899,10 +863,6 @@ function StaffCreatedSuccessModal({
     </Modal>
   );
 }
-
-/* =========================================================
-   MODAL FIELD
-========================================================= */
 
 function ModalField({
   label,
@@ -943,10 +903,6 @@ function ModalField({
     </View>
   );
 }
-
-/* =========================================================
-   PASSWORD FIELD
-========================================================= */
 
 function PasswordField({
   label,
@@ -997,9 +953,44 @@ function PasswordField({
   );
 }
 
-/* =========================================================
-   STAFF CARD
-========================================================= */
+function StaffAvatar({
+  uri,
+  size = 52,
+}: {
+  uri: string | null;
+  size?: number;
+}) {
+  const [imageError, setImageError] = useState(false);
+
+  const showImage = Boolean(uri) && !imageError;
+
+  return (
+    <View
+      className="overflow-hidden rounded-[17px] bg-ocean-100"
+      style={{
+        width: size,
+        height: size,
+      }}
+    >
+      {showImage ? (
+        <Image
+          source={{ uri: uri! }}
+          className="h-full w-full"
+          resizeMode="cover"
+          onError={() => setImageError(true)}
+        />
+      ) : (
+        <View className="h-full w-full items-center justify-center">
+          <UserRound
+            size={size * 0.46}
+            color={colors.primaryDark}
+            strokeWidth={2.3}
+          />
+        </View>
+      )}
+    </View>
+  );
+}
 
 function StaffCard({
   member,
@@ -1026,9 +1017,7 @@ function StaffCard({
       }}
     >
       <View className="flex-row items-center">
-        <View className="h-[52px] w-[52px] items-center justify-center rounded-[17px] bg-ocean-100">
-          <UserRound size={24} color={colors.primaryDark} strokeWidth={2.3} />
-        </View>
+        <StaffAvatar uri={member.avatar_url} />
 
         <View className="ml-3 flex-1">
           <Text
@@ -1132,10 +1121,6 @@ function StaffCard({
   );
 }
 
-/* =========================================================
-   INFO
-========================================================= */
-
 function InfoBlock({
   icon,
   label,
@@ -1165,10 +1150,6 @@ function InfoBlock({
   );
 }
 
-/* =========================================================
-   EMPTY
-========================================================= */
-
 function EmptyStaff({ search }: { search: string }) {
   return (
     <View className="items-center rounded-[25px] border border-white/90 bg-white/70 px-6 py-8">
@@ -1188,10 +1169,6 @@ function EmptyStaff({ search }: { search: string }) {
     </View>
   );
 }
-
-/* =========================================================
-   ROLE
-========================================================= */
 
 function formatRole(role: AdminStaffRole) {
   switch (role) {

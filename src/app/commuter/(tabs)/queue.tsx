@@ -1,6 +1,9 @@
 import {
   ArrowRight,
+  Bell,
+  BellOff,
   BusFront,
+  Check,
   Clock3,
   Info,
   MapPin,
@@ -19,9 +22,11 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+
 import OceanBackground from "../../../src/shared/components/clay/OceanBackground";
 import { colors } from "../../../src/shared/constants/theme";
 import { useCommuterQueue } from "../../../src/shared/hooks/useCommuterQueue";
+import { useTerminalSubscriptions } from "../../../src/shared/hooks/useTerminalSubscriptions";
 
 type JeepneyStatus =
   "LOADING" | "WAITING" | "ARRIVED" | "EN_ROUTE" | "DEPARTED";
@@ -38,7 +43,10 @@ interface Jeepney {
   driverName: string;
 }
 
-const TERMINAL_NAMES: Record<number, string> = { 1: "Donsol", 2: "Daraga" };
+const TERMINAL_NAMES: Record<number, string> = {
+  1: "Donsol",
+  2: "Daraga",
+};
 
 const STATUS_CONFIG: Record<
   JeepneyStatus,
@@ -57,6 +65,7 @@ const STATUS_CONFIG: Record<
     container: "bg-sky-100",
     text: "text-sky-700",
   },
+
   LOADING: {
     label: "Loading",
     description: "Passengers are boarding.",
@@ -64,6 +73,7 @@ const STATUS_CONFIG: Record<
     container: "bg-amber-100",
     text: "text-amber-700",
   },
+
   WAITING: {
     label: "Waiting",
     description: "In queue, ready to load.",
@@ -71,6 +81,7 @@ const STATUS_CONFIG: Record<
     container: "bg-green-100",
     text: "text-green-700",
   },
+
   EN_ROUTE: {
     label: "En Route",
     description: "On the way to destination.",
@@ -78,6 +89,7 @@ const STATUS_CONFIG: Record<
     container: "bg-blue-100",
     text: "text-blue-700",
   },
+
   DEPARTED: {
     label: "Departed",
     description: "Already left the terminal.",
@@ -87,18 +99,181 @@ const STATUS_CONFIG: Record<
   },
 };
 
-function getOccupancyPercentage(passengers: number, capacity: number) {
-  if (capacity <= 0) return 0;
+function getOccupancyPercentage(passengers: number, capacity: number): number {
+  if (capacity <= 0) {
+    return 0;
+  }
+
   return Math.min(100, Math.round((passengers / capacity) * 100));
 }
 
-function getOccupancyLabel(passengers: number, capacity: number) {
+function getOccupancyLabel(passengers: number, capacity: number): string {
   const percentage = getOccupancyPercentage(passengers, capacity);
-  if (percentage >= 100) return "Full";
-  if (percentage >= 80) return "Almost full";
-  if (percentage >= 50) return "Moderate";
+
+  if (percentage >= 100) {
+    return "Full";
+  }
+
+  if (percentage >= 80) {
+    return "Almost full";
+  }
+
+  if (percentage >= 50) {
+    return "Moderate";
+  }
+
   return "Seats available";
 }
+
+/* -------------------------------------------------------------------------- */
+/* TERMINAL NOTIFICATION CARD                                                */
+/* -------------------------------------------------------------------------- */
+
+function TerminalNotificationCard({
+  terminalId,
+  terminalName,
+  jeepneyCount,
+  subscribed,
+  processing,
+  expirationLabel,
+  onToggle,
+}: {
+  terminalId: number;
+  terminalName: string;
+  jeepneyCount: number;
+  subscribed: boolean;
+  processing: boolean;
+  expirationLabel: string;
+  onToggle: () => void;
+}) {
+  return (
+    <View className="mt-4 overflow-hidden rounded-[26px] border border-white/90 bg-white p-5 shadow-clay-sm">
+      {/* Terminal heading */}
+      <View className="flex-row items-center">
+        <View
+          className={`h-[52px] w-[52px] items-center justify-center rounded-[18px] ${
+            subscribed ? "bg-green-100" : "bg-ocean-100"
+          }`}
+        >
+          {subscribed ? (
+            <Check size={25} color="#16A34A" strokeWidth={2.8} />
+          ) : (
+            <MapPin size={25} color={colors.primaryDark} strokeWidth={2.2} />
+          )}
+        </View>
+
+        <View className="ml-3 flex-1">
+          <View className="flex-row items-center justify-between">
+            <Text className="text-[9px] font-extrabold uppercase tracking-[1px] text-ocean-600">
+              Terminal {terminalId}
+            </Text>
+
+            <View
+              className={`rounded-full px-3 py-1.5 ${
+                subscribed ? "bg-green-100" : "bg-slate-100"
+              }`}
+            >
+              <Text
+                className={`text-[8px] font-extrabold tracking-[0.4px] ${
+                  subscribed ? "text-green-700" : "text-slate-500"
+                }`}
+              >
+                {subscribed ? "ACTIVE TODAY" : "NOT ACTIVE"}
+              </Text>
+            </View>
+          </View>
+
+          <Text className="mt-1 text-[21px] font-extrabold text-ink-dark">
+            {terminalName}
+          </Text>
+
+          <Text className="mt-0.5 text-[10px] text-ink-secondary">
+            {jeepneyCount} {jeepneyCount === 1 ? "jeepney" : "jeepneys"}{" "}
+            currently in service
+          </Text>
+        </View>
+      </View>
+
+      {/* Notification information */}
+      <View
+        className={`mt-4 rounded-[20px] p-4 ${
+          subscribed ? "bg-green-50" : "bg-ocean-50"
+        }`}
+      >
+        <View className="flex-row items-start">
+          <View className="h-[38px] w-[38px] items-center justify-center rounded-full bg-white">
+            {subscribed ? (
+              <Bell size={18} color="#16A34A" strokeWidth={2.3} />
+            ) : (
+              <Bell size={18} color={colors.primaryDark} strokeWidth={2.3} />
+            )}
+          </View>
+
+          <View className="ml-3 flex-1">
+            <Text className="text-[11px] font-extrabold text-ink-dark">
+              {subscribed
+                ? "SMS notifications are active"
+                : "Get SMS trip updates"}
+            </Text>
+
+            <Text className="mt-1 text-[9px] leading-4 text-ink-secondary">
+              {subscribed
+                ? "You'll receive an SMS when a jeepney arrives, starts loading, and departs from this terminal."
+                : "Notify me when a jeepney arrives, starts loading, and departs from this terminal."}
+            </Text>
+
+            {subscribed && expirationLabel ? (
+              <View className="mt-2 flex-row items-center">
+                <Check size={12} color="#15803D" strokeWidth={2.8} />
+
+                <Text className="ml-1 text-[9px] font-bold text-green-700">
+                  {expirationLabel}
+                </Text>
+              </View>
+            ) : null}
+          </View>
+        </View>
+
+        {/* Action */}
+        <TouchableOpacity
+          activeOpacity={0.82}
+          disabled={processing}
+          onPress={onToggle}
+          className={`mt-4 h-[47px] items-center justify-center rounded-[16px] ${
+            subscribed ? "border border-green-200 bg-white" : "bg-ocean-400"
+          } ${processing ? "opacity-60" : ""}`}
+        >
+          {processing ? (
+            <ActivityIndicator
+              size="small"
+              color={subscribed ? "#16A34A" : "#FFFFFF"}
+            />
+          ) : (
+            <View className="flex-row items-center">
+              {subscribed ? (
+                <BellOff size={17} color="#15803D" strokeWidth={2.3} />
+              ) : (
+                <Bell size={17} color="#FFFFFF" strokeWidth={2.3} />
+              )}
+
+              <Text
+                className={`ml-2 text-[11px] font-extrabold ${
+                  subscribed ? "text-green-700" : "text-white"
+                }`}
+              >
+                {subscribed ? "Turn off notifications" : "Notify me"}
+              </Text>
+            </View>
+          )}
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* JEEPNEY CARD                                                               */
+/* -------------------------------------------------------------------------- */
 
 function JeepneyCard({
   jeepney,
@@ -108,11 +283,14 @@ function JeepneyCard({
   onPressDetails: () => void;
 }) {
   const status = STATUS_CONFIG[jeepney.status];
+
   const occupancy = getOccupancyPercentage(
     jeepney.passengers,
     jeepney.capacity,
   );
+
   const seatsLeft = Math.max(0, jeepney.capacity - jeepney.passengers);
+
   const isDeparted = jeepney.status === "DEPARTED";
 
   return (
@@ -121,6 +299,7 @@ function JeepneyCard({
         isDeparted ? "opacity-65" : ""
       }`}
     >
+      {/* Header */}
       <View className="flex-row items-start justify-between">
         <View className="flex-row items-center">
           <View
@@ -139,11 +318,14 @@ function JeepneyCard({
             <Text className="text-[10px] font-bold uppercase tracking-[0.7px] text-ink-muted">
               Jeepney
             </Text>
+
             <Text className="mt-0.5 text-[22px] font-extrabold text-ink-dark">
               #{jeepney.number}
             </Text>
+
             <View className="mt-1 flex-row items-center">
               <MapPin size={12} color="#64748b" strokeWidth={2} />
+
               <Text className="ml-1 text-[10px] text-ink-muted">
                 {TERMINAL_NAMES[jeepney.terminalId] || "Terminal"}
               </Text>
@@ -155,6 +337,7 @@ function JeepneyCard({
           className={`flex-row items-center rounded-full px-3 py-2 ${status.container}`}
         >
           {status.icon}
+
           <Text className={`ml-1.5 text-[10px] font-extrabold ${status.text}`}>
             {status.label}
           </Text>
@@ -165,14 +348,17 @@ function JeepneyCard({
         {status.description}
       </Text>
 
+      {/* Occupancy */}
       <View className="mt-5">
         <View className="flex-row items-center justify-between">
           <View className="flex-row items-center">
             <Users size={15} color={colors.textSecondary} strokeWidth={2.2} />
+
             <Text className="ml-2 text-[11px] font-bold text-ink-secondary">
               Occupancy
             </Text>
           </View>
+
           <Text className="text-[11px] font-extrabold text-ink-dark">
             {jeepney.passengers}/{jeepney.capacity}
           </Text>
@@ -195,12 +381,14 @@ function JeepneyCard({
           <Text className="text-[10px] text-ink-muted">
             {getOccupancyLabel(jeepney.passengers, jeepney.capacity)}
           </Text>
+
           <Text className="text-[10px] font-semibold text-ink-secondary">
             {seatsLeft} {seatsLeft === 1 ? "seat" : "seats"} left
           </Text>
         </View>
       </View>
 
+      {/* ETA */}
       <View className="mt-5 flex-row items-center rounded-[18px] bg-ocean-50 px-4 py-3">
         <View className="h-[34px] w-[34px] items-center justify-center rounded-full bg-white">
           {jeepney.status === "EN_ROUTE" ? (
@@ -209,28 +397,34 @@ function JeepneyCard({
             <Clock3 size={16} color={colors.primaryDark} strokeWidth={2.3} />
           )}
         </View>
+
         <View className="ml-3 flex-1">
           <Text className="text-[9px] font-bold uppercase tracking-[0.6px] text-ink-muted">
             {jeepney.status === "EN_ROUTE"
               ? "Estimated arrival"
               : "Estimated departure"}
           </Text>
+
           <Text className="mt-0.5 text-[14px] font-extrabold text-ink-dark">
             {jeepney.estimatedDeparture}
           </Text>
-          <Text className="text-[8px] text-ink-muted italic">
+
+          <Text className="text-[8px] italic text-ink-muted">
             * Estimated, may change
           </Text>
         </View>
       </View>
 
+      {/* Details */}
       <TouchableOpacity
         onPress={onPressDetails}
-        className="mt-4 flex-row items-center justify-end gap-1"
+        activeOpacity={0.7}
+        className="mt-4 flex-row items-center justify-end"
       >
-        <Text className="text-[10px] text-ocean-500 font-semibold">
+        <Text className="text-[10px] font-semibold text-ocean-500">
           View details
         </Text>
+
         <Info size={14} color="#0ea5e9" strokeWidth={2} className="ml-1" />
       </TouchableOpacity>
     </View>
@@ -245,9 +439,22 @@ const STATUS_ORDER: JeepneyStatus[] = [
   "DEPARTED",
 ];
 
+/* -------------------------------------------------------------------------- */
+/* SCREEN                                                                     */
+/* -------------------------------------------------------------------------- */
+
 export default function CommuterQueueScreen() {
   const { jeepneys, loading, refreshing, refresh, error } = useCommuterQueue();
+
+  const {
+    processingTerminal,
+    isSubscribed,
+    toggleSubscription,
+    getExpirationLabel,
+  } = useTerminalSubscriptions();
+
   const [selectedJeepney, setSelectedJeepney] = useState<Jeepney | null>(null);
+
   const [modalVisible, setModalVisible] = useState(false);
 
   const onRefresh = useCallback(() => refresh(), [refresh]);
@@ -262,7 +469,7 @@ export default function CommuterQueueScreen() {
     setSelectedJeepney(null);
   };
 
-  // Group by status
+  /* Group jeepneys by status */
   const grouped = useMemo(() => {
     const map: Record<JeepneyStatus, Jeepney[]> = {
       LOADING: [],
@@ -271,30 +478,54 @@ export default function CommuterQueueScreen() {
       EN_ROUTE: [],
       DEPARTED: [],
     };
-    jeepneys.forEach((j) => {
-      if (map[j.status]) map[j.status].push(j);
+
+    jeepneys.forEach((jeepney) => {
+      if (map[jeepney.status]) {
+        map[jeepney.status].push(jeepney);
+      }
     });
+
     return map;
   }, [jeepneys]);
 
-  const statusKeys = STATUS_ORDER.filter((key) => grouped[key].length > 0);
-
-  // Queue summary: count LOADING + WAITING, per terminal
-  const loadingAndWaiting = jeepneys.filter(
-    (j) => j.status === "LOADING" || j.status === "WAITING",
+  const statusKeys = STATUS_ORDER.filter(
+    (status) => grouped[status].length > 0,
   );
+
+  /* Queue summary */
+  const loadingAndWaiting = jeepneys.filter(
+    (jeepney) => jeepney.status === "LOADING" || jeepney.status === "WAITING",
+  );
+
   const terminalCounts = {
-    1: loadingAndWaiting.filter((j) => j.terminalId === 1).length,
-    2: loadingAndWaiting.filter((j) => j.terminalId === 2).length,
+    1: loadingAndWaiting.filter((jeepney) => jeepney.terminalId === 1).length,
+
+    2: loadingAndWaiting.filter((jeepney) => jeepney.terminalId === 2).length,
   };
+
+  /* Terminal jeepney counts */
+  const terminalGroups = useMemo(
+    () => ({
+      1: jeepneys.filter((jeepney) => jeepney.terminalId === 1),
+
+      2: jeepneys.filter((jeepney) => jeepney.terminalId === 2),
+    }),
+    [jeepneys],
+  );
+
+  /* ---------------------------------------------------------------------- */
+  /* ERROR                                                                    */
+  /* ---------------------------------------------------------------------- */
 
   if (error) {
     return (
       <OceanBackground intensity={0.2}>
         <SafeAreaView className="flex-1 items-center justify-center px-6">
-          <Text className="text-red-500 text-center">{error}</Text>
+          <Text className="text-center text-red-500">{error}</Text>
+
           <TouchableOpacity
             onPress={refresh}
+            activeOpacity={0.8}
             className="mt-4 rounded-xl bg-ocean-400 px-6 py-3"
           >
             <Text className="font-semibold text-white">Retry</Text>
@@ -304,11 +535,16 @@ export default function CommuterQueueScreen() {
     );
   }
 
+  /* ---------------------------------------------------------------------- */
+  /* LOADING                                                                  */
+  /* ---------------------------------------------------------------------- */
+
   if (loading && jeepneys.length === 0) {
     return (
       <OceanBackground intensity={0.2}>
         <SafeAreaView className="flex-1 items-center justify-center">
           <ActivityIndicator size="large" color={colors.primary} />
+
           <Text className="mt-3 text-sm text-ink-secondary">
             Loading queue...
           </Text>
@@ -317,19 +553,27 @@ export default function CommuterQueueScreen() {
     );
   }
 
+  /* ---------------------------------------------------------------------- */
+  /* EMPTY                                                                    */
+  /* ---------------------------------------------------------------------- */
+
   if (jeepneys.length === 0 && !loading) {
     return (
       <OceanBackground intensity={0.2}>
         <SafeAreaView className="flex-1 items-center justify-center px-6">
           <BusFront size={48} color="#94a3b8" />
+
           <Text className="mt-3 text-lg font-bold text-ink-dark">
             No jeepneys in queue
           </Text>
-          <Text className="mt-1 text-sm text-ink-secondary text-center">
+
+          <Text className="mt-1 text-center text-sm text-ink-secondary">
             There are currently no jeepneys available.
           </Text>
+
           <TouchableOpacity
             onPress={refresh}
+            activeOpacity={0.8}
             className="mt-6 rounded-xl bg-ocean-400 px-6 py-3"
           >
             <Text className="font-semibold text-white">Refresh</Text>
@@ -338,6 +582,10 @@ export default function CommuterQueueScreen() {
       </OceanBackground>
     );
   }
+
+  /* ---------------------------------------------------------------------- */
+  /* MAIN                                                                     */
+  /* ---------------------------------------------------------------------- */
 
   return (
     <OceanBackground intensity={0.2}>
@@ -351,7 +599,9 @@ export default function CommuterQueueScreen() {
               tintColor={colors.primary}
             />
           }
-          contentContainerStyle={{ paddingBottom: 120 }}
+          contentContainerStyle={{
+            paddingBottom: 120,
+          }}
         >
           <View className="px-5 pt-4">
             {/* HEADER */}
@@ -359,46 +609,55 @@ export default function CommuterQueueScreen() {
               <Text className="text-[11px] font-bold uppercase tracking-[1px] text-ocean-700">
                 SMART QUEUE
               </Text>
+
               <Text className="mt-1 text-[28px] font-extrabold text-ink-dark">
                 Jeepney Queue
               </Text>
+
               <View className="mt-2 flex-row items-center">
                 <MapPin
                   size={14}
                   color={colors.primaryDark}
                   strokeWidth={2.2}
                 />
+
                 <Text className="ml-1 text-[12px] font-medium text-ink-secondary">
                   All Terminals
                 </Text>
               </View>
             </View>
 
-            {/* ─── QUEUE SUMMARY (improved) ───────────────────────── */}
+            {/* QUEUE SUMMARY */}
             <View className="mt-6 rounded-[28px] border border-white/90 bg-ocean-400 p-5 shadow-clay-floating">
               <View className="flex-row items-start justify-between">
                 <View>
                   <Text className="text-[10px] font-bold uppercase tracking-[1px] text-white/70">
                     Waiting to Load
                   </Text>
+
                   <Text className="mt-2 text-[44px] font-extrabold leading-[48px] text-white">
                     {loadingAndWaiting.length}
                   </Text>
+
                   <View className="mt-1 flex-row items-center gap-3">
                     <View className="flex-row items-center">
-                      <View className="h-2 w-2 rounded-full bg-white/60 mr-1" />
+                      <View className="mr-1 h-2 w-2 rounded-full bg-white/60" />
+
                       <Text className="text-[11px] font-medium text-white/80">
                         Donsol: {terminalCounts[1]}
                       </Text>
                     </View>
+
                     <View className="flex-row items-center">
-                      <View className="h-2 w-2 rounded-full bg-white/60 mr-1" />
+                      <View className="mr-1 h-2 w-2 rounded-full bg-white/60" />
+
                       <Text className="text-[11px] font-medium text-white/80">
                         Daraga: {terminalCounts[2]}
                       </Text>
                     </View>
                   </View>
                 </View>
+
                 <View className="h-[52px] w-[52px] items-center justify-center rounded-[18px] bg-white/20">
                   <BusFront size={25} color="#FFFFFF" strokeWidth={2.1} />
                 </View>
@@ -410,10 +669,12 @@ export default function CommuterQueueScreen() {
                 <View className="h-[34px] w-[34px] items-center justify-center rounded-full bg-white/20">
                   <Clock3 size={16} color="#FFFFFF" strokeWidth={2.3} />
                 </View>
+
                 <View className="ml-3">
                   <Text className="text-[9px] font-bold uppercase tracking-[0.6px] text-white/60">
                     Next departure
                   </Text>
+
                   <Text className="mt-0.5 text-[14px] font-extrabold text-white">
                     {loadingAndWaiting[0]?.estimatedDeparture ||
                       "No jeepney available"}
@@ -427,15 +688,64 @@ export default function CommuterQueueScreen() {
               <View className="h-[40px] w-[40px] items-center justify-center rounded-[14px] bg-green-100">
                 <View className="h-[10px] w-[10px] rounded-full bg-green-500" />
               </View>
+
               <View className="ml-3 flex-1">
                 <Text className="text-[11px] font-bold text-ink-dark">
                   Live queue status
                 </Text>
+
                 <Text className="mt-0.5 text-[10px] text-ink-secondary">
                   Queue information updates automatically.
                 </Text>
               </View>
+
               <RefreshCw size={17} color={colors.textMuted} />
+            </View>
+
+            {/* TERMINAL ALERTS */}
+            <View className="mt-7">
+              <View className="flex-row items-end justify-between">
+                <View className="flex-1">
+                  <Text className="text-[19px] font-extrabold text-ink-dark">
+                    Terminal Alerts
+                  </Text>
+
+                  <Text className="mt-1 text-[10px] leading-4 text-ink-secondary">
+                    Get SMS updates when a jeepney arrives, starts loading, and
+                    departs.
+                  </Text>
+                </View>
+
+                <View className="ml-3 h-[38px] w-[38px] items-center justify-center rounded-[13px] bg-ocean-100">
+                  <Bell
+                    size={18}
+                    color={colors.primaryDark}
+                    strokeWidth={2.2}
+                  />
+                </View>
+              </View>
+
+              {/* DONSOL */}
+              <TerminalNotificationCard
+                terminalId={1}
+                terminalName="Donsol"
+                jeepneyCount={terminalGroups[1].length}
+                subscribed={isSubscribed(1)}
+                processing={processingTerminal === 1}
+                expirationLabel={getExpirationLabel(1)}
+                onToggle={() => toggleSubscription(1)}
+              />
+
+              {/* DARAGA */}
+              <TerminalNotificationCard
+                terminalId={2}
+                terminalName="Daraga"
+                jeepneyCount={terminalGroups[2].length}
+                subscribed={isSubscribed(2)}
+                processing={processingTerminal === 2}
+                expirationLabel={getExpirationLabel(2)}
+                onToggle={() => toggleSubscription(2)}
+              />
             </View>
 
             {/* STATUS SECTIONS */}
@@ -446,22 +756,26 @@ export default function CommuterQueueScreen() {
                     <Text className="text-[18px] font-extrabold text-ink-dark">
                       {STATUS_CONFIG[status].label}
                     </Text>
+
                     <Text className="mt-0.5 text-[10px] text-ink-secondary">
                       {STATUS_CONFIG[status].description}
                     </Text>
                   </View>
+
                   <View className="rounded-full bg-ocean-100 px-3 py-1.5">
                     <Text className="text-[10px] font-extrabold text-ocean-700">
-                      {grouped[status].length} jeepneys
+                      {grouped[status].length}{" "}
+                      {grouped[status].length === 1 ? "jeepney" : "jeepneys"}
                     </Text>
                   </View>
                 </View>
+
                 <View className="mt-4">
-                  {grouped[status].map((j) => (
+                  {grouped[status].map((jeepney) => (
                     <JeepneyCard
-                      key={j.id}
-                      jeepney={j}
-                      onPressDetails={() => openDetails(j)}
+                      key={jeepney.id}
+                      jeepney={jeepney}
+                      onPressDetails={() => openDetails(jeepney)}
                     />
                   ))}
                 </View>
@@ -489,12 +803,13 @@ export default function CommuterQueueScreen() {
         animationType="slide"
         onRequestClose={closeModal}
       >
-        <View className="flex-1 bg-black/50 justify-end">
-          <View className="bg-white rounded-t-3xl p-6 min-h-[40%]">
-            <View className="flex-row justify-between items-center mb-4">
+        <View className="flex-1 justify-end bg-black/50">
+          <View className="min-h-[40%] rounded-t-3xl bg-white p-6">
+            <View className="mb-4 flex-row items-center justify-between">
               <Text className="text-xl font-bold text-slate-900">
                 Jeepney Details
               </Text>
+
               <TouchableOpacity onPress={closeModal} className="p-1">
                 <X size={24} color="#64748b" />
               </TouchableOpacity>
@@ -504,34 +819,37 @@ export default function CommuterQueueScreen() {
               <View className="gap-3">
                 <View className="flex-row items-center">
                   <BusFront size={20} color="#0ea5e9" />
+
                   <Text className="ml-3 text-lg font-semibold text-slate-900">
                     #{selectedJeepney.number}
                   </Text>
                 </View>
-                {selectedJeepney.jeepName && (
+
+                {selectedJeepney.jeepName ? (
                   <View className="flex-row items-center">
-                    <Text className="text-sm text-slate-600 font-medium">
+                    <Text className="text-sm font-medium text-slate-600">
                       Name: {selectedJeepney.jeepName}
                     </Text>
                   </View>
-                )}
-                {selectedJeepney.driverName && (
+                ) : null}
+
+                {selectedJeepney.driverName ? (
                   <View className="flex-row items-center">
                     <Text className="text-sm text-slate-600">
                       Driver: {selectedJeepney.driverName}
                     </Text>
                   </View>
-                )}
+                ) : null}
+
                 <View className="flex-row items-center">
                   <MapPin size={18} color="#64748b" />
+
                   <Text className="ml-3 text-sm text-slate-600">
                     {TERMINAL_NAMES[selectedJeepney.terminalId] || "Unknown"}
                   </Text>
                 </View>
 
-                {/* ETA - only shown for EN_ROUTE jeepneys. Other statuses haven't
-                    left the terminal yet, so there's no "arrival ETA" to show -
-                    they get the estimated departure time instead. */}
+                {/* ETA */}
                 {selectedJeepney.status === "EN_ROUTE" ? (
                   <View className="flex-row items-center rounded-[16px] bg-ocean-50 px-4 py-3">
                     <View className="h-[34px] w-[34px] items-center justify-center rounded-full bg-white">
@@ -541,14 +859,17 @@ export default function CommuterQueueScreen() {
                         strokeWidth={2.3}
                       />
                     </View>
+
                     <View className="ml-3 flex-1">
                       <Text className="text-[9px] font-bold uppercase tracking-[0.6px] text-ink-muted">
                         ETA
                       </Text>
+
                       <Text className="mt-0.5 text-[16px] font-extrabold text-ink-dark">
                         {selectedJeepney.estimatedDeparture}
                       </Text>
-                      <Text className="text-[9px] text-ink-muted italic">
+
+                      <Text className="text-[9px] italic text-ink-muted">
                         Estimated, may change
                       </Text>
                     </View>
@@ -556,9 +877,10 @@ export default function CommuterQueueScreen() {
                 ) : (
                   <View className="flex-row items-center">
                     <Clock3 size={18} color="#64748b" />
+
                     <Text className="ml-3 text-sm text-slate-600">
                       Est. departure: {selectedJeepney.estimatedDeparture}
-                      <Text className="text-xs text-slate-400 italic">
+                      <Text className="text-xs italic text-slate-400">
                         {" "}
                         (may change)
                       </Text>
@@ -568,14 +890,16 @@ export default function CommuterQueueScreen() {
 
                 <View className="flex-row items-center">
                   <Users size={18} color="#64748b" />
+
                   <Text className="ml-3 text-sm text-slate-600">
                     {selectedJeepney.passengers}/{selectedJeepney.capacity}{" "}
                     passengers
                   </Text>
                 </View>
+
                 <View className="flex-row items-center">
                   <View
-                    className={`px-3 py-1 rounded-full ${
+                    className={`rounded-full px-3 py-1 ${
                       STATUS_CONFIG[selectedJeepney.status].container
                     }`}
                   >
@@ -588,11 +912,13 @@ export default function CommuterQueueScreen() {
                     </Text>
                   </View>
                 </View>
+
                 <TouchableOpacity
                   onPress={closeModal}
-                  className="mt-4 bg-ocean-400 py-3 rounded-xl items-center"
+                  activeOpacity={0.8}
+                  className="mt-4 items-center rounded-xl bg-ocean-400 py-3"
                 >
-                  <Text className="text-white font-semibold">Close</Text>
+                  <Text className="font-semibold text-white">Close</Text>
                 </TouchableOpacity>
               </View>
             )}

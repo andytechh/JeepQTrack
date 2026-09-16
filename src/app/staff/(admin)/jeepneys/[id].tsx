@@ -1749,10 +1749,6 @@ function DetailRow({
   );
 }
 
-/* ================================================================
-   GPS VALUE
-================================================================ */
-
 function GpsValue({ label, value }: { label: string; value: string }) {
   return (
     <View className="flex-1">
@@ -1770,17 +1766,9 @@ function GpsValue({ label, value }: { label: string; value: string }) {
   );
 }
 
-/* ================================================================
-   DIVIDER
-================================================================ */
-
 function Divider() {
   return <View className="my-3 h-[1px] bg-slate-100" />;
 }
-
-/* ================================================================
-   ADMIN ACTION MODAL
-================================================================ */
 
 function AdminActionModal({
   visible,

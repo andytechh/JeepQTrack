@@ -16,8 +16,7 @@ import { useRouter } from "expo-router";
 
 import {
   ActivityIndicator,
-  Animated,
-  Easing,
+  Dimensions,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -26,8 +25,9 @@ import {
 } from "react-native";
 
 import { SafeAreaView } from "react-native-safe-area-context";
+import { WebView } from "react-native-webview";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import ClayAdminDrawer from "../../../../src/shared/components/clay/ClayAdminDrawer";
 import OceanBackground from "../../../../src/shared/components/clay/OceanBackground";
@@ -57,12 +57,20 @@ interface UserAnalytics {
   inactive: number;
 }
 
-interface BarItem {
+type UserAnalyticsPoint = {
   label: string;
-  value: number;
-  icon?: React.ReactNode;
-  iconBackground?: string;
-}
+  commuters: number;
+  drivers: number;
+  dispatchers: number;
+  admins: number;
+};
+
+type JeepneyAnalyticsPoint = {
+  label: string;
+  trips: number;
+  passengers: number;
+  activeJeepneys: number;
+};
 
 /* ============================================================
    CONSTANTS
@@ -104,6 +112,12 @@ export default function AdminDashboardScreen() {
   });
 
   const [analyticsLoading, setAnalyticsLoading] = useState(true);
+  const [userAnalyticsHistory, setUserAnalyticsHistory] = useState<
+    UserAnalyticsPoint[]
+  >([]);
+  const [jeepneyAnalyticsHistory, setJeepneyAnalyticsHistory] = useState<
+    JeepneyAnalyticsPoint[]
+  >([]);
 
   const {
     jeepneys,
@@ -119,45 +133,70 @@ export default function AdminDashboardScreen() {
   } = useAdminDashboard();
 
   /* ==========================================================
-     LOAD USER ANALYTICS
+     LOAD DASHBOARD ANALYTICS
+
+     Users use actual users.created_at timestamps and show NEW
+     registrations per day.
+
+     Jeepney analytics use actual trips.departure_time data and
+     calculate daily trip count, passenger count, and the number
+     of unique jeepneys that operated that day.
+
+     These are daily values, not cumulative totals, so the area
+     charts can naturally move both upward and downward.
   ========================================================== */
 
   useEffect(() => {
     let mounted = true;
 
-    const loadUserAnalytics = async () => {
+    const loadAnalytics = async () => {
       try {
         setAnalyticsLoading(true);
 
-        const { data, error: usersError } = await supabase
-          .from("users")
-          .select("role, is_active");
+        const firstDay = new Date();
+        firstDay.setHours(0, 0, 0, 0);
+        firstDay.setDate(firstDay.getDate() - 6);
 
-        if (usersError) {
-          console.error("❌ Admin dashboard users query failed:", usersError);
-          return;
+        const [usersResult, tripsResult] = await Promise.all([
+          supabase
+            .from("users")
+            .select("role, is_active, created_at")
+            .order("created_at", { ascending: true }),
+          supabase
+            .from("trips")
+            .select("jeepney_id, departure_time, total_passengers")
+            .gte("departure_time", firstDay.toISOString())
+            .order("departure_time", { ascending: true }),
+        ]);
+
+        if (!mounted) return;
+
+        if (usersResult.error) {
+          console.error(
+            "❌ Admin dashboard users query failed:",
+            usersResult.error,
+          );
         }
 
-        if (!mounted) {
-          return;
+        if (tripsResult.error) {
+          console.error(
+            "❌ Admin dashboard trips query failed:",
+            tripsResult.error,
+          );
         }
 
-        const users = data ?? [];
+        const users = usersResult.data ?? [];
+        const trips = tripsResult.data ?? [];
 
         const commuters = users.filter(
           (user) => user.role === "commuter",
         ).length;
-
         const drivers = users.filter((user) => user.role === "driver").length;
-
         const dispatchers = users.filter(
           (user) => user.role === "dispatcher",
         ).length;
-
         const admins = users.filter((user) => user.role === "admin").length;
-
         const active = users.filter((user) => user.is_active === true).length;
-
         const inactive = users.filter((user) => user.is_active !== true).length;
 
         setUserAnalytics({
@@ -169,16 +208,82 @@ export default function AdminDashboardScreen() {
           active,
           inactive,
         });
+
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+
+        const days = Array.from({ length: 7 }, (_, index) => {
+          const day = new Date(today);
+          day.setDate(today.getDate() - (6 - index));
+          return day;
+        });
+
+        const userHistory: UserAnalyticsPoint[] = days.map((day) => {
+          const start = new Date(day);
+          start.setHours(0, 0, 0, 0);
+
+          const end = new Date(day);
+          end.setHours(23, 59, 59, 999);
+
+          const registered = users.filter((user) => {
+            if (!user.created_at) return false;
+            const created = new Date(user.created_at);
+            return created >= start && created <= end;
+          });
+
+          return {
+            label: day.toLocaleDateString("en-US", { weekday: "short" }),
+            commuters: registered.filter((user) => user.role === "commuter")
+              .length,
+            drivers: registered.filter((user) => user.role === "driver").length,
+            dispatchers: registered.filter((user) => user.role === "dispatcher")
+              .length,
+            admins: registered.filter((user) => user.role === "admin").length,
+          };
+        });
+
+        const jeepneyHistory: JeepneyAnalyticsPoint[] = days.map((day) => {
+          const start = new Date(day);
+          start.setHours(0, 0, 0, 0);
+
+          const end = new Date(day);
+          end.setHours(23, 59, 59, 999);
+
+          const dailyTrips = trips.filter((trip) => {
+            if (!trip.departure_time) return false;
+            const departure = new Date(trip.departure_time);
+            return departure >= start && departure <= end;
+          });
+
+          const activeJeepneys = new Set(
+            dailyTrips
+              .map((trip) => trip.jeepney_id)
+              .filter((id): id is string => Boolean(id)),
+          ).size;
+
+          const passengers = dailyTrips.reduce(
+            (sum, trip) => sum + Number(trip.total_passengers ?? 0),
+            0,
+          );
+
+          return {
+            label: day.toLocaleDateString("en-US", { weekday: "short" }),
+            trips: dailyTrips.length,
+            passengers,
+            activeJeepneys,
+          };
+        });
+
+        setUserAnalyticsHistory(userHistory);
+        setJeepneyAnalyticsHistory(jeepneyHistory);
       } catch (err) {
-        console.error("❌ Admin dashboard user analytics error:", err);
+        console.error("❌ Admin dashboard analytics error:", err);
       } finally {
-        if (mounted) {
-          setAnalyticsLoading(false);
-        }
+        if (mounted) setAnalyticsLoading(false);
       }
     };
 
-    loadUserAnalytics();
+    loadAnalytics();
 
     return () => {
       mounted = false;
@@ -245,85 +350,6 @@ export default function AdminDashboardScreen() {
       inactive,
     };
   }, [jeepneys, isOperatingHours]);
-
-  /* ==========================================================
-     USER ANALYTICS DATA
-  ========================================================== */
-
-  const userChartData = useMemo<BarItem[]>(
-    () => [
-      {
-        label: "Commuters",
-        value: userAnalytics.commuters,
-        icon: (
-          <Users size={16} color={ROLE_COLORS.commuters} strokeWidth={2.4} />
-        ),
-        iconBackground: "#E0F2FE",
-      },
-      {
-        label: "Drivers",
-        value: userAnalytics.drivers,
-        icon: (
-          <BusFront size={16} color={ROLE_COLORS.drivers} strokeWidth={2.4} />
-        ),
-        iconBackground: "#D1FAE5",
-      },
-      {
-        label: "Dispatchers",
-        value: userAnalytics.dispatchers,
-        icon: (
-          <Radio size={16} color={ROLE_COLORS.dispatchers} strokeWidth={2.4} />
-        ),
-        iconBackground: "#FEF3C7",
-      },
-      {
-        label: "Admins",
-        value: userAnalytics.admins,
-        icon: (
-          <CheckCircle2
-            size={16}
-            color={ROLE_COLORS.admins}
-            strokeWidth={2.4}
-          />
-        ),
-        iconBackground: "#EDE9FE",
-      },
-    ],
-    [userAnalytics],
-  );
-
-  /* ==========================================================
-     STAFF ANALYTICS DATA
-
-     Staff = driver + dispatcher + admin.
-  ========================================================== */
-
-  const staffChartData = useMemo<BarItem[]>(
-    () => [
-      {
-        label: "Drivers",
-        value: userAnalytics.drivers,
-        icon: <BusFront size={16} color="#059669" strokeWidth={2.4} />,
-        iconBackground: "#D1FAE5",
-      },
-      {
-        label: "Dispatchers",
-        value: userAnalytics.dispatchers,
-        icon: <Radio size={16} color="#D97706" strokeWidth={2.4} />,
-        iconBackground: "#FEF3C7",
-      },
-      {
-        label: "Admins",
-        value: userAnalytics.admins,
-        icon: <CheckCircle2 size={16} color="#7C3AED" strokeWidth={2.4} />,
-        iconBackground: "#EDE9FE",
-      },
-    ],
-    [userAnalytics.drivers, userAnalytics.dispatchers, userAnalytics.admins],
-  );
-
-  const totalStaff =
-    userAnalytics.drivers + userAnalytics.dispatchers + userAnalytics.admins;
 
   /* ==========================================================
      LOADING
@@ -685,27 +711,40 @@ export default function AdminDashboardScreen() {
 
             <SectionHeader
               title="Dashboard Analytics"
-              subtitle="Registered users and staff distribution"
+              subtitle="Users and jeepney operating statistics"
             />
 
             {/* USERS GRAPH */}
 
-            <AnimatedBarChart
+            <ApexAreaChart
               title="Users"
-              subtitle="Registered accounts by role"
+              subtitle="New registrations over the last 7 days"
               total={userAnalytics.total}
-              data={userChartData}
+              history={userAnalyticsHistory}
+              series={[
+                { name: "Commuters", key: "commuters", color: "#0284C7" },
+                { name: "Drivers", key: "drivers", color: "#059669" },
+                { name: "Dispatchers", key: "dispatchers", color: "#D97706" },
+                { name: "Admins", key: "admins", color: "#7C3AED" },
+              ]}
+              unit="registrations"
               loading={analyticsLoading}
             />
 
-            {/* STAFF GRAPH */}
+            {/* JEEPNEY STATS GRAPH */}
 
             <View className="mt-4">
-              <AnimatedBarChart
-                title="Staff"
-                subtitle="Drivers, dispatchers, and administrators"
-                total={totalStaff}
-                data={staffChartData}
+              <ApexAreaChart
+                title="Jeepney Stats"
+                subtitle="Daily trips, passengers, and operating jeepneys"
+                total={jeepneys.length}
+                history={jeepneyAnalyticsHistory}
+                series={[
+                  { name: "Trips", key: "trips", color: "#0284C7" },
+                  { name: "Passengers", key: "passengers", color: "#059669" },
+                  { name: "Jeepneys", key: "activeJeepneys", color: "#D97706" },
+                ]}
+                unit="count"
                 loading={analyticsLoading}
               />
             </View>
@@ -821,46 +860,186 @@ function SectionHeader({
 }
 
 /* ============================================================
-   ANIMATED BAR CHART
+   APEXCHARTS AREA CHART
+
+   ApexCharts is rendered inside react-native-webview because
+   ApexCharts uses browser DOM APIs. Data is passed as JSON.
 ============================================================ */
 
-function AnimatedBarChart({
+type ApexSeries = {
+  name: string;
+  key: string;
+  color: string;
+};
+
+function ApexAreaChart({
   title,
   subtitle,
   total,
-  data,
+  history,
+  series,
   loading,
+  unit,
 }: {
   title: string;
   subtitle: string;
   total: number;
-  data: BarItem[];
+  history: Array<Record<string, any>>;
+  series: ApexSeries[];
   loading: boolean;
+  unit: string;
 }) {
-  const maxValue = Math.max(1, ...data.map((item) => item.value));
+  const chartWidth = Math.max(300, Dimensions.get("window").width - 70);
+
+  const html = useMemo(() => {
+    const categories = history.map((point) => point.label);
+    const apexSeries = series.map((item) => ({
+      name: item.name,
+      data: history.map((point) => Number(point[item.key] ?? 0)),
+    }));
+    const chartColors = JSON.stringify(series.map((item) => item.color));
+    const tooltipUnit = JSON.stringify(unit);
+
+    return `<!DOCTYPE html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: transparent;
+  }
+  #chart {
+    width: 100%;
+    height: 100%;
+  }
+</style>
+</head>
+<body>
+<div id="chart"></div>
+<script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
+<script>
+  const options = {
+    chart: {
+      type: "area",
+      height: 270,
+      width: "100%",
+      background: "transparent",
+      toolbar: { show: false },
+      zoom: { enabled: false },
+      animations: {
+        enabled: true,
+        easing: "easeinout",
+        speed: 750,
+        animateGradually: { enabled: true, delay: 120 },
+        dynamicAnimation: { enabled: true, speed: 350 }
+      },
+      parentHeightOffset: 0,
+      foreColor: "#64748B"
+    },
+    series: ${JSON.stringify(apexSeries)},
+    colors: ${chartColors},
+    stroke: {
+      curve: "smooth",
+      width: 3
+    },
+    fill: {
+      type: "gradient",
+      gradient: {
+        shadeIntensity: 1,
+        opacityFrom: 0.38,
+        opacityTo: 0.05,
+        stops: [0, 88, 100]
+      }
+    },
+    markers: {
+      size: 4,
+      strokeWidth: 2,
+      hover: { size: 6 }
+    },
+    dataLabels: { enabled: false },
+    grid: {
+      borderColor: "#E2E8F0",
+      strokeDashArray: 4,
+      padding: { top: 6, right: 8, bottom: 0, left: 4 }
+    },
+    xaxis: {
+      categories: ${JSON.stringify(categories)},
+      labels: {
+        style: {
+          colors: "#64748B",
+          fontSize: "10px",
+          fontFamily: "Arial, sans-serif",
+          fontWeight: 600
+        }
+      },
+      axisBorder: { show: false },
+      axisTicks: { show: false }
+    },
+    yaxis: {
+      min: 0,
+      forceNiceScale: true,
+      labels: {
+        style: {
+          colors: "#64748B",
+          fontSize: "10px",
+          fontFamily: "Arial, sans-serif"
+        },
+        formatter: function(value) { return Math.round(value); }
+      }
+    },
+    legend: {
+      show: true,
+      position: "bottom",
+      horizontalAlign: "left",
+      fontSize: "10px",
+      fontFamily: "Arial, sans-serif",
+      fontWeight: 600,
+      markers: { width: 7, height: 7, radius: 7 },
+      itemMargin: { horizontal: 7, vertical: 3 }
+    },
+    tooltip: {
+      shared: true,
+      intersect: false,
+      theme: "light",
+      x: { show: true },
+      y: { formatter: function(value) { return Math.round(value) + " " + ${tooltipUnit}; } }
+    },
+    noData: {
+      text: "No analytics data available",
+      align: "center",
+      verticalAlign: "middle",
+      style: { color: "#64748B", fontSize: "11px" }
+    }
+  };
+
+  const chart = new ApexCharts(document.querySelector("#chart"), options);
+  chart.render();
+</script>
+</body>
+</html>`;
+  }, [history, series, unit]);
 
   return (
     <View
       className="rounded-[25px] border border-white/90 bg-clay-surface p-5"
       style={{
         shadowColor: "#000",
-        shadowOffset: {
-          width: 0,
-          height: 4,
-        },
+        shadowOffset: { width: 0, height: 4 },
         shadowOpacity: 0.045,
         shadowRadius: 9,
         elevation: 2,
       }}
     >
-      {/* HEADER */}
-
       <View className="flex-row items-start justify-between">
         <View className="flex-1">
           <Text className="text-[15px] font-extrabold text-ink-dark">
             {title}
           </Text>
-
           <Text className="mt-0.5 text-[10px] font-medium text-ink-muted">
             {subtitle}
           </Text>
@@ -870,171 +1049,42 @@ function AnimatedBarChart({
           <Text className="text-[21px] font-extrabold text-ink-dark">
             {total}
           </Text>
-
           <Text className="text-[9px] font-semibold uppercase tracking-[0.5px] text-ink-muted">
             Total
           </Text>
         </View>
       </View>
 
-      {/* CHART */}
-
-      <View className="mt-5">
+      <View className="mt-4 overflow-hidden rounded-[18px] bg-white/60">
         {loading ? (
-          <View className="py-7">
+          <View className="h-[270px] items-center justify-center">
             <ActivityIndicator size="small" color={colors.primaryDark} />
-
-            <Text className="mt-2 text-center text-[10px] font-medium text-ink-muted">
+            <Text className="mt-2 text-[10px] font-medium text-ink-muted">
               Loading analytics...
             </Text>
           </View>
-        ) : data.length === 0 ? (
-          <View className="items-center py-7">
-            <Text className="text-[11px] font-semibold text-ink-muted">
-              No data available
-            </Text>
-          </View>
         ) : (
-          data.map((item, index) => (
-            <AnimatedBarRow
-              key={item.label}
-              item={item}
-              maxValue={maxValue}
-              index={index}
-            />
-          ))
+          <WebView
+            originWhitelist={["*"]}
+            source={{ html }}
+            style={{
+              width: chartWidth,
+              height: 270,
+              backgroundColor: "transparent",
+            }}
+            scrollEnabled={false}
+            bounces={false}
+            showsHorizontalScrollIndicator={false}
+            showsVerticalScrollIndicator={false}
+            javaScriptEnabled
+            domStorageEnabled
+            setSupportMultipleWindows={false}
+            automaticallyAdjustContentInsets={false}
+          />
         )}
       </View>
     </View>
   );
-}
-
-/* ============================================================
-   ANIMATED BAR ROW
-============================================================ */
-
-function AnimatedBarRow({
-  item,
-  maxValue,
-  index,
-}: {
-  item: BarItem;
-  maxValue: number;
-  index: number;
-}) {
-  const progress = useRef(new Animated.Value(0)).current;
-
-  const percentage = maxValue > 0 ? item.value / maxValue : 0;
-
-  useEffect(() => {
-    progress.stopAnimation();
-    progress.setValue(0);
-
-    const animation = Animated.timing(progress, {
-      toValue: percentage,
-      duration: 1000,
-      delay: index * 140,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: false,
-    });
-
-    animation.start();
-
-    return () => {
-      animation.stop();
-    };
-  }, [item.value, percentage, index, progress]);
-
-  const animatedWidth = progress.interpolate({
-    inputRange: [0, 1],
-    outputRange: ["0%", "100%"],
-  });
-
-  const animatedOpacity = progress.interpolate({
-    inputRange: [0, 0.08, 1],
-    outputRange: [0.35, 1, 1],
-  });
-
-  const barColor = getBarColor(item.label);
-
-  return (
-    <View className="mb-4">
-      {/* LABEL */}
-
-      <View className="mb-1.5 flex-row items-center">
-        <View
-          className="h-[30px] w-[30px] items-center justify-center rounded-[10px]"
-          style={{
-            backgroundColor: item.iconBackground ?? "#E0F2FE",
-          }}
-        >
-          {item.icon}
-        </View>
-
-        <Text className="ml-2 flex-1 text-[11px] font-bold text-ink-secondary">
-          {item.label}
-        </Text>
-
-        <Text className="text-[12px] font-extrabold text-ink-dark">
-          {item.value}
-        </Text>
-      </View>
-
-      {/* BAR */}
-
-      <View className="ml-[38px] h-[10px] overflow-hidden rounded-full bg-slate-100">
-        <Animated.View
-          className="h-full rounded-full"
-          style={{
-            width: animatedWidth,
-            opacity: animatedOpacity,
-            backgroundColor: barColor,
-          }}
-        />
-      </View>
-    </View>
-  );
-}
-
-/* ============================================================
-   BAR COLOR
-============================================================ */
-
-function getBarColor(label: string) {
-  switch (label) {
-    case "Waiting":
-      return STATUS_COLORS.waiting;
-
-    case "Loading":
-      return STATUS_COLORS.loading;
-
-    case "En Route":
-      return STATUS_COLORS.enRoute;
-
-    case "Arrived":
-      return STATUS_COLORS.arrived;
-
-    case "Dispatched":
-      return STATUS_COLORS.dispatched;
-
-    case "Inactive":
-      return STATUS_COLORS.inactive;
-
-    case "Commuters":
-      return ROLE_COLORS.commuters;
-
-    case "Drivers":
-      return ROLE_COLORS.drivers;
-
-    case "Dispatchers":
-      return ROLE_COLORS.dispatchers;
-
-    case "Admins":
-      return ROLE_COLORS.admins;
-
-    default:
-      return colors.primaryDark;
-  }
 }
 
 /* ============================================================

@@ -54,9 +54,8 @@ export default {
 
     plugins: [
       "expo-router",
-
       "@react-native-vector-icons/ionicons",
-
+      "expo-sharing",
       [
         "expo-notifications",
         {

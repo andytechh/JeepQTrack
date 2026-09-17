@@ -1,18 +1,27 @@
+import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
 import {
   AlertTriangle,
   ArrowLeft,
   BusFront,
+  Camera,
   Check,
   ChevronDown,
+  Image as ImageIcon,
   MapPin,
+  Trash2,
   UserRound,
   Users,
+  XCircle,
 } from "lucide-react-native";
 import { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Image,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
   Pressable,
   ScrollView,
   Text,
@@ -44,6 +53,9 @@ export default function AddJeepneyScreen() {
   const [plateNumber, setPlateNumber] = useState("");
   const [jeepName, setJeepName] = useState("");
   const [capacity, setCapacity] = useState("24");
+  const [imageUri, setImageUri] = useState<string | null>(null);
+  const [imageUploading, setImageUploading] = useState(false);
+  const [imageSourceVisible, setImageSourceVisible] = useState(false);
 
   const [terminals, setTerminals] = useState<Terminal[]>([]);
   const [drivers, setDrivers] = useState<Driver[]>([]);
@@ -74,6 +86,7 @@ export default function AddJeepneyScreen() {
       const [
         { data: terminalData, error: terminalError },
         { data: driverData, error: driverError },
+        { data: assignedJeepneys, error: assignedJeepneysError },
       ] = await Promise.all([
         supabase
           .from("terminals")
@@ -90,6 +103,13 @@ export default function AddJeepneyScreen() {
           .order("full_name", {
             ascending: true,
           }),
+
+        // A driver is unavailable whenever their driver_id is already
+        // attached to any existing jeepney. Status does not matter here.
+        supabase
+          .from("jeepneys")
+          .select("driver_id")
+          .not("driver_id", "is", null),
       ]);
 
       if (terminalError) {
@@ -99,6 +119,16 @@ export default function AddJeepneyScreen() {
       if (driverError) {
         throw driverError;
       }
+
+      if (assignedJeepneysError) {
+        throw assignedJeepneysError;
+      }
+
+      const assignedDriverIds = new Set(
+        (assignedJeepneys ?? [])
+          .map((jeepney: any) => jeepney.driver_id)
+          .filter(Boolean),
+      );
 
       const normalizedTerminals: Terminal[] = (terminalData ?? []).map(
         (terminal: any) => ({
@@ -110,12 +140,12 @@ export default function AddJeepneyScreen() {
         }),
       );
 
-      const normalizedDrivers: Driver[] = (driverData ?? []).map(
-        (driver: any) => ({
+      const normalizedDrivers: Driver[] = (driverData ?? [])
+        .filter((driver: any) => !assignedDriverIds.has(driver.id))
+        .map((driver: any) => ({
           id: driver.id,
           name: driver.full_name || driver.name || "Unnamed Driver",
-        }),
-      );
+        }));
 
       setTerminals(normalizedTerminals);
       setDrivers(normalizedDrivers);
@@ -145,6 +175,128 @@ export default function AddJeepneyScreen() {
     }
 
     router.replace("/staff/(admin)/jeepneys");
+  };
+
+  const pickImage = async () => {
+    if (saving || imageUploading) return;
+
+    try {
+      const permission =
+        await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permission.granted) {
+        Alert.alert(
+          "Photo Access Required",
+          "Allow photo access so you can select a jeepney picture.",
+        );
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ["images"],
+        allowsEditing: true,
+        aspect: [4, 3],
+        quality: 0.8,
+      });
+
+      if (!result.canceled && result.assets?.[0]?.uri) {
+        setImageUri(result.assets[0].uri);
+      }
+    } catch (err) {
+      console.error("Failed to select jeepney image:", err);
+      Alert.alert(
+        "Unable to Select Photo",
+        "The jeepney photo could not be selected.",
+      );
+    }
+  };
+
+  const takePhoto = async () => {
+    if (saving || imageUploading) return;
+
+    try {
+      const permission = await ImagePicker.requestCameraPermissionsAsync();
+      if (!permission.granted) {
+        Alert.alert(
+          "Camera Access Required",
+          "Allow camera access so you can take a jeepney picture.",
+        );
+        return;
+      }
+
+      const result = await ImagePicker.launchCameraAsync({
+        allowsEditing: true,
+        aspect: [4, 3],
+        quality: 0.8,
+      });
+
+      if (!result.canceled && result.assets?.[0]?.uri) {
+        setImageUri(result.assets[0].uri);
+      }
+    } catch (err) {
+      console.error("Failed to take jeepney image:", err);
+      Alert.alert(
+        "Unable to Take Photo",
+        "The jeepney photo could not be captured.",
+      );
+    }
+  };
+
+  const chooseImageSource = () => {
+    if (saving || imageUploading) return;
+    setImageSourceVisible(true);
+  };
+
+  const uploadJeepneyImage = async (jeepneyId: string, uri: string) => {
+    setImageUploading(true);
+    try {
+      const response = await fetch(uri);
+      if (!response.ok) throw new Error("Unable to read the selected image.");
+
+      const arrayBuffer = await response.arrayBuffer();
+      const extension =
+        uri
+          .split(".")
+          .pop()
+          ?.split("?")[0]
+          ?.toLowerCase()
+          .replace(/[^a-z0-9]/g, "") || "jpg";
+      const contentType =
+        extension === "png"
+          ? "image/png"
+          : extension === "webp"
+            ? "image/webp"
+            : "image/jpeg";
+      const path = `${jeepneyId}/profile`;
+
+      const { error: uploadError } = await supabase.storage
+        .from("jeepney-images")
+        .upload(path, arrayBuffer, {
+          contentType,
+          upsert: true,
+          cacheControl: "3600",
+        });
+
+      if (uploadError) throw uploadError;
+
+      const { data } = supabase.storage
+        .from("jeepney-images")
+        .getPublicUrl(path);
+      if (!data.publicUrl)
+        throw new Error(
+          "The image was uploaded but no public URL was returned.",
+        );
+
+      const imageUrl = `${data.publicUrl}?v=${Date.now()}`;
+      const { error: databaseError } = await supabase
+        .from("jeepneys")
+        .update({ image_url: imageUrl })
+        .eq("id", jeepneyId);
+
+      if (databaseError) throw databaseError;
+      return imageUrl;
+    } finally {
+      setImageUploading(false);
+    }
   };
 
   const handleSave = async () => {
@@ -212,6 +364,7 @@ export default function AddJeepneyScreen() {
           current_longitude: null,
           terminal_id: selectedTerminal.terminal_number,
           loading_ends_at: null,
+          image_url: null,
         })
         .select("id")
         .single();
@@ -238,12 +391,27 @@ export default function AddJeepneyScreen() {
         });
 
       if (assignmentError) {
-        /*
-         * Roll the jeepney back if terminal assignment fails.
-         */
         await supabase.from("jeepneys").delete().eq("id", jeepney.id);
-
         throw assignmentError;
+      }
+
+      if (imageUri) {
+        try {
+          setImageUploading(true);
+          await uploadJeepneyImage(jeepney.id, imageUri);
+        } catch (imageError: any) {
+          console.error("Failed to upload jeepney image:", imageError);
+          await supabase
+            .from("terminal_jeepneys")
+            .delete()
+            .eq("jeepney_id", jeepney.id);
+          await supabase.from("jeepneys").delete().eq("id", jeepney.id);
+          throw new Error(
+            imageError?.message ?? "The jeepney photo could not be uploaded.",
+          );
+        } finally {
+          setImageUploading(false);
+        }
       }
 
       Alert.alert(
@@ -326,24 +494,60 @@ export default function AddJeepneyScreen() {
 
           <View className="mt-5 rounded-[27px] border border-white/90 bg-clay-surface p-5">
             <View className="flex-row items-center">
-              <View className="h-[58px] w-[58px] items-center justify-center rounded-[19px] bg-ocean-100">
-                <BusFront
-                  size={28}
-                  color={colors.primaryDark}
-                  strokeWidth={2.3}
-                />
-              </View>
+              <BusFront size={58} />
 
               <View className="ml-4 flex-1">
                 <Text className="text-[15px] font-extrabold text-ink-dark">
                   Register Jeepney
                 </Text>
-
                 <Text className="mt-1 text-[10px] leading-[16px] text-ink-muted">
                   Add the jeepney to the fleet and assign its operating
                   terminal.
                 </Text>
               </View>
+            </View>
+
+            <View className="mt-5 items-center">
+              <View className="h-[160px] w-full overflow-hidden rounded-[22px] border border-white bg-slate-100">
+                {imageUri ? (
+                  <Image
+                    source={{ uri: imageUri }}
+                    className="h-full w-full"
+                    resizeMode="cover"
+                  />
+                ) : (
+                  <View className="flex-1 items-center justify-center">
+                    <ImageIcon size={42} color="#94A3B8" strokeWidth={1.8} />
+                    <Text className="mt-2 text-[10px] font-bold text-slate-400">
+                      No photo selected
+                    </Text>
+                  </View>
+                )}
+              </View>
+
+              <Pressable
+                disabled={saving}
+                onPress={chooseImageSource}
+                className="mt-3 flex-row items-center rounded-full bg-ocean-400 px-5 py-3"
+              >
+                <Camera size={16} color="#FFFFFF" strokeWidth={2.4} />
+                <Text className="ml-2 text-[11px] font-extrabold text-white">
+                  {imageUri ? "Change Photo" : "Add Photo"}
+                </Text>
+              </Pressable>
+
+              {imageUri && (
+                <Pressable
+                  disabled={saving}
+                  onPress={() => setImageUri(null)}
+                  className="mt-2 flex-row items-center rounded-full px-4 py-2"
+                >
+                  <Trash2 size={14} color="#DC2626" strokeWidth={2.3} />
+                  <Text className="ml-1.5 text-[10px] font-extrabold text-red-600">
+                    Remove Photo
+                  </Text>
+                </Pressable>
+              )}
             </View>
           </View>
 
@@ -644,7 +848,11 @@ export default function AddJeepneyScreen() {
             )}
 
             <Text className="ml-2 text-[12px] font-extrabold text-white">
-              {saving ? "Adding Jeepney..." : "Add Jeepney"}
+              {imageUploading
+                ? "Uploading Photo..."
+                : saving
+                  ? "Adding Jeepney..."
+                  : "Add Jeepney"}
             </Text>
           </Pressable>
 
@@ -658,6 +866,25 @@ export default function AddJeepneyScreen() {
             </Text>
           </Pressable>
         </ScrollView>
+
+        <ImageSourceModal
+          visible={imageSourceVisible}
+          hasImage={Boolean(imageUri)}
+          saving={saving || imageUploading}
+          onClose={() => setImageSourceVisible(false)}
+          onGallery={async () => {
+            setImageSourceVisible(false);
+            await pickImage();
+          }}
+          onCamera={async () => {
+            setImageSourceVisible(false);
+            await takePhoto();
+          }}
+          onRemove={() => {
+            setImageUri(null);
+            setImageSourceVisible(false);
+          }}
+        />
       </SafeAreaView>
     </OceanBackground>
   );
@@ -723,5 +950,129 @@ function XIcon() {
       <View className="absolute h-[2px] w-[12px] rotate-45 rounded-full bg-slate-500" />
       <View className="absolute h-[2px] w-[12px] -rotate-45 rounded-full bg-slate-500" />
     </View>
+  );
+}
+
+function ImageSourceModal({
+  visible,
+  hasImage,
+  saving,
+  onClose,
+  onGallery,
+  onCamera,
+  onRemove,
+}: {
+  visible: boolean;
+  hasImage: boolean;
+  saving: boolean;
+  onClose: () => void;
+  onGallery: () => void | Promise<void>;
+  onCamera: () => void | Promise<void>;
+  onRemove: () => void;
+}) {
+  return (
+    <Modal
+      visible={visible}
+      transparent
+      animationType="fade"
+      onRequestClose={onClose}
+    >
+      <KeyboardAvoidingView
+        className="flex-1"
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+      >
+        <View className="flex-1 items-center justify-center bg-black/35 px-5">
+          <View className="w-full max-w-[390px] rounded-[30px] border border-white/95 bg-clay-surface p-5">
+            <View className="flex-row items-center">
+              <View className="h-[48px] w-[48px] items-center justify-center rounded-[16px] bg-ocean-100">
+                <Camera
+                  size={22}
+                  color={colors.primaryDark}
+                  strokeWidth={2.4}
+                />
+              </View>
+              <View className="ml-3 flex-1">
+                <Text className="text-[16px] font-extrabold text-ink-dark">
+                  Jeepney Photo
+                </Text>
+                <Text className="mt-0.5 text-[10px] leading-[15px] text-ink-muted">
+                  Choose a photo source for this jeepney.
+                </Text>
+              </View>
+              <Pressable
+                disabled={saving}
+                onPress={onClose}
+                className="h-[38px] w-[38px] items-center justify-center rounded-full bg-slate-100"
+              >
+                <XCircle size={19} color="#64748B" strokeWidth={2.3} />
+              </Pressable>
+            </View>
+
+            <Pressable
+              disabled={saving}
+              onPress={onGallery}
+              className="mt-5 flex-row items-center rounded-[21px] border border-white/90 bg-white px-4 py-4"
+            >
+              <View className="h-[42px] w-[42px] items-center justify-center rounded-[14px] bg-ocean-100">
+                <ImageIcon
+                  size={20}
+                  color={colors.primaryDark}
+                  strokeWidth={2.3}
+                />
+              </View>
+              <View className="ml-3 flex-1">
+                <Text className="text-[12px] font-extrabold text-ink-dark">
+                  Choose from Gallery
+                </Text>
+                <Text className="mt-0.5 text-[10px] text-ink-muted">
+                  Select an existing jeepney picture.
+                </Text>
+              </View>
+            </Pressable>
+
+            <Pressable
+              disabled={saving}
+              onPress={onCamera}
+              className="mt-3 flex-row items-center rounded-[21px] border border-white/90 bg-white px-4 py-4"
+            >
+              <View className="h-[42px] w-[42px] items-center justify-center rounded-[14px] bg-sky-100">
+                <Camera size={20} color="#0284C7" strokeWidth={2.3} />
+              </View>
+              <View className="ml-3 flex-1">
+                <Text className="text-[12px] font-extrabold text-ink-dark">
+                  Take Photo
+                </Text>
+                <Text className="mt-0.5 text-[10px] text-ink-muted">
+                  Use the device camera.
+                </Text>
+              </View>
+            </Pressable>
+
+            {hasImage && (
+              <Pressable
+                disabled={saving}
+                onPress={onRemove}
+                className="mt-3 flex-row items-center justify-center rounded-full bg-red-50 py-3.5"
+              >
+                <Trash2 size={16} color="#DC2626" strokeWidth={2.3} />
+                <Text className="ml-2 text-[11px] font-extrabold text-red-600">
+                  Remove Photo
+                </Text>
+              </Pressable>
+            )}
+
+            <Pressable
+              disabled={saving}
+              onPress={onClose}
+              className="mt-3 items-center rounded-full bg-slate-100 py-3.5"
+            >
+              <Text className="text-[11px] font-extrabold text-ink-secondary">
+                Cancel
+              </Text>
+            </Pressable>
+          </View>
+        </View>
+      </KeyboardAvoidingView>
+    </Modal>
   );
 }

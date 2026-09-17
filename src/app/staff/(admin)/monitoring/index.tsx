@@ -1,19 +1,28 @@
+import { useRouter } from "expo-router";
 import {
   Activity,
+  ArrowLeft,
   BarChart3,
   BusFront,
   CheckCircle2,
   Clock3,
+  Download,
+  Eye,
+  FileSpreadsheet,
+  FileText,
   RefreshCw,
   Route,
   TrendingUp,
   UserRound,
   Users,
+  X,
   XCircle,
 } from "lucide-react-native";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
+  Modal,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -21,6 +30,12 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+
+import {
+  exportReportToExcel,
+  exportReportToPdf,
+  type MonitoringReportLog,
+} from "@/src/shared/services/admin/AdminReportService";
 
 import OceanBackground from "@/src/shared/components/clay/OceanBackground";
 import { colors } from "@/src/shared/constants/theme";
@@ -68,7 +83,54 @@ export default function AdminMonitoringScreen() {
     period,
     setPeriod,
     refresh,
+    reportLogs,
+    generatingReport,
+    generateReport,
   } = useAdminMonitoring();
+
+  const router = useRouter();
+  const [selectedReport, setSelectedReport] =
+    useState<MonitoringReportLog | null>(null);
+  const [exporting, setExporting] = useState<string | null>(null);
+
+  const handleGenerateReport = async () => {
+    const report = await generateReport();
+
+    if (report) {
+      Alert.alert(
+        "Report Generated",
+        "The report snapshot has been saved to the JeepQTrack cloud report history.",
+      );
+    }
+  };
+
+  const handleExportPdf = async (report: MonitoringReportLog) => {
+    try {
+      setExporting(`${report.id}:pdf`);
+      await exportReportToPdf(report);
+    } catch (err: any) {
+      Alert.alert(
+        "PDF Export Failed",
+        err?.message || "Unable to export the report as PDF.",
+      );
+    } finally {
+      setExporting(null);
+    }
+  };
+
+  const handleExportExcel = async (report: MonitoringReportLog) => {
+    try {
+      setExporting(`${report.id}:excel`);
+      await exportReportToExcel(report);
+    } catch (err: any) {
+      Alert.alert(
+        "Excel Export Failed",
+        err?.message || "Unable to export the report as Excel.",
+      );
+    } finally {
+      setExporting(null);
+    }
+  };
 
   const maxTerminalTrips = useMemo(() => {
     return Math.max(...(terminalStats ?? []).map((item) => item.totalTrips), 1);
@@ -133,13 +195,18 @@ export default function AdminMonitoringScreen() {
           {/* HEADER */}
 
           <View className="flex-row items-center">
-            <View className="h-[50px] w-[50px] items-center justify-center rounded-[18px] bg-ocean-100">
-              <Activity
-                size={24}
+            <Pressable
+              onPress={() => router.back()}
+              className="h-[48px] w-[48px] items-center justify-center rounded-[16px] bg-white/80"
+              accessibilityRole="button"
+              accessibilityLabel="Go back"
+            >
+              <ArrowLeft
+                size={19}
                 color={colors.primaryDark}
-                strokeWidth={2.4}
+                strokeWidth={2.5}
               />
-            </View>
+            </Pressable>
 
             <View className="ml-3 flex-1">
               <Text className="text-[10px] font-extrabold uppercase tracking-[1.3px] text-ocean-700">
@@ -197,6 +264,179 @@ export default function AdminMonitoringScreen() {
               );
             })}
           </ScrollView>
+
+          {/* CLOUD REPORTS */}
+
+          <View className="mt-5 rounded-[26px] border border-white/90 bg-clay-surface p-5">
+            <View className="flex-row items-center">
+              <View className="h-[44px] w-[44px] items-center justify-center rounded-[15px] bg-ocean-100">
+                <FileText
+                  size={20}
+                  color={colors.primaryDark}
+                  strokeWidth={2.3}
+                />
+              </View>
+
+              <View className="ml-3 flex-1">
+                <Text className="text-[14px] font-extrabold text-ink-dark">
+                  Cloud Reports
+                </Text>
+                <Text className="mt-0.5 text-[9px] leading-[14px] text-ink-muted">
+                  Save the current monitoring snapshot to the cloud and export
+                  it as PDF or Excel.
+                </Text>
+              </View>
+            </View>
+
+            <Pressable
+              onPress={handleGenerateReport}
+              disabled={generatingReport}
+              className={`mt-4 flex-row items-center justify-center rounded-[18px] py-3.5 ${
+                generatingReport ? "bg-ocean-200" : "bg-ocean-400"
+              }`}
+            >
+              {generatingReport ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <FileText size={16} color="#FFFFFF" strokeWidth={2.4} />
+              )}
+              <Text className="ml-2 text-[11px] font-extrabold text-white">
+                {generatingReport
+                  ? "Saving Report..."
+                  : "Generate Cloud Report"}
+              </Text>
+            </Pressable>
+          </View>
+
+          <SectionTitle
+            icon={<FileText size={18} color={colors.primaryDark} />}
+            title="Report History"
+            subtitle={`${reportLogs.length} saved cloud reports`}
+          />
+
+          {reportLogs.length === 0 ? (
+            <EmptyCard label="No generated cloud reports yet." />
+          ) : (
+            reportLogs.slice(0, 10).map((report) => {
+              const reportStats = report.report_data?.stats;
+              const pdfBusy = exporting === `${report.id}:pdf`;
+              const excelBusy = exporting === `${report.id}:excel`;
+
+              return (
+                <View
+                  key={report.id}
+                  className="mb-3 rounded-[23px] border border-white/90 bg-clay-surface p-5"
+                >
+                  <View className="flex-row items-center">
+                    <View className="h-[42px] w-[42px] items-center justify-center rounded-[14px] bg-ocean-100">
+                      <FileText
+                        size={18}
+                        color={colors.primaryDark}
+                        strokeWidth={2.3}
+                      />
+                    </View>
+
+                    <View className="ml-3 flex-1">
+                      <Text className="text-[12px] font-extrabold text-ink-dark">
+                        {report.period === "today"
+                          ? "Today"
+                          : report.period === "7d"
+                            ? "Last 7 Days"
+                            : report.period === "30d"
+                              ? "Last 30 Days"
+                              : "All Records"}
+                      </Text>
+                      <Text className="mt-0.5 text-[9px] text-ink-muted">
+                        Generated {formatDateTime(report.generated_at)} ·{" "}
+                        {report.generated_by_name || "Administrator"}
+                      </Text>
+                    </View>
+                  </View>
+
+                  <View className="mt-4 flex-row">
+                    <Metric
+                      label="Trips"
+                      value={String(
+                        reportStats?.totalTrips ?? report.total_trips,
+                      )}
+                    />
+                    <Metric
+                      label="Passengers"
+                      value={String(
+                        reportStats?.totalPassengers ?? report.total_passengers,
+                      )}
+                    />
+                    <Metric
+                      label="Completed"
+                      value={String(
+                        reportStats?.completedTrips ?? report.completed_trips,
+                      )}
+                    />
+                  </View>
+
+                  <View className="mt-4 flex-row">
+                    <Pressable
+                      onPress={() => setSelectedReport(report)}
+                      className="mr-2 flex-1 flex-row items-center justify-center rounded-[15px] bg-ocean-100 py-3"
+                    >
+                      <Eye
+                        size={14}
+                        color={colors.primaryDark}
+                        strokeWidth={2.4}
+                      />
+                      <Text className="ml-1.5 text-[9px] font-extrabold text-ocean-700">
+                        View
+                      </Text>
+                    </Pressable>
+
+                    <Pressable
+                      onPress={() => handleExportPdf(report)}
+                      disabled={!!exporting}
+                      className="mr-2 flex-1 flex-row items-center justify-center rounded-[15px] bg-slate-100 py-3"
+                    >
+                      {pdfBusy ? (
+                        <ActivityIndicator
+                          size="small"
+                          color={colors.primaryDark}
+                        />
+                      ) : (
+                        <Download
+                          size={14}
+                          color={colors.primaryDark}
+                          strokeWidth={2.4}
+                        />
+                      )}
+                      <Text className="ml-1.5 text-[9px] font-extrabold text-ink-secondary">
+                        PDF
+                      </Text>
+                    </Pressable>
+
+                    <Pressable
+                      onPress={() => handleExportExcel(report)}
+                      disabled={!!exporting}
+                      className="flex-1 flex-row items-center justify-center rounded-[15px] bg-slate-100 py-3"
+                    >
+                      {excelBusy ? (
+                        <ActivityIndicator
+                          size="small"
+                          color={colors.primaryDark}
+                        />
+                      ) : (
+                        <FileSpreadsheet
+                          size={14}
+                          color={colors.primaryDark}
+                          strokeWidth={2.4}
+                        />
+                      )}
+                      <Text className="ml-1.5 text-[9px] font-extrabold text-ink-secondary">
+                        Excel
+                      </Text>
+                    </Pressable>
+                  </View>
+                </View>
+              );
+            })
+          )}
 
           {/* ERROR */}
 
@@ -759,6 +999,124 @@ export default function AdminMonitoringScreen() {
             ))
           )}
         </ScrollView>
+
+        <Modal
+          visible={!!selectedReport}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setSelectedReport(null)}
+        >
+          <View className="flex-1 justify-end bg-black/30">
+            <View className="max-h-[82%] rounded-t-[30px] bg-clay-surface px-5 pb-8 pt-5">
+              <View className="flex-row items-center">
+                <View className="h-[42px] w-[42px] items-center justify-center rounded-[14px] bg-ocean-100">
+                  <FileText
+                    size={18}
+                    color={colors.primaryDark}
+                    strokeWidth={2.3}
+                  />
+                </View>
+
+                <View className="ml-3 flex-1">
+                  <Text className="text-[15px] font-extrabold text-ink-dark">
+                    Report Details
+                  </Text>
+                  <Text className="mt-0.5 text-[9px] text-ink-muted">
+                    {selectedReport
+                      ? formatDateTime(selectedReport.generated_at)
+                      : ""}
+                  </Text>
+                </View>
+
+                <Pressable
+                  onPress={() => setSelectedReport(null)}
+                  className="h-[38px] w-[38px] items-center justify-center rounded-full bg-slate-100"
+                >
+                  <X size={17} color={colors.primaryDark} strokeWidth={2.4} />
+                </Pressable>
+              </View>
+
+              {selectedReport && (
+                <ScrollView
+                  showsVerticalScrollIndicator={false}
+                  className="mt-5"
+                  contentContainerStyle={{ paddingBottom: 12 }}
+                >
+                  <View className="flex-row flex-wrap justify-between">
+                    <StatCard
+                      icon={<Route size={19} color={colors.primaryDark} />}
+                      label="Total Trips"
+                      value={String(
+                        selectedReport.report_data?.stats?.totalTrips ??
+                          selectedReport.total_trips,
+                      )}
+                    />
+                    <StatCard
+                      icon={<Users size={19} color={colors.primaryDark} />}
+                      label="Passengers"
+                      value={String(
+                        selectedReport.report_data?.stats?.totalPassengers ??
+                          selectedReport.total_passengers,
+                      )}
+                    />
+                    <StatCard
+                      icon={
+                        <CheckCircle2 size={19} color={colors.primaryDark} />
+                      }
+                      label="Completed"
+                      value={String(
+                        selectedReport.report_data?.stats?.completedTrips ??
+                          selectedReport.completed_trips,
+                      )}
+                    />
+                    <StatCard
+                      icon={<Activity size={19} color={colors.primaryDark} />}
+                      label="Activity Logs"
+                      value={String(
+                        selectedReport.report_data?.stats?.totalActivityLogs ??
+                          selectedReport.total_activity_logs,
+                      )}
+                    />
+                  </View>
+
+                  <Text className="mt-2 text-[10px] leading-[16px] text-ink-secondary">
+                    This report is a cloud snapshot of the selected monitoring
+                    period. The original trip and activity records remain in the
+                    operational tables.
+                  </Text>
+
+                  <View className="mt-4 flex-row">
+                    <Pressable
+                      onPress={() => handleExportPdf(selectedReport)}
+                      disabled={!!exporting}
+                      className="mr-2 flex-1 flex-row items-center justify-center rounded-[17px] bg-ocean-400 py-3.5"
+                    >
+                      <Download size={15} color="#FFFFFF" strokeWidth={2.4} />
+                      <Text className="ml-2 text-[10px] font-extrabold text-white">
+                        Export PDF
+                      </Text>
+                    </Pressable>
+
+                    <Pressable
+                      onPress={() => handleExportExcel(selectedReport)}
+                      disabled={!!exporting}
+                      className="flex-1 flex-row items-center justify-center rounded-[17px] bg-ocean-100 py-3.5"
+                    >
+                      <FileSpreadsheet
+                        size={15}
+                        color={colors.primaryDark}
+                        strokeWidth={2.4}
+                      />
+                      <Text className="ml-2 text-[10px] font-extrabold text-ocean-700">
+                        Export Excel
+                      </Text>
+                    </Pressable>
+                  </View>
+                </ScrollView>
+              )}
+            </View>
+          </View>
+        </Modal>
       </SafeAreaView>
     </OceanBackground>
   );
@@ -902,6 +1260,26 @@ function formatDate(value: string | null) {
   return date.toLocaleDateString("en-US", {
     month: "short",
     day: "numeric",
+  });
+}
+
+function formatDateTime(value: string | null | undefined) {
+  if (!value) {
+    return "—";
+  }
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return "—";
+  }
+
+  return date.toLocaleString("en-PH", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
   });
 }
 

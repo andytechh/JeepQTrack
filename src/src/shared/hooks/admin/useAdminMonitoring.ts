@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "../../config/supabase";
+import {
+  createReportLog,
+  getReportHistory,
+  type MonitoringReportLog,
+  type ReportSnapshot,
+} from "../../services/admin/AdminReportService";
 
 export type MonitoringPeriod = "today" | "7d" | "30d" | "all";
 
@@ -111,6 +117,8 @@ export interface ActionStats {
   count: number;
 }
 
+export type { MonitoringReportLog };
+
 export interface MonitoringResult {
   activityLogs: ActivityLogRecord[];
   trips: TripMonitoringRecord[];
@@ -121,6 +129,8 @@ export interface MonitoringResult {
   dailyTrips: DailyTripStats[];
   dailyActivity: DailyActivityStats[];
   actionStats: ActionStats[];
+  reportLogs: MonitoringReportLog[];
+  generatingReport: boolean;
 
   loading: boolean;
   refreshing: boolean;
@@ -130,6 +140,7 @@ export interface MonitoringResult {
   setPeriod: (period: MonitoringPeriod) => void;
 
   refresh: () => Promise<void>;
+  generateReport: () => Promise<MonitoringReportLog | null>;
 }
 
 interface UserRecord {
@@ -323,6 +334,10 @@ export function useAdminMonitoring(): MonitoringResult {
 
   const [actionStats, setActionStats] = useState<ActionStats[]>([]);
 
+  const [reportLogs, setReportLogs] = useState<MonitoringReportLog[]>([]);
+
+  const [generatingReport, setGeneratingReport] = useState(false);
+
   const [period, setPeriod] = useState<MonitoringPeriod>("7d");
 
   const [loading, setLoading] = useState(true);
@@ -394,7 +409,7 @@ export function useAdminMonitoring(): MonitoringResult {
           .limit(300);
 
         if (periodStart) {
-          tripQuery = tripQuery.gte("created_at", periodStart);
+          tripQuery = tripQuery.gte("departure_time", periodStart);
           activityQuery = activityQuery.gte("created_at", periodStart);
         }
 
@@ -854,6 +869,14 @@ export function useAdminMonitoring(): MonitoringResult {
           }))
           .sort((a, b) => b.count - a.count);
 
+        let savedReports: MonitoringReportLog[] = [];
+
+        try {
+          savedReports = await getReportHistory(25);
+        } catch (reportError) {
+          console.warn("Failed to load report history:", reportError);
+        }
+
         if (!mountedRef.current) {
           return;
         }
@@ -875,6 +898,7 @@ export function useAdminMonitoring(): MonitoringResult {
         setDailyActivity(calculatedDailyActivity);
 
         setActionStats(calculatedActionStats);
+        setReportLogs(savedReports);
       } catch (err: any) {
         console.error("Failed to load admin monitoring:", err);
 
@@ -965,6 +989,20 @@ export function useAdminMonitoring(): MonitoringResult {
       {
         event: "*",
         schema: "public",
+        table: "report_logs",
+      },
+      () => {
+        if (active) {
+          void loadMonitoring(true);
+        }
+      },
+    );
+
+    channel.on(
+      "postgres_changes",
+      {
+        event: "*",
+        schema: "public",
         table: "users",
       },
       () => {
@@ -1003,6 +1041,66 @@ export function useAdminMonitoring(): MonitoringResult {
     };
   }, [loadMonitoring]);
 
+  const generateReport =
+    useCallback(async (): Promise<MonitoringReportLog | null> => {
+      if (generatingReport) {
+        return null;
+      }
+
+      try {
+        setGeneratingReport(true);
+
+        const snapshot: ReportSnapshot = {
+          stats,
+          terminalStats,
+          staffStats,
+          jeepneyStats,
+          dailyTrips,
+          dailyActivity,
+          actionStats,
+          trips,
+          activityLogs,
+        };
+
+        const report = await createReportLog(period, snapshot);
+
+        if (mountedRef.current) {
+          setReportLogs((current) =>
+            [report, ...current.filter((item) => item.id !== report.id)].slice(
+              0,
+              25,
+            ),
+          );
+        }
+
+        return report;
+      } catch (err: any) {
+        console.error("Failed to generate admin report:", err);
+
+        if (mountedRef.current) {
+          setError(err?.message || "Unable to generate report.");
+        }
+
+        return null;
+      } finally {
+        if (mountedRef.current) {
+          setGeneratingReport(false);
+        }
+      }
+    }, [
+      generatingReport,
+      period,
+      stats,
+      terminalStats,
+      staffStats,
+      jeepneyStats,
+      dailyTrips,
+      dailyActivity,
+      actionStats,
+      trips,
+      activityLogs,
+    ]);
+
   const refresh = useCallback(async () => {
     await loadMonitoring(true);
   }, [loadMonitoring]);
@@ -1017,6 +1115,8 @@ export function useAdminMonitoring(): MonitoringResult {
     dailyTrips,
     dailyActivity,
     actionStats,
+    reportLogs,
+    generatingReport,
 
     loading,
     refreshing,
@@ -1026,5 +1126,6 @@ export function useAdminMonitoring(): MonitoringResult {
     setPeriod,
 
     refresh,
+    generateReport,
   };
 }

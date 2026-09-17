@@ -28,6 +28,7 @@ import { useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Image,
+  Keyboard,
   Modal,
   Pressable,
   RefreshControl,
@@ -36,6 +37,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { KeyboardAwareScrollView } from "react-native-keyboard-aware-scroll-view";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import OceanBackground from "@/src/shared/components/clay/OceanBackground";
@@ -47,6 +49,10 @@ import {
 } from "@/src/shared/hooks/admin/useAdminProfile";
 
 const AVATAR_BUCKET = "avatars";
+
+/* ================================================================
+   TYPES
+================================================================ */
 
 type ClayAlertButton = {
   text: string;
@@ -61,6 +67,10 @@ type ClayAlertConfig = {
   buttons: ClayAlertButton[];
 };
 
+/* ================================================================
+   HELPERS
+================================================================ */
+
 function formatDate(dateString: string | null) {
   if (!dateString) {
     return "Not available";
@@ -73,6 +83,80 @@ function formatDate(dateString: string | null) {
   }
 
   return date.toLocaleString();
+}
+
+/**
+ * Normalize Philippine mobile numbers into the SMS-compatible format:
+ *
+ * +639XXXXXXXXX
+ *
+ * Supported input examples:
+ * 09171234567
+ * 639171234567
+ * +639171234567
+ *
+ * Final stored format:
+ * +639171234567
+ */
+function normalizePhilippineMobile(value: string) {
+  let cleaned = value.replace(/[^\d+]/g, "");
+
+  // If the user enters the normal Philippine local format:
+  // 09XXXXXXXXX
+  if (cleaned.startsWith("09")) {
+    cleaned = `+63${cleaned.slice(1)}`;
+  }
+
+  // If the user enters:
+  // 639XXXXXXXXX
+  if (cleaned.startsWith("639")) {
+    cleaned = `+${cleaned}`;
+  }
+
+  // If it starts with +63, keep it.
+  if (cleaned.startsWith("+63")) {
+    const subscriberNumber = cleaned.slice(3).replace(/\D/g, "").slice(0, 10);
+
+    return `+63${subscriberNumber}`;
+  }
+
+  // If the user manually types only a digit sequence,
+  // interpret it as a Philippine number.
+  if (cleaned && !cleaned.startsWith("+")) {
+    cleaned = cleaned.replace(/\D/g, "");
+
+    // Local format beginning with 9:
+    // 9171234567 -> +639171234567
+    if (cleaned.startsWith("9")) {
+      return `+63${cleaned.slice(0, 10)}`;
+    }
+
+    // Local format beginning with 0:
+    // 09171234567 -> +639171234567
+    if (cleaned.startsWith("0")) {
+      return `+63${cleaned.slice(1, 11)}`;
+    }
+
+    return `+63${cleaned.slice(0, 10)}`;
+  }
+
+  // If "+" exists but the country code is wrong,
+  // constrain it back to +63.
+  if (cleaned.startsWith("+")) {
+    const digits = cleaned.replace(/\D/g, "");
+
+    if (digits.startsWith("63")) {
+      return `+63${digits.slice(2, 12)}`;
+    }
+
+    return "+63";
+  }
+
+  return cleaned;
+}
+
+function isValidPhilippineMobile(value: string) {
+  return /^\+639\d{9}$/.test(value);
 }
 
 function getRolePresentation(role: AdminProfile["role"]) {
@@ -111,6 +195,10 @@ function getRolePresentation(role: AdminProfile["role"]) {
   }
 }
 
+/* ================================================================
+   MAIN SCREEN
+================================================================ */
+
 export default function AdminProfileScreen() {
   const {
     profile,
@@ -145,6 +233,10 @@ export default function AdminProfileScreen() {
 
   const RoleIcon = rolePresentation.icon;
 
+  /* ================================================================
+     ALERT
+  ================================================================ */
+
   const showClayAlert = (
     title: string,
     message: string,
@@ -170,6 +262,10 @@ export default function AdminProfileScreen() {
     }));
   };
 
+  /* ================================================================
+     NAVIGATION
+  ================================================================ */
+
   const handleBack = () => {
     if (router.canGoBack()) {
       router.back();
@@ -179,36 +275,84 @@ export default function AdminProfileScreen() {
     router.replace("/staff/(admin)/(tabs)");
   };
 
+  /* ================================================================
+     EDIT PROFILE
+  ================================================================ */
+
   const startEditing = () => {
     if (!profile) return;
 
     setName(profile.display_name ?? "");
-    setMobile(profile.phone_number ?? "");
+
+    setMobile(normalizePhilippineMobile(profile.phone_number ?? ""));
+
     setEditing(true);
   };
 
   const cancelEditing = () => {
     if (!profile) return;
 
+    Keyboard.dismiss();
+
     setName(profile.display_name ?? "");
-    setMobile(profile.phone_number ?? "");
+
+    setMobile(normalizePhilippineMobile(profile.phone_number ?? ""));
+
     setEditing(false);
   };
 
   const saveProfile = async () => {
     if (!profile || saving) return;
 
+    Keyboard.dismiss();
+
     const trimmedName = name.trim();
-    const trimmedMobile = mobile.trim();
+    const normalizedMobile = normalizePhilippineMobile(mobile);
+
+    /* --------------------------------------------------------------
+       NAME VALIDATION
+    -------------------------------------------------------------- */
 
     if (!trimmedName) {
-      showClayAlert("Name required", "Please enter your name.");
+      showClayAlert("Name required", "Please enter your full name.");
       return;
     }
 
+    if (trimmedName.length < 2) {
+      showClayAlert("Invalid name", "Please enter a valid full name.");
+      return;
+    }
+
+    /* --------------------------------------------------------------
+       MOBILE VALIDATION
+    -------------------------------------------------------------- */
+
+    if (!normalizedMobile) {
+      showClayAlert(
+        "Mobile number required",
+        "Please enter your mobile number using the +63 format.",
+      );
+      return;
+    }
+
+    if (!isValidPhilippineMobile(normalizedMobile)) {
+      showClayAlert(
+        "Invalid mobile number",
+        "Please enter a valid Philippine mobile number using this format: +639XXXXXXXXX.",
+      );
+      return;
+    }
+
+    // Keep state synchronized with the normalized value.
+    setMobile(normalizedMobile);
+
+    /* --------------------------------------------------------------
+       UPDATE DATABASE
+    -------------------------------------------------------------- */
+
     const result = await updateProfile({
       display_name: trimmedName,
-      phone_number: trimmedMobile,
+      phone_number: normalizedMobile,
     });
 
     if (!result.success) {
@@ -226,6 +370,10 @@ export default function AdminProfileScreen() {
       "Your profile information has been saved.",
     );
   };
+
+  /* ================================================================
+     AVATAR
+  ================================================================ */
 
   const uploadAvatar = async (uri: string) => {
     if (!profile) return null;
@@ -332,6 +480,10 @@ export default function AdminProfileScreen() {
     }
   };
 
+  /* ================================================================
+     PUSH NOTIFICATIONS
+  ================================================================ */
+
   const togglePushNotifications = async () => {
     if (!profile || togglingPush) return;
 
@@ -408,6 +560,10 @@ export default function AdminProfileScreen() {
     }
   };
 
+  /* ================================================================
+     SIGN OUT
+  ================================================================ */
+
   const handleSignOut = () => {
     showClayAlert(
       "Sign out",
@@ -436,6 +592,10 @@ export default function AdminProfileScreen() {
     );
   };
 
+  /* ================================================================
+     INITIALS
+  ================================================================ */
+
   const initials = useMemo(() => {
     const value = profile?.display_name?.trim() || name.trim();
 
@@ -451,6 +611,10 @@ export default function AdminProfileScreen() {
 
     return `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase();
   }, [profile?.display_name, name]);
+
+  /* ================================================================
+     LOADING
+  ================================================================ */
 
   if (loading) {
     return (
@@ -471,6 +635,10 @@ export default function AdminProfileScreen() {
       </OceanBackground>
     );
   }
+
+  /* ================================================================
+     PROFILE UNAVAILABLE
+  ================================================================ */
 
   if (!profile) {
     return (
@@ -500,11 +668,9 @@ export default function AdminProfileScreen() {
                 {refreshing ? (
                   <ActivityIndicator color="#FFFFFF" />
                 ) : (
-                  <>
-                    <Text className="text-[12px] font-extrabold text-white">
-                      Try Again
-                    </Text>
-                  </>
+                  <Text className="text-[12px] font-extrabold text-white">
+                    Try Again
+                  </Text>
                 )}
               </Pressable>
             </View>
@@ -514,11 +680,16 @@ export default function AdminProfileScreen() {
     );
   }
 
+  /* ================================================================
+     MAIN PROFILE
+  ================================================================ */
+
   return (
     <OceanBackground intensity={0.28}>
       <SafeAreaView className="flex-1">
         <ScrollView
           showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
@@ -534,7 +705,9 @@ export default function AdminProfileScreen() {
         >
           <Header onBack={handleBack} />
 
-          {/* PROFILE HERO */}
+          {/* ======================================================
+             PROFILE HERO
+          ====================================================== */}
 
           <View className="mt-5 rounded-[28px] border border-white/90 bg-clay-surface p-5 shadow-clay">
             <View className="items-center">
@@ -614,349 +787,272 @@ export default function AdminProfileScreen() {
             </View>
           </View>
 
-          {/* EDIT */}
+          {/* ======================================================
+             EDIT PROFILE BUTTON
+          ====================================================== */}
 
-          {!editing && (
-            <Pressable
-              onPress={startEditing}
-              className="mt-5 flex-row items-center rounded-[23px] border border-white/90 bg-clay-surface p-4 shadow-clay-sm"
-            >
-              <View className="h-[44px] w-[44px] items-center justify-center rounded-[15px] bg-ocean-100">
-                <Edit3 size={20} color={colors.primaryDark} strokeWidth={2.3} />
-              </View>
+          <Pressable
+            onPress={startEditing}
+            className="mt-5 flex-row items-center rounded-[23px] border border-white/90 bg-clay-surface p-4 shadow-clay-sm"
+          >
+            <View className="h-[44px] w-[44px] items-center justify-center rounded-[15px] bg-ocean-100">
+              <Edit3 size={20} color={colors.primaryDark} strokeWidth={2.3} />
+            </View>
 
-              <View className="ml-3 flex-1">
-                <Text className="text-[13px] font-extrabold text-ink-dark">
-                  Edit Profile
-                </Text>
-
-                <Text className="mt-0.5 text-[10px] text-ink-secondary">
-                  Update your personal information
-                </Text>
-              </View>
-
-              <ChevronRight size={19} color={colors.textMuted} />
-            </Pressable>
-          )}
-
-          {editing && (
-            <>
-              <SectionTitle
-                icon={
-                  <User
-                    size={17}
-                    color={colors.primaryDark}
-                    strokeWidth={2.3}
-                  />
-                }
-                title="Personal Information"
-              />
-
-              <View className="rounded-[25px] border border-white/90 bg-clay-surface p-5 shadow-clay">
-                <Text className="text-[10px] font-bold uppercase tracking-[0.8px] text-ocean-700">
-                  Full Name
-                </Text>
-
-                <TextInput
-                  value={name}
-                  onChangeText={setName}
-                  autoCapitalize="words"
-                  placeholder="Your name"
-                  placeholderTextColor={colors.textMuted}
-                  editable={!saving}
-                  className="mt-2 min-h-[52px] rounded-[17px] border border-ocean-100 bg-white px-4 text-[14px] font-semibold text-ink-dark"
-                />
-
-                <Text className="mt-4 text-[10px] font-bold uppercase tracking-[0.8px] text-ocean-700">
-                  Mobile Number
-                </Text>
-
-                <TextInput
-                  value={mobile}
-                  onChangeText={setMobile}
-                  keyboardType="phone-pad"
-                  placeholder="Your mobile number"
-                  placeholderTextColor={colors.textMuted}
-                  editable={!saving}
-                  className="mt-2 min-h-[52px] rounded-[17px] border border-ocean-100 bg-white px-4 text-[14px] font-semibold text-ink-dark"
-                />
-
-                <View className="mt-5 flex-row gap-3">
-                  <Pressable
-                    disabled={saving}
-                    onPress={cancelEditing}
-                    className="min-h-[52px] flex-1 items-center justify-center rounded-full border border-ocean-200 bg-white"
-                  >
-                    <Text className="font-extrabold text-ocean-700">
-                      Cancel
-                    </Text>
-                  </Pressable>
-
-                  <Pressable
-                    disabled={saving}
-                    onPress={saveProfile}
-                    className="min-h-[52px] flex-1 items-center justify-center rounded-full bg-ocean-400"
-                  >
-                    {saving ? (
-                      <ActivityIndicator color="#FFFFFF" />
-                    ) : (
-                      <Text className="font-extrabold text-white">
-                        Save Changes
-                      </Text>
-                    )}
-                  </Pressable>
-                </View>
-              </View>
-            </>
-          )}
-
-          {/* CONTACT */}
-
-          {!editing && (
-            <>
-              <SectionTitle
-                icon={
-                  <Smartphone
-                    size={17}
-                    color={colors.primaryDark}
-                    strokeWidth={2.3}
-                  />
-                }
-                title="Contact Information"
-              />
-
-              <View className="rounded-[25px] border border-white/90 bg-clay-surface p-5 shadow-clay">
-                <DetailRow
-                  icon={<User size={17} color="#64748B" strokeWidth={2.2} />}
-                  label="Name"
-                  value={profile.display_name || "Not available"}
-                />
-
-                <Divider />
-
-                <DetailRow
-                  icon={
-                    <Smartphone size={17} color="#64748B" strokeWidth={2.2} />
-                  }
-                  label="Mobile"
-                  value={profile.phone_number || "Not provided"}
-                />
-
-                <Divider />
-
-                <DetailRow
-                  icon={<Phone size={17} color="#64748B" strokeWidth={2.2} />}
-                  label="Email"
-                  value={profile.email || "Not available"}
-                />
-              </View>
-
-              {/* STAFF */}
-
-              <SectionTitle
-                icon={
-                  <ShieldCheck
-                    size={17}
-                    color={colors.primaryDark}
-                    strokeWidth={2.3}
-                  />
-                }
-                title="Staff Information"
-              />
-
-              <View className="rounded-[25px] border border-white/90 bg-clay-surface p-5 shadow-clay">
-                <DetailRow
-                  icon={
-                    <ShieldCheck size={17} color="#64748B" strokeWidth={2.2} />
-                  }
-                  label="Role"
-                  value={rolePresentation.label}
-                />
-
-                <Divider />
-
-                <DetailRow
-                  icon={<MapPin size={17} color="#64748B" strokeWidth={2.2} />}
-                  label="Preferred terminal"
-                  value={
-                    profile.preferred_terminal !== null
-                      ? `Terminal ${profile.preferred_terminal}`
-                      : "Not assigned"
-                  }
-                />
-
-                <Divider />
-
-                <DetailRow
-                  icon={<Users size={17} color="#64748B" strokeWidth={2.2} />}
-                  label="Preferred bracket"
-                  value={
-                    profile.preferred_bracket !== null
-                      ? `Bracket ${profile.preferred_bracket}`
-                      : "Not assigned"
-                  }
-                />
-              </View>
-
-              {/* NOTIFICATIONS */}
-
-              <SectionTitle
-                icon={
-                  pushEnabled ? (
-                    <Bell
-                      size={17}
-                      color={colors.primaryDark}
-                      strokeWidth={2.3}
-                    />
-                  ) : (
-                    <BellOff
-                      size={17}
-                      color={colors.primaryDark}
-                      strokeWidth={2.3}
-                    />
-                  )
-                }
-                title="Preferences"
-              />
-
-              <View className="overflow-hidden rounded-[25px] border border-white/90 bg-clay-surface shadow-clay">
-                <ProfileActionRow
-                  icon={pushEnabled ? Bell : BellOff}
-                  title="Push Notifications"
-                  description={
-                    pushEnabled
-                      ? "Admin push notifications are enabled"
-                      : "Admin push notifications are disabled"
-                  }
-                  onPress={togglePushNotifications}
-                  disabled={togglingPush}
-                />
-              </View>
-
-              {/* ACCOUNT */}
-
-              <SectionTitle
-                icon={
-                  <CalendarClock
-                    size={17}
-                    color={colors.primaryDark}
-                    strokeWidth={2.3}
-                  />
-                }
-                title="Account Information"
-              />
-
-              <View className="rounded-[25px] border border-white/90 bg-clay-surface p-5 shadow-clay">
-                <DetailRow
-                  icon={
-                    <UserRound size={17} color="#64748B" strokeWidth={2.2} />
-                  }
-                  label="Account ID"
-                  value={profile.id}
-                />
-
-                <Divider />
-
-                <DetailRow
-                  icon={
-                    <CalendarClock
-                      size={17}
-                      color="#64748B"
-                      strokeWidth={2.2}
-                    />
-                  }
-                  label="Created"
-                  value={formatDate(profile.created_at)}
-                />
-
-                <Divider />
-
-                <DetailRow
-                  icon={
-                    <CalendarClock
-                      size={17}
-                      color="#64748B"
-                      strokeWidth={2.2}
-                    />
-                  }
-                  label="Last updated"
-                  value={formatDate(profile.updated_at)}
-                />
-              </View>
-
-              {/* SUPPORT */}
-
-              <SectionTitle
-                icon={
-                  <CircleHelp
-                    size={17}
-                    color={colors.primaryDark}
-                    strokeWidth={2.3}
-                  />
-                }
-                title="Support"
-              />
-
-              <View className="overflow-hidden rounded-[25px] border border-white/90 bg-clay-surface shadow-clay">
-                <ProfileActionRow
-                  icon={CircleHelp}
-                  title="Help & Support"
-                  description="Get assistance with Smart Queue"
-                  onPress={() =>
-                    showClayAlert(
-                      "Help & Support",
-                      "For assistance with Smart Queue, please contact the system administrator.",
-                    )
-                  }
-                />
-
-                <Divider />
-
-                <ProfileActionRow
-                  icon={FileText}
-                  title="About Smart Queue"
-                  description="Information about the application"
-                  onPress={() =>
-                    showClayAlert(
-                      "About Smart Queue",
-                      "Smart Queue is a transport queue monitoring system developed for capstone and research purposes.",
-                    )
-                  }
-                />
-
-                <Divider />
-
-                <ProfileActionRow
-                  icon={ShieldCheck}
-                  title="Privacy"
-                  description="How your information is handled"
-                  onPress={() =>
-                    showClayAlert(
-                      "Privacy",
-                      "Your staff account information is used to provide Smart Queue administrative and transport-management services.",
-                    )
-                  }
-                />
-              </View>
-
-              {/* SIGN OUT */}
-
-              <Pressable
-                onPress={handleSignOut}
-                className="mt-8 min-h-[56px] flex-row items-center justify-center rounded-full border border-red-200 bg-white"
-              >
-                <LogOut size={18} color="#DC2626" strokeWidth={2.3} />
-
-                <Text className="ml-2 text-[14px] font-extrabold text-red-600">
-                  Sign Out
-                </Text>
-              </Pressable>
-
-              <Text className="mt-5 text-center text-[10px] text-ink-muted">
-                Smart Queue • Admin
+            <View className="ml-3 flex-1">
+              <Text className="text-[13px] font-extrabold text-ink-dark">
+                Edit Profile
               </Text>
-            </>
-          )}
+
+              <Text className="mt-0.5 text-[10px] text-ink-secondary">
+                Update your personal information
+              </Text>
+            </View>
+
+            <ChevronRight size={19} color={colors.textMuted} />
+          </Pressable>
+
+          {/* ======================================================
+             CONTACT
+          ====================================================== */}
+
+          <SectionTitle
+            icon={
+              <Smartphone
+                size={17}
+                color={colors.primaryDark}
+                strokeWidth={2.3}
+              />
+            }
+            title="Contact Information"
+          />
+
+          <View className="rounded-[25px] border border-white/90 bg-clay-surface p-5 shadow-clay">
+            <DetailRow
+              icon={<User size={17} color="#64748B" strokeWidth={2.2} />}
+              label="Name"
+              value={profile.display_name || "Not available"}
+            />
+
+            <Divider />
+
+            <DetailRow
+              icon={<Smartphone size={17} color="#64748B" strokeWidth={2.2} />}
+              label="Mobile"
+              value={profile.phone_number || "Not provided"}
+            />
+
+            <Divider />
+
+            <DetailRow
+              icon={<Phone size={17} color="#64748B" strokeWidth={2.2} />}
+              label="Email"
+              value={profile.email || "Not available"}
+            />
+          </View>
+
+          {/* ======================================================
+             STAFF
+          ====================================================== */}
+
+          <SectionTitle
+            icon={
+              <ShieldCheck
+                size={17}
+                color={colors.primaryDark}
+                strokeWidth={2.3}
+              />
+            }
+            title="Staff Information"
+          />
+
+          <View className="rounded-[25px] border border-white/90 bg-clay-surface p-5 shadow-clay">
+            <DetailRow
+              icon={<ShieldCheck size={17} color="#64748B" strokeWidth={2.2} />}
+              label="Role"
+              value={rolePresentation.label}
+            />
+
+            <Divider />
+
+            <DetailRow
+              icon={<MapPin size={17} color="#64748B" strokeWidth={2.2} />}
+              label="Preferred terminal"
+              value={
+                profile.preferred_terminal !== null
+                  ? `Terminal ${profile.preferred_terminal}`
+                  : "Not assigned"
+              }
+            />
+
+            <Divider />
+
+            <DetailRow
+              icon={<Users size={17} color="#64748B" strokeWidth={2.2} />}
+              label="Preferred bracket"
+              value={
+                profile.preferred_bracket !== null
+                  ? `Bracket ${profile.preferred_bracket}`
+                  : "Not assigned"
+              }
+            />
+          </View>
+
+          {/* ======================================================
+             NOTIFICATIONS
+          ====================================================== */}
+
+          <SectionTitle
+            icon={
+              pushEnabled ? (
+                <Bell size={17} color={colors.primaryDark} strokeWidth={2.3} />
+              ) : (
+                <BellOff
+                  size={17}
+                  color={colors.primaryDark}
+                  strokeWidth={2.3}
+                />
+              )
+            }
+            title="Preferences"
+          />
+
+          <View className="overflow-hidden rounded-[25px] border border-white/90 bg-clay-surface shadow-clay">
+            <ProfileActionRow
+              icon={pushEnabled ? Bell : BellOff}
+              title="Push Notifications"
+              description={
+                pushEnabled
+                  ? "Admin push notifications are enabled"
+                  : "Admin push notifications are disabled"
+              }
+              onPress={togglePushNotifications}
+              disabled={togglingPush}
+            />
+          </View>
+
+          {/* ======================================================
+             ACCOUNT
+          ====================================================== */}
+
+          <SectionTitle
+            icon={
+              <CalendarClock
+                size={17}
+                color={colors.primaryDark}
+                strokeWidth={2.3}
+              />
+            }
+            title="Account Information"
+          />
+
+          <View className="rounded-[25px] border border-white/90 bg-clay-surface p-5 shadow-clay">
+            <DetailRow
+              icon={<UserRound size={17} color="#64748B" strokeWidth={2.2} />}
+              label="Account ID"
+              value={profile.id}
+            />
+
+            <Divider />
+
+            <DetailRow
+              icon={
+                <CalendarClock size={17} color="#64748B" strokeWidth={2.2} />
+              }
+              label="Created"
+              value={formatDate(profile.created_at)}
+            />
+
+            <Divider />
+
+            <DetailRow
+              icon={
+                <CalendarClock size={17} color="#64748B" strokeWidth={2.2} />
+              }
+              label="Last updated"
+              value={formatDate(profile.updated_at)}
+            />
+          </View>
+
+          {/* ======================================================
+             SUPPORT
+          ====================================================== */}
+
+          <SectionTitle
+            icon={
+              <CircleHelp
+                size={17}
+                color={colors.primaryDark}
+                strokeWidth={2.3}
+              />
+            }
+            title="Support"
+          />
+
+          <View className="overflow-hidden rounded-[25px] border border-white/90 bg-clay-surface shadow-clay">
+            <ProfileActionRow
+              icon={CircleHelp}
+              title="Help & Support"
+              description="Get assistance with Smart Queue"
+              onPress={() =>
+                showClayAlert(
+                  "Help & Support",
+                  "For assistance with Smart Queue, please contact the system administrator.",
+                )
+              }
+            />
+
+            <Divider />
+
+            <ProfileActionRow
+              icon={FileText}
+              title="About Smart Queue"
+              description="Information about the application"
+              onPress={() =>
+                showClayAlert(
+                  "About Smart Queue",
+                  "Smart Queue is a transport queue monitoring system developed for capstone and research purposes.",
+                )
+              }
+            />
+
+            <Divider />
+
+            <ProfileActionRow
+              icon={ShieldCheck}
+              title="Privacy"
+              description="How your information is handled"
+              onPress={() =>
+                showClayAlert(
+                  "Privacy",
+                  "Your staff account information is used to provide Smart Queue administrative and transport-management services.",
+                )
+              }
+            />
+          </View>
+
+          {/* ======================================================
+             SIGN OUT
+          ====================================================== */}
+
+          <Pressable
+            onPress={handleSignOut}
+            className="mt-8 min-h-[56px] flex-row items-center justify-center rounded-full border border-red-200 bg-white"
+          >
+            <LogOut size={18} color="#DC2626" strokeWidth={2.3} />
+
+            <Text className="ml-2 text-[14px] font-extrabold text-red-600">
+              Sign Out
+            </Text>
+          </Pressable>
+
+          <Text className="mt-5 text-center text-[10px] text-ink-muted">
+            Smart Queue • Admin
+          </Text>
+
+          {/* ======================================================
+             ERROR
+          ====================================================== */}
 
           {error && (
             <View className="mt-5 rounded-[22px] border border-red-100 bg-white/90 p-4">
@@ -972,6 +1068,27 @@ export default function AdminProfileScreen() {
         </ScrollView>
       </SafeAreaView>
 
+      {/* ============================================================
+         PERSONAL INFORMATION MODAL
+      ============================================================ */}
+
+      <PersonalInformationModal
+        visible={editing}
+        name={name}
+        mobile={mobile}
+        saving={saving}
+        onNameChange={setName}
+        onMobileChange={(value) => {
+          setMobile(normalizePhilippineMobile(value));
+        }}
+        onSave={saveProfile}
+        onCancel={cancelEditing}
+      />
+
+      {/* ============================================================
+         CLAY ALERT
+      ============================================================ */}
+
       <ClayModal
         visible={alertConfig.visible}
         title={alertConfig.title}
@@ -980,6 +1097,212 @@ export default function AdminProfileScreen() {
         onClose={hideClayAlert}
       />
     </OceanBackground>
+  );
+}
+
+/* ================================================================
+   PERSONAL INFORMATION MODAL
+================================================================ */
+
+function PersonalInformationModal({
+  visible,
+  name,
+  mobile,
+  saving,
+  onNameChange,
+  onMobileChange,
+  onSave,
+  onCancel,
+}: {
+  visible: boolean;
+  name: string;
+  mobile: string;
+  saving: boolean;
+  onNameChange: (value: string) => void;
+  onMobileChange: (value: string) => void;
+  onSave: () => void;
+  onCancel: () => void;
+}) {
+  const mobileValid = isValidPhilippineMobile(mobile);
+
+  const nameValid = name.trim().length >= 2;
+
+  const canSave = !saving && nameValid && mobileValid;
+
+  return (
+    <Modal
+      visible={visible}
+      transparent
+      animationType="slide"
+      onRequestClose={onCancel}
+    >
+      <View className="flex-1 bg-black/40">
+        <KeyboardAwareScrollView
+          enableOnAndroid
+          enableAutomaticScroll
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+          extraScrollHeight={18}
+          contentContainerStyle={{
+            flexGrow: 1,
+            justifyContent: "center",
+            paddingHorizontal: 20,
+            paddingVertical: 24,
+          }}
+        >
+          <View className="w-full rounded-[30px] border border-white/90 bg-clay-surface p-6 shadow-clay-floating">
+            {/* CLOSE BUTTON */}
+
+            <Pressable
+              onPress={onCancel}
+              disabled={saving}
+              className="absolute right-4 top-4 h-[34px] w-[34px] items-center justify-center rounded-full bg-ocean-100"
+            >
+              <X size={17} color={colors.primaryDark} strokeWidth={2.5} />
+            </Pressable>
+
+            {/* HEADER */}
+
+            <View className="pr-10">
+              <Text className="text-[10px] font-extrabold uppercase tracking-[1px] text-ocean-700">
+                ADMIN PROFILE
+              </Text>
+
+              <Text className="mt-1 text-[22px] font-extrabold text-ink-dark">
+                Personal Information
+              </Text>
+
+              <Text className="mt-1 text-[11px] leading-[17px] text-ink-secondary">
+                Update your name and mobile number.
+              </Text>
+            </View>
+
+            {/* NAME */}
+
+            <View className="mt-6">
+              <Text className="text-[10px] font-bold uppercase tracking-[0.8px] text-ocean-700">
+                Full Name
+              </Text>
+
+              <TextInput
+                value={name}
+                onChangeText={onNameChange}
+                autoCapitalize="words"
+                autoCorrect={false}
+                placeholder="Your full name"
+                placeholderTextColor={colors.textMuted}
+                editable={!saving}
+                returnKeyType="next"
+                className={`mt-2 min-h-[52px] rounded-[17px] border bg-white px-4 text-[14px] font-semibold text-ink-dark ${
+                  name.length > 0 && !nameValid
+                    ? "border-red-300"
+                    : "border-ocean-100"
+                }`}
+              />
+
+              {name.length > 0 && !nameValid && (
+                <View className="mt-2 flex-row items-center">
+                  <AlertTriangle size={13} color="#DC2626" strokeWidth={2.4} />
+
+                  <Text className="ml-1.5 text-[10px] font-semibold text-red-600">
+                    Please enter a valid name.
+                  </Text>
+                </View>
+              )}
+            </View>
+
+            {/* MOBILE */}
+
+            <View className="mt-5">
+              <Text className="text-[10px] font-bold uppercase tracking-[0.8px] text-ocean-700">
+                Mobile Number
+              </Text>
+
+              <TextInput
+                value={mobile}
+                onChangeText={onMobileChange}
+                keyboardType="phone-pad"
+                textContentType="telephoneNumber"
+                autoComplete="tel"
+                autoCorrect={false}
+                placeholder="+639171234567"
+                placeholderTextColor={colors.textMuted}
+                editable={!saving}
+                maxLength={13}
+                returnKeyType="done"
+                onSubmitEditing={() => {
+                  if (canSave) {
+                    onSave();
+                  }
+                }}
+                className={`mt-2 min-h-[52px] rounded-[17px] border bg-white px-4 text-[14px] font-semibold text-ink-dark ${
+                  mobile.length > 0 && !mobileValid
+                    ? "border-red-300"
+                    : "border-ocean-100"
+                }`}
+              />
+
+              <Text className="mt-2 text-[10px] leading-[15px] text-ink-muted">
+                Philippine mobile format: +639XXXXXXXXX
+              </Text>
+
+              {mobile.length > 0 && !mobileValid && (
+                <View className="mt-2 flex-row items-center">
+                  <AlertTriangle size={13} color="#DC2626" strokeWidth={2.4} />
+
+                  <Text className="ml-1.5 flex-1 text-[10px] font-semibold text-red-600">
+                    Enter a valid +63 mobile number.
+                  </Text>
+                </View>
+              )}
+            </View>
+
+            {/* SMS FORMAT INFO */}
+
+            <View className="mt-5 flex-row items-center rounded-[17px] bg-ocean-50 px-4 py-3">
+              <Smartphone
+                size={16}
+                color={colors.primaryDark}
+                strokeWidth={2.2}
+              />
+
+              <Text className="ml-2 flex-1 text-[10px] leading-[15px] font-semibold text-ocean-800">
+                This number will be used for staff SMS notifications and must
+                use the +63 format.
+              </Text>
+            </View>
+
+            {/* ACTIONS */}
+
+            <View className="mt-6 flex-row gap-3">
+              <Pressable
+                disabled={saving}
+                onPress={onCancel}
+                className="min-h-[52px] flex-1 items-center justify-center rounded-full border border-ocean-200 bg-white"
+              >
+                <Text className="font-extrabold text-ocean-700">Cancel</Text>
+              </Pressable>
+
+              <Pressable
+                disabled={!canSave}
+                onPress={onSave}
+                className={`min-h-[52px] flex-1 items-center justify-center rounded-full ${
+                  canSave ? "bg-ocean-400" : "bg-ocean-200"
+                }`}
+              >
+                {saving ? (
+                  <ActivityIndicator color="#FFFFFF" />
+                ) : (
+                  <Text className="font-extrabold text-white">
+                    Save Changes
+                  </Text>
+                )}
+              </Pressable>
+            </View>
+          </View>
+        </KeyboardAwareScrollView>
+      </View>
+    </Modal>
   );
 }
 
@@ -1127,7 +1450,7 @@ function Divider() {
 }
 
 /* ================================================================
-   CLAY MODAL
+   CLAY ALERT MODAL
 ================================================================ */
 
 function ClayModal({

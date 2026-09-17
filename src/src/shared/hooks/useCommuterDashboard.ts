@@ -1,6 +1,7 @@
 import { supabase } from "@/src/shared/config/supabase";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNotifications } from "./useNotification";
+
 /* ============================================================
    TYPES
 ============================================================ */
@@ -15,8 +16,6 @@ export interface CommuterProfile {
 export interface CommuterDashboardJeepney {
   id: string;
   plate_number: string;
-  front_count: number;
-  rear_count: number;
 
   bracket: number | null;
 
@@ -33,6 +32,20 @@ export interface CommuterDashboardJeepney {
 
   terminal_id: number | null;
 
+  /*
+   * IMPORTANT:
+   *
+   * Passenger counts are NOT stored directly on jeepneys.
+   *
+   * door_counts:
+   *   front_count
+   *   rear_count
+   *
+   * are combined by the database function
+   * update_jeepney_occupancy() and stored here:
+   *
+   *   jeepneys.current_occupancy
+   */
   current_occupancy: number;
   capacity: number;
 
@@ -124,26 +137,14 @@ const TERMINAL_NAMES: Record<number, string> = {
 };
 
 /*
- * IMPORTANT
+ * These are the only statuses that belong to the active queue.
  *
- * The jeepneys table is the SINGLE SOURCE OF TRUTH
- * for the commuter queue.
+ * waiting:
+ *   Jeepney is waiting in the terminal queue.
  *
- * We DO NOT use:
- *
- * public.queue
- * public.terminals
- * queue_entries
- *
- * Queue order comes from:
- *
- * jeepneys.queue_position
- *
- * Queue status comes from:
- *
- * jeepneys.status
+ * loading:
+ *   Jeepney is currently loading passengers.
  */
-
 const ACTIVE_QUEUE_STATUSES = ["waiting", "loading"];
 
 /* ============================================================
@@ -180,7 +181,7 @@ function sortQueue(
     }
 
     /*
-     * Then queue position.
+     * Then sort by queue position.
      */
     const positionA = a.queue_position ?? 999999;
     const positionB = b.queue_position ?? 999999;
@@ -190,7 +191,7 @@ function sortQueue(
 }
 
 /* ============================================================
-   GET CURRENT USER
+   GET AUTHENTICATED USER
 ============================================================ */
 
 async function getAuthenticatedUserId(): Promise<string | null> {
@@ -218,7 +219,9 @@ async function getAuthenticatedUserId(): Promise<string | null> {
    HOOK
 ============================================================ */
 
-export function useCommuterDashboard(): UseCommuterDashboardReturn {
+export function useCommuterDashboard(
+  _isOpen?: boolean,
+): UseCommuterDashboardReturn {
   const [profile, setProfile] = useState<CommuterProfile | null>(null);
 
   const [jeepneys, setJeepneys] = useState<CommuterDashboardJeepney[]>([]);
@@ -235,11 +238,6 @@ export function useCommuterDashboard(): UseCommuterDashboardReturn {
 
   /* ==========================================================
      CURRENT USER ID
-
-     Notifications now come entirely from useNotifications,
-     which needs a userId to key its own realtime channel and
-     query. We track it locally here (and keep it in sync with
-     auth state) instead of re-fetching it ad hoc.
   ========================================================== */
 
   const [userId, setUserId] = useState<string | null>(null);
@@ -269,11 +267,9 @@ export function useCommuterDashboard(): UseCommuterDashboardReturn {
 
   /* ==========================================================
      NOTIFICATIONS
-
-     Single source of truth shared with the notifications
-     screen. Handles its own realtime channel safely (unique
-     per hook instance), so the dashboard bell badge and the
-     notifications list always agree.
+     
+     Kept here for compatibility with existing consumers of
+     this hook.
   ========================================================== */
 
   const {
@@ -287,12 +283,12 @@ export function useCommuterDashboard(): UseCommuterDashboardReturn {
   ========================================================== */
 
   const loadProfile = useCallback(
-    async (userId: string): Promise<CommuterProfile | null> => {
+    async (authenticatedUserId: string): Promise<CommuterProfile | null> => {
       try {
         const { data, error } = await supabase
           .from("users")
           .select("id, display_name, phone_number, avatar_url")
-          .eq("id", userId)
+          .eq("id", authenticatedUserId)
           .maybeSingle();
 
         if (error) {
@@ -324,12 +320,27 @@ export function useCommuterDashboard(): UseCommuterDashboardReturn {
      LOAD JEEPNEY QUEUE
      
      SOURCE:
+       public.jeepneys
      
-     public.jeepneys
+     QUEUE:
+       jeepneys.queue_position
+       jeepneys.status
+     
+     OCCUPANCY:
+       jeepneys.current_occupancy
      
      IMPORTANT:
      
-     queue_position is stored directly on jeepneys.
+     front_count and rear_count DO NOT exist on jeepneys.
+     
+     They exist on:
+       public.door_counts
+     
+     The door_counts trigger calls:
+       update_jeepney_occupancy()
+     
+     which updates:
+       jeepneys.current_occupancy
   ========================================================== */
 
   const loadQueue = useCallback(async (): Promise<
@@ -344,37 +355,27 @@ export function useCommuterDashboard(): UseCommuterDashboardReturn {
               plate_number,
               bracket,
               status,
-              front_count,
-              rear_count,
               current_occupancy,
               last_occupancy_update,
               queue_position,
               departure_time,
               eta,
-
               current_latitude,
               current_longitude,
               last_location_update,
-
               latitude,
               longitude,
-
               last_queue_update,
               entered_geofence_at,
-
               loading_started_at,
               loading_ends_at,
               departed_at,
-
               jeep_name,
               driver_name,
               driver_id,
-
               terminal_id,
-
               created_at,
               updated_at,
-
               capacity
             `,
         )
@@ -412,9 +413,13 @@ export function useCommuterDashboard(): UseCommuterDashboardReturn {
 
         terminal_id: jeepney.terminal_id ?? null,
 
-        current_occupancy: jeepney.current_occupancy ?? 0,
+        /*
+         * Occupancy is already calculated server-side
+         * from door_counts.
+         */
+        current_occupancy: Math.max(0, jeepney.current_occupancy ?? 0),
 
-        capacity: jeepney.capacity ?? 0,
+        capacity: Math.max(0, jeepney.capacity ?? 0),
 
         driver_name: jeepney.driver_name ?? null,
 
@@ -458,12 +463,9 @@ export function useCommuterDashboard(): UseCommuterDashboardReturn {
   /* ==========================================================
      LOAD RECENT QUEUE ACTIVITY
      
-     IMPORTANT:
+     Activity is derived from jeepneys.
      
-     There is NO queue history table being used here.
-     
-     We derive recent activity from jeepneys.updated_at
-     and their current queue/status fields.
+     There is no queue history table used here.
   ========================================================== */
 
   const loadActivities = useCallback(async (): Promise<QueueActivity[]> => {
@@ -517,7 +519,7 @@ export function useCommuterDashboard(): UseCommuterDashboardReturn {
 
             plateNumber: jeepney.plate_number,
 
-            status: jeepney.status,
+            status: jeepney.status ?? "inactive",
 
             queuePosition: jeepney.queue_position ?? null,
 
@@ -539,15 +541,6 @@ export function useCommuterDashboard(): UseCommuterDashboardReturn {
 
   /* ==========================================================
      LOAD DASHBOARD
-
-     Notifications are intentionally NOT loaded here anymore —
-     useNotifications owns that data and its own realtime
-     channel. Loading it here too was both duplicating fetches
-     and creating a second realtime channel with a colliding
-     name (commuter-notifications-${userId}), which is what
-     caused the "cannot add postgres_changes callbacks after
-     subscribe()" crash whenever this hook and the notifications
-     screen were mounted at the same time.
   ========================================================== */
 
   const loadDashboard = useCallback(
@@ -599,13 +592,36 @@ export function useCommuterDashboard(): UseCommuterDashboardReturn {
   }, [loadDashboard]);
 
   /* ==========================================================
-     REALTIME JEEPNEY QUEUE
+     REALTIME JEEPNEY + OCCUPANCY UPDATES
      
-     This is the important realtime listener.
+     We listen to BOTH tables:
+     
+     1. jeepneys
+        - queue changes
+        - status changes
+        - occupancy changes
+        - driver changes
+        - location changes
+     
+     2. door_counts
+        - front_count changes
+        - rear_count changes
+     
+     Why listen to door_counts?
+     
+     Android writes passenger counts to door_counts.
+     
+     The database trigger then updates:
+     
+       jeepneys.current_occupancy
+     
+     Listening to door_counts gives the commuter dashboard
+     an immediate refresh path while the jeepneys trigger
+     updates current_occupancy.
   ========================================================== */
 
   useEffect(() => {
-    const channel = supabase
+    const jeepneysChannel = supabase
       .channel("commuter-dashboard-jeepneys")
       .on(
         "postgres_changes",
@@ -620,8 +636,32 @@ export function useCommuterDashboard(): UseCommuterDashboardReturn {
       )
       .subscribe();
 
+    const doorCountsChannel = supabase
+      .channel("commuter-dashboard-door-counts")
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "door_counts",
+        },
+        () => {
+          /*
+           * The door_counts trigger updates
+           * jeepneys.current_occupancy.
+           *
+           * Reload the queue so the commuter sees
+           * the latest occupancy.
+           */
+          loadDashboard(true);
+        },
+      )
+      .subscribe();
+
     return () => {
-      supabase.removeChannel(channel);
+      supabase.removeChannel(jeepneysChannel);
+
+      supabase.removeChannel(doorCountsChannel);
     };
   }, [loadDashboard]);
 
@@ -636,10 +676,8 @@ export function useCommuterDashboard(): UseCommuterDashboardReturn {
   /* ==========================================================
      TOTAL PASSENGERS
      
-     This is NOT a passenger queue.
-     
-     It is simply the combined occupancy
-     currently reported by queued jeepneys.
+     This is the combined CURRENT OCCUPANCY of the active
+     queued jeepneys.
   ========================================================== */
 
   const totalPassengers = useMemo(() => {
@@ -651,12 +689,6 @@ export function useCommuterDashboard(): UseCommuterDashboardReturn {
 
   /* ==========================================================
      AVAILABLE SEATS
-     
-     Kept for compatibility with your current dashboard.
-     
-     This is NOT "passenger queue availability".
-     
-     It is simply unused capacity across queued jeepneys.
   ========================================================== */
 
   const availableSeats = useMemo(() => {
@@ -672,23 +704,19 @@ export function useCommuterDashboard(): UseCommuterDashboardReturn {
   /* ==========================================================
      NEXT JEEPNEY
      
-     Since the array is sorted:
+     Queue is sorted:
      
-     terminal 1 → queue position
-     terminal 2 → queue position
+       Terminal 1 → queue position
+       Terminal 2 → queue position
      
-     The first active jeepney is the next
-     jeepney in the combined system.
+     Therefore the first item is the next active
+     jeepney in the combined commuter queue.
   ========================================================== */
 
   const nextJeepney = jeepneys.length > 0 ? jeepneys[0] : null;
 
   /* ==========================================================
      REFRESH
-
-     Refreshes both dashboard data (profile/queue/activity) and
-     notifications, so pull-to-refresh on the dashboard updates
-     the bell badge too.
   ========================================================== */
 
   const refresh = useCallback(async () => {

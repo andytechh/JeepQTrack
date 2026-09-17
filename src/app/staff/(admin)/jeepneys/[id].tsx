@@ -1,12 +1,15 @@
+import * as ImagePicker from "expo-image-picker";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import {
   AlertTriangle,
   ArrowLeft,
   BusFront,
   CalendarClock,
+  Camera,
   CheckCircle2,
   Clock3,
   Gauge,
+  Image as ImageIcon,
   MapPin,
   Navigation,
   Pencil,
@@ -21,6 +24,8 @@ import {
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
+  Image,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -34,6 +39,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import OceanBackground from "@/src/shared/components/clay/OceanBackground";
+import JeepneyImage from "@/src/shared/components/jeepney/JeepneyImage";
 import { supabase } from "@/src/shared/config/supabase";
 import { colors } from "@/src/shared/constants/theme";
 
@@ -44,6 +50,7 @@ interface JeepneyDetails {
   id: string;
   plate_number: string;
   jeep_name: string | null;
+  image_url: string | null;
 
   driver_id: string | null;
   driver_name: string | null;
@@ -87,6 +94,7 @@ const SELECT_COLUMNS = `
   id,
   plate_number,
   jeep_name,
+  image_url,
   driver_id,
   driver_name,
   bracket,
@@ -225,6 +233,10 @@ export default function AdminJeepneyDetailsScreen() {
   const [editJeepName, setEditJeepName] = useState("");
   const [editCapacity, setEditCapacity] = useState("");
   const [editBracket, setEditBracket] = useState("");
+  const [editImageUri, setEditImageUri] = useState<string | null>(null);
+  const [editImageUrl, setEditImageUrl] = useState<string | null>(null);
+  const [editImageRemoved, setEditImageRemoved] = useState(false);
+  const [imageSourceVisible, setImageSourceVisible] = useState(false);
 
   const [modal, setModal] = useState<ActionModalState>({
     visible: false,
@@ -232,6 +244,8 @@ export default function AdminJeepneyDetailsScreen() {
     title: "",
     message: "",
   });
+
+  const [redirectAfterDelete, setRedirectAfterDelete] = useState(false);
 
   /*
    * Automatically marks the jeepney inactive when its latest GPS
@@ -308,6 +322,15 @@ export default function AdminJeepneyDetailsScreen() {
         }
 
         if (!data) {
+          /*
+           * The record may legitimately be missing because the
+           * admin has just deleted it. Do not replace the screen
+           * with "Jeepney unavailable" in that case.
+           */
+          if (redirectAfterDelete) {
+            return;
+          }
+
           setJeepney(null);
           setError("This jeepney could not be found.");
           return;
@@ -344,6 +367,7 @@ export default function AdminJeepneyDetailsScreen() {
           plate_number: data.plate_number ?? "",
 
           jeep_name: data.jeep_name ?? null,
+          image_url: data.image_url ?? null,
 
           driver_id: data.driver_id ?? null,
 
@@ -403,15 +427,16 @@ export default function AdminJeepneyDetailsScreen() {
       } catch (err: any) {
         console.error("❌ Failed to load jeepney details:", err);
 
-        setError(err?.message ?? "Unable to load jeepney information.");
-
-        setJeepney(null);
+        if (!redirectAfterDelete) {
+          setError(err?.message ?? "Unable to load jeepney information.");
+          setJeepney(null);
+        }
       } finally {
         setLoading(false);
         setRefreshing(false);
       }
     },
-    [jeepneyId, applyInactiveIfNoGpsToday],
+    [jeepneyId, applyInactiveIfNoGpsToday, redirectAfterDelete],
   );
 
   /*
@@ -441,6 +466,10 @@ export default function AdminJeepneyDetailsScreen() {
           filter: `id=eq.${jeepneyId}`,
         },
         () => {
+          if (redirectAfterDelete) {
+            return;
+          }
+
           loadJeepney(true);
         },
       )
@@ -454,6 +483,10 @@ export default function AdminJeepneyDetailsScreen() {
           filter: `jeepney_id=eq.${jeepneyId}`,
         },
         (payload) => {
+          if (redirectAfterDelete) {
+            return;
+          }
+
           const gps = payload.new as any;
 
           const recordedAt = gps.recorded_at ?? new Date().toISOString();
@@ -485,7 +518,7 @@ export default function AdminJeepneyDetailsScreen() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [jeepneyId, loadJeepney]);
+  }, [jeepneyId, loadJeepney, redirectAfterDelete]);
 
   const status = useMemo(
     () => getStatusPresentation(jeepney?.status ?? "inactive"),
@@ -536,6 +569,24 @@ export default function AdminJeepneyDetailsScreen() {
       return;
     }
 
+    if (redirectAfterDelete) {
+      setModal((current) => ({
+        ...current,
+        visible: false,
+      }));
+
+      setRedirectAfterDelete(false);
+
+      /*
+       * Replace the details route instead of going back.
+       * This guarantees the deleted jeepney details screen
+       * is removed from the navigation stack.
+       */
+      router.replace("/staff/(admin)/jeepneys");
+
+      return;
+    }
+
     setModal((current) => ({
       ...current,
       visible: false,
@@ -547,6 +598,9 @@ export default function AdminJeepneyDetailsScreen() {
     setEditPlateNumber(jeepney.plate_number);
     setEditJeepName(jeepney.jeep_name ?? "");
     setEditCapacity(String(jeepney.capacity));
+    setEditImageUri(null);
+    setEditImageUrl(jeepney.image_url ?? null);
+    setEditImageRemoved(false);
     setEditVisible(true);
   };
 
@@ -556,10 +610,110 @@ export default function AdminJeepneyDetailsScreen() {
     setBracketVisible(true);
   };
 
+  const pickEditImage = async () => {
+    if (actionLoading) return;
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert(
+        "Photo Access Required",
+        "Allow photo access so you can choose a jeepney picture.",
+      );
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ["images"],
+      allowsEditing: true,
+      aspect: [4, 3],
+      quality: 0.8,
+    });
+    if (!result.canceled && result.assets?.[0]?.uri) {
+      setEditImageUri(result.assets[0].uri);
+      setEditImageRemoved(false);
+    }
+  };
+
+  const takeEditPhoto = async () => {
+    if (actionLoading) return;
+    const permission = await ImagePicker.requestCameraPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert(
+        "Camera Access Required",
+        "Allow camera access so you can take a jeepney picture.",
+      );
+      return;
+    }
+    const result = await ImagePicker.launchCameraAsync({
+      allowsEditing: true,
+      aspect: [4, 3],
+      quality: 0.8,
+    });
+    if (!result.canceled && result.assets?.[0]?.uri) {
+      setEditImageUri(result.assets[0].uri);
+      setEditImageRemoved(false);
+    }
+  };
+
+  const removeEditImage = () => {
+    if (actionLoading) return;
+    setEditImageUri(null);
+    setEditImageUrl(null);
+    setEditImageRemoved(true);
+  };
+
+  const uploadEditImage = async (jeepneyId: string, uri: string) => {
+    const response = await fetch(uri);
+    if (!response.ok) throw new Error("Unable to read the selected image.");
+    const arrayBuffer = await response.arrayBuffer();
+    const extension =
+      uri
+        .split(".")
+        .pop()
+        ?.split("?")[0]
+        ?.toLowerCase()
+        .replace(/[^a-z0-9]/g, "") || "jpg";
+    const contentType =
+      extension === "png"
+        ? "image/png"
+        : extension === "webp"
+          ? "image/webp"
+          : "image/jpeg";
+    const path = `${jeepneyId}/profile`;
+    const { error: uploadError } = await supabase.storage
+      .from("jeepney-images")
+      .upload(path, arrayBuffer, {
+        contentType,
+        upsert: true,
+        cacheControl: "3600",
+      });
+    if (uploadError) throw uploadError;
+    const { data } = supabase.storage.from("jeepney-images").getPublicUrl(path);
+    if (!data.publicUrl)
+      throw new Error("The image was uploaded but no public URL was returned.");
+    const imageUrl = `${data.publicUrl}?v=${Date.now()}`;
+    const { error: databaseError } = await supabase
+      .from("jeepneys")
+      .update({ image_url: imageUrl })
+      .eq("id", jeepneyId);
+    if (databaseError) throw databaseError;
+    return imageUrl;
+  };
+
+  const deleteStoredJeepneyImage = async (jeepneyId: string) => {
+    const { error } = await supabase.storage
+      .from("jeepney-images")
+      .remove([`${jeepneyId}/profile`]);
+    if (error) throw error;
+    const { error: databaseError } = await supabase
+      .from("jeepneys")
+      .update({ image_url: null })
+      .eq("id", jeepneyId);
+    if (databaseError) throw databaseError;
+  };
+
   const handleEditJeepney = async () => {
     if (!jeepney || actionLoading) return;
 
-    const plate = editPlateNumber.trim();
+    const plate = editPlateNumber.trim().toUpperCase();
     const name = editJeepName.trim();
     const capacity = Number(editCapacity.trim());
 
@@ -567,7 +721,6 @@ export default function AdminJeepneyDetailsScreen() {
       showError("Invalid Plate Number", "Plate number is required.");
       return;
     }
-
     if (!Number.isInteger(capacity) || capacity <= 0) {
       showError(
         "Invalid Capacity",
@@ -575,7 +728,6 @@ export default function AdminJeepneyDetailsScreen() {
       );
       return;
     }
-
     if (capacity < jeepney.current_occupancy) {
       showError(
         "Invalid Capacity",
@@ -589,14 +741,17 @@ export default function AdminJeepneyDetailsScreen() {
 
       const { error: updateError } = await supabase
         .from("jeepneys")
-        .update({
-          plate_number: plate,
-          jeep_name: name || null,
-          capacity,
-        })
+        .update({ plate_number: plate, jeep_name: name || null, capacity })
         .eq("id", jeepney.id);
-
       if (updateError) throw updateError;
+
+      let finalImageUrl = jeepney.image_url;
+      if (editImageUri) {
+        finalImageUrl = await uploadEditImage(jeepney.id, editImageUri);
+      } else if (editImageRemoved && jeepney.image_url) {
+        await deleteStoredJeepneyImage(jeepney.id);
+        finalImageUrl = null;
+      }
 
       setJeepney((current) =>
         current
@@ -605,14 +760,17 @@ export default function AdminJeepneyDetailsScreen() {
               plate_number: plate,
               jeep_name: name || null,
               capacity,
+              image_url: finalImageUrl,
             }
           : current,
       );
-
       setEditVisible(false);
+      setEditImageUri(null);
+      setEditImageUrl(finalImageUrl);
+      setEditImageRemoved(false);
       showSuccess(
         "Jeepney Updated",
-        "The jeepney information has been updated successfully.",
+        "The jeepney information and photo have been updated successfully.",
       );
     } catch (err: any) {
       console.error("❌ Failed to edit jeepney:", err);
@@ -653,7 +811,7 @@ export default function AdminJeepneyDetailsScreen() {
         `Jeepney is now assigned to bracket ${bracket}.`,
       );
     } catch (err: any) {
-      console.error("❌ Failed to assign bracket:", err);
+      console.error("led to assign bracket:", err);
       showError(
         "Unable to Assign Bracket",
         err?.message ?? "The bracket could not be assigned.",
@@ -756,12 +914,16 @@ export default function AdminJeepneyDetailsScreen() {
   };
 
   const handleDelete = async () => {
-    if (!jeepney) {
+    if (!jeepney || actionLoading) {
       return;
     }
 
     try {
       setActionLoading(true);
+
+      const deletedJeepneyId = jeepney.id;
+
+      console.log("🗑️ Deleting jeepney:", deletedJeepneyId);
 
       /*
        * Remove terminal assignment first.
@@ -769,9 +931,13 @@ export default function AdminJeepneyDetailsScreen() {
       const { error: assignmentError } = await supabase
         .from("terminal_jeepneys")
         .delete()
-        .eq("jeepney_id", jeepney.id);
+        .eq("jeepney_id", deletedJeepneyId);
 
       if (assignmentError) {
+        console.error(
+          "❌ Failed to delete terminal assignment:",
+          assignmentError,
+        );
         throw assignmentError;
       }
 
@@ -781,13 +947,23 @@ export default function AdminJeepneyDetailsScreen() {
       const { error: jeepneyError } = await supabase
         .from("jeepneys")
         .delete()
-        .eq("id", jeepney.id);
+        .eq("id", deletedJeepneyId);
 
       if (jeepneyError) {
+        console.error("❌ Failed to delete jeepney:", jeepneyError);
         throw jeepneyError;
       }
 
-      setJeepney(null);
+      console.log("✅ Jeepney deleted successfully:", deletedJeepneyId);
+
+      /*
+       * Do NOT call setJeepney(null).
+       *
+       * The details page must stay mounted until the user
+       * presses Done. closeModal() will then replace this
+       * route with the jeepney index/list screen.
+       */
+      setRedirectAfterDelete(true);
 
       setModal({
         visible: true,
@@ -797,6 +973,8 @@ export default function AdminJeepneyDetailsScreen() {
       });
     } catch (err: any) {
       console.error("❌ Failed to delete jeepney:", err);
+
+      setRedirectAfterDelete(false);
 
       showError(
         "Unable to Delete",
@@ -832,6 +1010,46 @@ export default function AdminJeepneyDetailsScreen() {
               Getting the latest fleet information
             </Text>
           </View>
+        </SafeAreaView>
+      </OceanBackground>
+    );
+  }
+
+  /*
+   * A successful delete takes priority over the normal
+   * "Jeepney unavailable" state. Even if realtime has already
+   * cleared the deleted row, keep the success modal visible
+   * until Done is pressed.
+   */
+  if (redirectAfterDelete) {
+    return (
+      <OceanBackground intensity={0.28}>
+        <SafeAreaView className="flex-1">
+          <View className="flex-1 items-center justify-center px-5">
+            <View className="w-full items-center rounded-[26px] border border-white/90 bg-clay-surface px-6 py-9">
+              <View className="h-[60px] w-[60px] items-center justify-center rounded-full bg-emerald-50">
+                <CheckCircle2 size={30} color="#059669" strokeWidth={2.4} />
+              </View>
+
+              <Text className="mt-4 text-[17px] font-extrabold text-ink-dark">
+                Jeepney Deleted
+              </Text>
+
+              <Text className="mt-2 text-center text-[11px] leading-[17px] text-ink-secondary">
+                The jeepney has been permanently removed from the fleet.
+              </Text>
+            </View>
+          </View>
+
+          <AdminActionModal
+            visible={modal.visible}
+            type={modal.type}
+            title={modal.title}
+            message={modal.message}
+            loading={actionLoading}
+            onClose={closeModal}
+            onConfirm={undefined}
+          />
         </SafeAreaView>
       </OceanBackground>
     );
@@ -916,13 +1134,12 @@ export default function AdminJeepneyDetailsScreen() {
 
           <View className="mt-4 rounded-[28px] border border-white/90 bg-clay-surface p-5">
             <View className="flex-row items-center">
-              <View className="h-[62px] w-[62px] items-center justify-center rounded-[21px] bg-ocean-100">
-                <BusFront
-                  size={30}
-                  color={colors.primaryDark}
-                  strokeWidth={2.3}
-                />
-              </View>
+              <JeepneyImage
+                uri={jeepney.image_url}
+                size={62}
+                iconSize={30}
+                rounded={21}
+              />
 
               <View className="ml-4 flex-1">
                 <Text className="text-[10px] font-extrabold uppercase tracking-[1.1px] text-ocean-700">
@@ -1286,8 +1503,8 @@ export default function AdminJeepneyDetailsScreen() {
               onPress={openBracketModal}
               className="mt-4 h-[50px] flex-row items-center justify-center rounded-[17px] border border-white/90 bg-violet-50"
             >
-              <Gauge size={18} color="#6D28D9" strokeWidth={2.4} />
-              <Text className="ml-2 text-[12px] font-extrabold text-violet-700">
+              <Gauge size={18} color={colors.primaryDark} strokeWidth={2.4} />
+              <Text className="ml-2 text-[12px] font-extrabold text-ocean-600">
                 Assign Bracket
               </Text>
             </Pressable>
@@ -1354,9 +1571,34 @@ export default function AdminJeepneyDetailsScreen() {
           setJeepName={setEditJeepName}
           capacity={editCapacity}
           setCapacity={setEditCapacity}
+          imageUri={editImageUri}
+          imageUrl={editImageUrl}
           saving={actionLoading}
+          onPickImage={pickEditImage}
+          onTakePhoto={takeEditPhoto}
+          onRemoveImage={removeEditImage}
+          onOpenImageSource={() => setImageSourceVisible(true)}
           onClose={() => !actionLoading && setEditVisible(false)}
           onSubmit={handleEditJeepney}
+        />
+
+        <ImageSourceModal
+          visible={imageSourceVisible}
+          hasImage={Boolean(editImageUri || editImageUrl)}
+          saving={actionLoading}
+          onClose={() => setImageSourceVisible(false)}
+          onGallery={() => {
+            setImageSourceVisible(false);
+            void pickEditImage();
+          }}
+          onCamera={() => {
+            setImageSourceVisible(false);
+            void takeEditPhoto();
+          }}
+          onRemove={() => {
+            removeEditImage();
+            setImageSourceVisible(false);
+          }}
         />
 
         <AssignBracketModal
@@ -1401,7 +1643,13 @@ function EditJeepneyModal({
   setJeepName,
   capacity,
   setCapacity,
+  imageUri,
+  imageUrl,
   saving,
+  onPickImage,
+  onTakePhoto,
+  onRemoveImage,
+  onOpenImageSource,
   onClose,
   onSubmit,
 }: {
@@ -1412,10 +1660,23 @@ function EditJeepneyModal({
   setJeepName: (value: string) => void;
   capacity: string;
   setCapacity: (value: string) => void;
+  imageUri: string | null;
+  imageUrl: string | null;
   saving: boolean;
+  onPickImage: () => void;
+  onTakePhoto: () => void;
+  onRemoveImage: () => void;
+  onOpenImageSource: () => void;
   onClose: () => void;
   onSubmit: () => void;
 }) {
+  const displayImage = imageUri || imageUrl;
+
+  const choosePhoto = () => {
+    if (saving) return;
+    onOpenImageSource();
+  };
+
   return (
     <Modal
       visible={visible}
@@ -1428,78 +1689,127 @@ function EditJeepneyModal({
         behavior={Platform.OS === "ios" ? "padding" : "height"}
       >
         <View className="flex-1 justify-center bg-black/30 px-5">
-          <View className="max-h-[85%] rounded-[30px] border border-white/95 bg-clay-surface p-6">
-            <View className="flex-row items-center">
-              <View className="h-[46px] w-[46px] items-center justify-center rounded-[15px] bg-ocean-100">
-                <Pencil
-                  size={21}
-                  color={colors.primaryDark}
-                  strokeWidth={2.4}
-                />
+          <View className="max-h-[92%] rounded-[30px] border border-white/95 bg-clay-surface p-6">
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+            >
+              <View className="flex-row items-center">
+                <View className="h-[46px] w-[46px] items-center justify-center rounded-[15px] bg-ocean-100">
+                  <Pencil
+                    size={21}
+                    color={colors.primaryDark}
+                    strokeWidth={2.4}
+                  />
+                </View>
+                <View className="ml-3 flex-1">
+                  <Text className="text-[17px] font-extrabold text-ink-dark">
+                    Edit Jeepney
+                  </Text>
+                  <Text className="mt-0.5 text-[10px] text-ink-muted">
+                    Update vehicle information and photo.
+                  </Text>
+                </View>
+                <Pressable
+                  disabled={saving}
+                  onPress={onClose}
+                  className="h-[38px] w-[38px] items-center justify-center rounded-full bg-slate-100"
+                >
+                  <XCircle size={19} color="#64748B" strokeWidth={2.3} />
+                </Pressable>
               </View>
-              <View className="ml-3 flex-1">
-                <Text className="text-[17px] font-extrabold text-ink-dark">
-                  Edit Jeepney
-                </Text>
-                <Text className="mt-0.5 text-[10px] text-ink-muted">
-                  Update vehicle information.
-                </Text>
-              </View>
-              <Pressable
-                disabled={saving}
-                onPress={onClose}
-                className="h-[38px] w-[38px] items-center justify-center rounded-full bg-slate-100"
-              >
-                <XCircle size={19} color="#64748B" strokeWidth={2.3} />
-              </Pressable>
-            </View>
 
-            <EditField
-              label="Plate Number"
-              value={plateNumber}
-              onChangeText={setPlateNumber}
-              placeholder="e.g. ABC-1234"
-              autoCapitalize="characters"
-            />
-            <EditField
-              label="Jeepney Name"
-              value={jeepName}
-              onChangeText={setJeepName}
-              placeholder="Optional"
-            />
-            <EditField
-              label="Maximum Capacity"
-              value={capacity}
-              onChangeText={setCapacity}
-              placeholder="e.g. 24"
-              keyboardType="number-pad"
-            />
-
-            <View className="mt-6 flex-row">
-              <Pressable
-                disabled={saving}
-                onPress={onClose}
-                className="flex-1 items-center justify-center rounded-full bg-slate-100 py-3.5"
-              >
-                <Text className="text-[11px] font-extrabold text-ink-secondary">
-                  Cancel
-                </Text>
-              </Pressable>
-              <Pressable
-                disabled={saving}
-                onPress={onSubmit}
-                className="ml-3 flex-1 flex-row items-center justify-center rounded-full bg-ocean-400 py-3.5"
-              >
-                {saving ? (
-                  <ActivityIndicator size="small" color="#FFFFFF" />
-                ) : (
-                  <CheckCircle2 size={16} color="#FFFFFF" strokeWidth={2.5} />
+              <Text className="mt-5 text-[10px] font-extrabold uppercase tracking-[0.6px] text-ink-muted">
+                Jeepney Photo
+              </Text>
+              <View className="mt-2 items-center">
+                <View className="h-[160px] w-full overflow-hidden rounded-[22px] border border-white bg-slate-100">
+                  {displayImage ? (
+                    <Image
+                      source={{ uri: displayImage }}
+                      className="h-full w-full"
+                      resizeMode="cover"
+                    />
+                  ) : (
+                    <View className="flex-1 items-center justify-center">
+                      <BusFront size={45} color="#94A3B8" strokeWidth={1.8} />
+                      <Text className="mt-2 text-[10px] font-bold text-slate-400">
+                        No photo
+                      </Text>
+                    </View>
+                  )}
+                </View>
+                <Pressable
+                  disabled={saving}
+                  onPress={choosePhoto}
+                  className="mt-3 flex-row items-center rounded-full bg-ocean-400 px-5 py-3"
+                >
+                  <Camera size={16} color="#FFFFFF" strokeWidth={2.4} />
+                  <Text className="ml-2 text-[11px] font-extrabold text-white">
+                    {displayImage ? "Change Photo" : "Add Photo"}
+                  </Text>
+                </Pressable>
+                {displayImage && (
+                  <Pressable
+                    disabled={saving}
+                    onPress={onRemoveImage}
+                    className="mt-2 flex-row items-center rounded-full px-4 py-2"
+                  >
+                    <Trash2 size={14} color="#DC2626" strokeWidth={2.3} />
+                    <Text className="ml-1.5 text-[10px] font-extrabold text-red-600">
+                      Remove Photo
+                    </Text>
+                  </Pressable>
                 )}
-                <Text className="ml-2 text-[11px] font-extrabold text-white">
-                  {saving ? "Saving..." : "Save Changes"}
-                </Text>
-              </Pressable>
-            </View>
+              </View>
+
+              <EditField
+                label="Plate Number"
+                value={plateNumber}
+                onChangeText={setPlateNumber}
+                placeholder="e.g. ABC-1234"
+                autoCapitalize="characters"
+              />
+              <EditField
+                label="Jeepney Name"
+                value={jeepName}
+                onChangeText={setJeepName}
+                placeholder="Optional"
+              />
+              <EditField
+                label="Maximum Capacity"
+                value={capacity}
+                onChangeText={setCapacity}
+                placeholder="e.g. 24"
+                keyboardType="number-pad"
+              />
+
+              <View className="mt-6 flex-row">
+                <Pressable
+                  disabled={saving}
+                  onPress={onClose}
+                  className="flex-1 items-center justify-center rounded-full bg-slate-100 py-3.5"
+                >
+                  <Text className="text-[11px] font-extrabold text-ink-secondary">
+                    Cancel
+                  </Text>
+                </Pressable>
+                <Pressable
+                  disabled={saving}
+                  onPress={onSubmit}
+                  className="ml-3 flex-1 flex-row items-center justify-center rounded-full bg-ocean-400 py-3.5"
+                >
+                  {saving ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <CheckCircle2 size={16} color="#FFFFFF" strokeWidth={2.5} />
+                  )}
+                  <Text className="ml-2 text-[11px] font-extrabold text-white">
+                    {saving ? "Saving..." : "Save Changes"}
+                  </Text>
+                </Pressable>
+              </View>
+            </ScrollView>
           </View>
         </View>
       </KeyboardAvoidingView>
@@ -1543,7 +1853,7 @@ function AssignBracketModal({
           <View className="rounded-[30px] border border-white/95 bg-clay-surface p-6">
             <View className="flex-row items-center">
               <View className="h-[46px] w-[46px] items-center justify-center rounded-[15px] bg-violet-100">
-                <Gauge size={22} color="#6D28D9" strokeWidth={2.4} />
+                <Gauge size={22} color={colors.primaryDark} strokeWidth={2.4} />
               </View>
               <View className="ml-3 flex-1">
                 <Text className="text-[17px] font-extrabold text-ink-dark">
@@ -1563,10 +1873,10 @@ function AssignBracketModal({
             </View>
 
             <View className="mt-5 rounded-[18px] bg-violet-50 p-4">
-              <Text className="text-[9px] font-extrabold uppercase tracking-[0.6px] text-violet-600">
+              <Text className="text-[9px] font-extrabold uppercase tracking-[0.6px] text-ocean-600">
                 Current bracket
               </Text>
-              <Text className="mt-1 text-[20px] font-extrabold text-violet-800">
+              <Text className="mt-1 text-[20px] font-extrabold text-ocean-800">
                 {currentBracket !== null
                   ? `Bracket ${currentBracket}`
                   : "Not assigned"}
@@ -1902,5 +2212,129 @@ function AdminActionModal({
         )}
       </View>
     </View>
+  );
+}
+
+function ImageSourceModal({
+  visible,
+  hasImage,
+  saving,
+  onClose,
+  onGallery,
+  onCamera,
+  onRemove,
+}: {
+  visible: boolean;
+  hasImage: boolean;
+  saving: boolean;
+  onClose: () => void;
+  onGallery: () => void;
+  onCamera: () => void;
+  onRemove: () => void;
+}) {
+  return (
+    <Modal
+      visible={visible}
+      transparent
+      animationType="fade"
+      onRequestClose={onClose}
+    >
+      <KeyboardAvoidingView
+        className="flex-1"
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+      >
+        <View className="flex-1 items-center justify-center bg-black/35 px-5">
+          <View className="w-full max-w-[390px] rounded-[30px] border border-white/95 bg-clay-surface p-5">
+            <View className="flex-row items-center">
+              <View className="h-[48px] w-[48px] items-center justify-center rounded-[16px] bg-ocean-100">
+                <Camera
+                  size={22}
+                  color={colors.primaryDark}
+                  strokeWidth={2.4}
+                />
+              </View>
+              <View className="ml-3 flex-1">
+                <Text className="text-[16px] font-extrabold text-ink-dark">
+                  Jeepney Photo
+                </Text>
+                <Text className="mt-0.5 text-[10px] leading-[15px] text-ink-muted">
+                  Choose a photo source for this jeepney.
+                </Text>
+              </View>
+              <Pressable
+                disabled={saving}
+                onPress={onClose}
+                className="h-[38px] w-[38px] items-center justify-center rounded-full bg-slate-100"
+              >
+                <XCircle size={19} color="#64748B" strokeWidth={2.3} />
+              </Pressable>
+            </View>
+
+            <Pressable
+              disabled={saving}
+              onPress={onGallery}
+              className="mt-5 flex-row items-center rounded-[21px] border border-white/90 bg-white px-4 py-4"
+            >
+              <View className="h-[42px] w-[42px] items-center justify-center rounded-[14px] bg-ocean-100">
+                <ImageIcon
+                  size={20}
+                  color={colors.primaryDark}
+                  strokeWidth={2.3}
+                />
+              </View>
+              <View className="ml-3 flex-1">
+                <Text className="text-[12px] font-extrabold text-ink-dark">
+                  Choose from Gallery
+                </Text>
+                <Text className="mt-0.5 text-[10px] text-ink-muted">
+                  Select an existing jeepney picture.
+                </Text>
+              </View>
+            </Pressable>
+
+            <Pressable
+              disabled={saving}
+              onPress={onCamera}
+              className="mt-3 flex-row items-center rounded-[21px] border border-white/90 bg-white px-4 py-4"
+            >
+              <View className="h-[42px] w-[42px] items-center justify-center rounded-[14px] bg-sky-100">
+                <Camera size={20} color="#0284C7" strokeWidth={2.3} />
+              </View>
+              <View className="ml-3 flex-1">
+                <Text className="text-[12px] font-extrabold text-ink-dark">
+                  Take Photo
+                </Text>
+                <Text className="mt-0.5 text-[10px] text-ink-muted">
+                  Use the device camera.
+                </Text>
+              </View>
+            </Pressable>
+
+            {hasImage && (
+              <Pressable
+                disabled={saving}
+                onPress={onRemove}
+                className="mt-3 flex-row items-center justify-center rounded-full bg-red-50 py-3.5"
+              >
+                <Trash2 size={16} color="#DC2626" strokeWidth={2.3} />
+                <Text className="ml-2 text-[11px] font-extrabold text-red-600">
+                  Remove Photo
+                </Text>
+              </Pressable>
+            )}
+
+            <Pressable
+              disabled={saving}
+              onPress={onClose}
+              className="mt-3 items-center rounded-full bg-slate-100 py-3.5"
+            >
+              <Text className="text-[11px] font-extrabold text-ink-secondary">
+                Cancel
+              </Text>
+            </Pressable>
+          </View>
+        </View>
+      </KeyboardAvoidingView>
+    </Modal>
   );
 }

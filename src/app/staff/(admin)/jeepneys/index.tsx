@@ -1,12 +1,16 @@
+import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
 import {
   AlertTriangle,
   ArrowLeft,
   BusFront,
+  Camera,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
   Clock3,
+  Image as ImageIcon,
+  ImagePlus,
   MapPin,
   Plus,
   RefreshCw,
@@ -18,6 +22,8 @@ import {
 import { useMemo, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
+  Image,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -31,6 +37,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import OceanBackground from "@/src/shared/components/clay/OceanBackground";
+import JeepneyImage from "@/src/shared/components/jeepney/JeepneyImage";
 import { colors } from "@/src/shared/constants/theme";
 import {
   AdminJeepneyRecord,
@@ -80,6 +87,8 @@ export default function AdminJeepneysScreen() {
   const [bracket, setBracket] = useState("");
 
   const [capacity, setCapacity] = useState("24");
+  const [imageUri, setImageUri] = useState<string | null>(null);
+  const [imageSourceVisible, setImageSourceVisible] = useState(false);
 
   const [selectedDriver, setSelectedDriver] = useState<AvailableDriver | null>(
     null,
@@ -125,6 +134,8 @@ export default function AdminJeepneysScreen() {
     setJeepName("");
     setBracket("");
     setCapacity("24");
+    setImageUri(null);
+    setImageSourceVisible(false);
     setSelectedDriver(null);
     setDriverPickerOpen(false);
     setModalError(null);
@@ -137,6 +148,74 @@ export default function AdminJeepneysScreen() {
 
     setAddVisible(false);
     resetForm();
+  };
+
+  const pickAddImage = async () => {
+    if (saving) return;
+
+    try {
+      const permission =
+        await ImagePicker.requestMediaLibraryPermissionsAsync();
+
+      if (!permission.granted) {
+        Alert.alert(
+          "Photo Access Required",
+          "Allow photo access so you can choose a jeepney picture.",
+        );
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ["images"],
+        allowsEditing: true,
+        aspect: [4, 3],
+        quality: 0.8,
+      });
+
+      if (!result.canceled && result.assets?.[0]?.uri) {
+        setImageUri(result.assets[0].uri);
+      }
+    } catch (err) {
+      console.error("Failed to select jeepney image:", err);
+
+      Alert.alert(
+        "Unable to Select Photo",
+        "The jeepney photo could not be selected.",
+      );
+    }
+  };
+
+  const takeAddPhoto = async () => {
+    if (saving) return;
+
+    try {
+      const permission = await ImagePicker.requestCameraPermissionsAsync();
+
+      if (!permission.granted) {
+        Alert.alert(
+          "Camera Access Required",
+          "Allow camera access so you can take a jeepney picture.",
+        );
+        return;
+      }
+
+      const result = await ImagePicker.launchCameraAsync({
+        allowsEditing: true,
+        aspect: [4, 3],
+        quality: 0.8,
+      });
+
+      if (!result.canceled && result.assets?.[0]?.uri) {
+        setImageUri(result.assets[0].uri);
+      }
+    } catch (err) {
+      console.error("Failed to take jeepney image:", err);
+
+      Alert.alert(
+        "Unable to Take Photo",
+        "The jeepney photo could not be captured.",
+      );
+    }
   };
 
   const handleAddJeepney = async () => {
@@ -178,6 +257,7 @@ export default function AdminJeepneysScreen() {
         capacity: parsedCapacity,
 
         driver_id: selectedDriver?.id ?? null,
+        image_uri: imageUri,
       });
 
       setAddVisible(false);
@@ -404,6 +484,12 @@ export default function AdminJeepneysScreen() {
         setBracket={setBracket}
         capacity={capacity}
         setCapacity={setCapacity}
+        imageUri={imageUri}
+        setImageUri={setImageUri}
+        imageSourceVisible={imageSourceVisible}
+        setImageSourceVisible={setImageSourceVisible}
+        pickImage={pickAddImage}
+        takePhoto={takeAddPhoto}
         selectedDriver={selectedDriver}
         setSelectedDriver={setSelectedDriver}
         availableDrivers={availableDrivers}
@@ -438,6 +524,12 @@ function AddJeepneyModal({
   setBracket,
   capacity,
   setCapacity,
+  imageUri,
+  setImageUri,
+  imageSourceVisible,
+  setImageSourceVisible,
+  pickImage,
+  takePhoto,
   selectedDriver,
   setSelectedDriver,
   availableDrivers,
@@ -459,6 +551,12 @@ function AddJeepneyModal({
   setBracket: (value: string) => void;
   capacity: string;
   setCapacity: (value: string) => void;
+  imageUri: string | null;
+  setImageUri: (value: string | null) => void;
+  imageSourceVisible: boolean;
+  setImageSourceVisible: (value: boolean) => void;
+  pickImage: () => void | Promise<void>;
+  takePhoto: () => void | Promise<void>;
   selectedDriver: AvailableDriver | null;
   setSelectedDriver: (driver: AvailableDriver | null) => void;
   availableDrivers: AvailableDriver[];
@@ -493,13 +591,7 @@ function AddJeepneyModal({
               }}
             >
               <View className="flex-row items-center">
-                <View className="h-[48px] w-[48px] items-center justify-center rounded-[16px] bg-ocean-100">
-                  <BusFront
-                    size={24}
-                    color={colors.primaryDark}
-                    strokeWidth={2.3}
-                  />
-                </View>
+                <JeepneyImage size={48} rounded={16} />
 
                 <View className="ml-3 flex-1">
                   <Text className="text-[18px] font-extrabold text-ink-dark">
@@ -543,6 +635,81 @@ function AddJeepneyModal({
                   </View>
                 </View>
               )}
+
+              <View className="mt-5 rounded-[20px] border border-white bg-white/70 p-4">
+                <View className="flex-row items-center">
+                  {imageUri ? (
+                    <Image
+                      source={{ uri: imageUri }}
+                      className="h-[76px] w-[76px] rounded-[22px]"
+                      resizeMode="cover"
+                    />
+                  ) : (
+                    <View className="h-[76px] w-[76px] items-center justify-center rounded-[22px] bg-ocean-100">
+                      <BusFront
+                        size={30}
+                        color={colors.primaryDark}
+                        strokeWidth={2.2}
+                      />
+                    </View>
+                  )}
+
+                  <View className="ml-4 flex-1">
+                    <Text className="text-[12px] font-extrabold text-ink-dark">
+                      Jeepney Picture
+                    </Text>
+
+                    <Text className="mt-1 text-[10px] leading-[15px] text-ink-muted">
+                      {imageUri
+                        ? "Use the selected picture for this jeepney."
+                        : "Choose a picture from your gallery or take a new one."}
+                    </Text>
+
+                    <Pressable
+                      disabled={saving}
+                      onPress={() => setImageSourceVisible(true)}
+                      className="mt-3 flex-row items-center self-start rounded-full bg-ocean-400 px-4 py-2.5"
+                    >
+                      <ImagePlus size={14} color="#FFFFFF" strokeWidth={2.4} />
+
+                      <Text className="ml-2 text-[10px] font-extrabold text-white">
+                        {imageUri ? "Change Picture" : "Choose Picture"}
+                      </Text>
+                    </Pressable>
+                  </View>
+                </View>
+
+                {imageUri && (
+                  <Pressable
+                    disabled={saving}
+                    onPress={() => setImageUri(null)}
+                    className="mt-3 self-end rounded-full bg-slate-100 px-3 py-2"
+                  >
+                    <Text className="text-[9px] font-extrabold text-slate-600">
+                      Remove Selection
+                    </Text>
+                  </Pressable>
+                )}
+              </View>
+
+              <ImageSourceModal
+                visible={imageSourceVisible}
+                hasImage={Boolean(imageUri)}
+                saving={saving}
+                onClose={() => setImageSourceVisible(false)}
+                onGallery={() => {
+                  setImageSourceVisible(false);
+                  void pickImage();
+                }}
+                onCamera={() => {
+                  setImageSourceVisible(false);
+                  void takePhoto();
+                }}
+                onRemove={() => {
+                  setImageUri(null);
+                  setImageSourceVisible(false);
+                }}
+              />
 
               <InputField
                 label="Plate Number"
@@ -704,6 +871,138 @@ function AddJeepneyModal({
   );
 }
 
+function ImageSourceModal({
+  visible,
+  hasImage,
+  saving,
+  onClose,
+  onGallery,
+  onCamera,
+  onRemove,
+}: {
+  visible: boolean;
+  hasImage: boolean;
+  saving: boolean;
+  onClose: () => void;
+  onGallery: () => void | Promise<void>;
+  onCamera: () => void | Promise<void>;
+  onRemove: () => void;
+}) {
+  return (
+    <Modal
+      visible={visible}
+      transparent
+      animationType="fade"
+      onRequestClose={onClose}
+    >
+      <KeyboardAvoidingView
+        className="flex-1"
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+      >
+        <View className="flex-1 items-center justify-center bg-black/35 px-5">
+          <View className="w-full max-w-[390px] rounded-[30px] border border-white/95 bg-clay-surface p-5">
+            <View className="flex-row items-center">
+              <View className="h-[48px] w-[48px] items-center justify-center rounded-[16px] bg-ocean-100">
+                <Camera
+                  size={22}
+                  color={colors.primaryDark}
+                  strokeWidth={2.4}
+                />
+              </View>
+
+              <View className="ml-3 flex-1">
+                <Text className="text-[16px] font-extrabold text-ink-dark">
+                  Jeepney Photo
+                </Text>
+
+                <Text className="mt-0.5 text-[10px] leading-[15px] text-ink-muted">
+                  Choose a photo source for this jeepney.
+                </Text>
+              </View>
+
+              <Pressable
+                disabled={saving}
+                onPress={onClose}
+                className="h-[38px] w-[38px] items-center justify-center rounded-full bg-slate-100"
+              >
+                <XCircle size={19} color="#64748B" strokeWidth={2.3} />
+              </Pressable>
+            </View>
+
+            <Pressable
+              disabled={saving}
+              onPress={onGallery}
+              className="mt-5 flex-row items-center rounded-[21px] border border-white/90 bg-white px-4 py-4"
+            >
+              <View className="h-[42px] w-[42px] items-center justify-center rounded-[14px] bg-ocean-100">
+                <ImageIcon
+                  size={20}
+                  color={colors.primaryDark}
+                  strokeWidth={2.3}
+                />
+              </View>
+
+              <View className="ml-3 flex-1">
+                <Text className="text-[12px] font-extrabold text-ink-dark">
+                  Choose from Gallery
+                </Text>
+
+                <Text className="mt-0.5 text-[10px] text-ink-muted">
+                  Select an existing jeepney picture.
+                </Text>
+              </View>
+            </Pressable>
+
+            <Pressable
+              disabled={saving}
+              onPress={onCamera}
+              className="mt-3 flex-row items-center rounded-[21px] border border-white/90 bg-white px-4 py-4"
+            >
+              <View className="h-[42px] w-[42px] items-center justify-center rounded-[14px] bg-sky-100">
+                <Camera size={20} color="#0284C7" strokeWidth={2.3} />
+              </View>
+
+              <View className="ml-3 flex-1">
+                <Text className="text-[12px] font-extrabold text-ink-dark">
+                  Take Photo
+                </Text>
+
+                <Text className="mt-0.5 text-[10px] text-ink-muted">
+                  Use the device camera.
+                </Text>
+              </View>
+            </Pressable>
+
+            {hasImage && (
+              <Pressable
+                disabled={saving}
+                onPress={onRemove}
+                className="mt-3 flex-row items-center justify-center rounded-full bg-red-50 py-3.5"
+              >
+                <XCircle size={16} color="#DC2626" strokeWidth={2.3} />
+
+                <Text className="ml-2 text-[11px] font-extrabold text-red-600">
+                  Remove Photo
+                </Text>
+              </Pressable>
+            )}
+
+            <Pressable
+              disabled={saving}
+              onPress={onClose}
+              className="mt-3 items-center rounded-full bg-slate-100 py-3.5"
+            >
+              <Text className="text-[11px] font-extrabold text-ink-secondary">
+                Cancel
+              </Text>
+            </Pressable>
+          </View>
+        </View>
+      </KeyboardAvoidingView>
+    </Modal>
+  );
+}
+
 function InputField({
   label,
   value,
@@ -824,9 +1123,7 @@ function JeepneyCard({
       className="mb-3 rounded-[25px] border border-white/90 bg-clay-surface p-5"
     >
       <View className="flex-row items-center">
-        <View className="h-[50px] w-[50px] items-center justify-center rounded-[16px] bg-ocean-100">
-          <BusFront size={24} color={colors.primaryDark} strokeWidth={2.3} />
-        </View>
+        <JeepneyImage imageUrl={jeepney.image_url} size={50} rounded={16} />
 
         <View className="ml-3 flex-1">
           <Text

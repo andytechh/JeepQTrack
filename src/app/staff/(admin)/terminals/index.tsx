@@ -1,5 +1,7 @@
+import { router } from "expo-router";
 import {
   AlertTriangle,
+  ArrowLeft,
   ArrowRightLeft,
   BusFront,
   CheckCircle2,
@@ -81,6 +83,21 @@ export default function AdminTerminalsScreen() {
     return filterJeepneys(terminalTwoJeepneys, search);
   }, [terminalTwoJeepneys, search]);
 
+  /**
+   * Navigate back using the same pattern as System Status.
+   *
+   * If there is a previous screen in the navigation stack,
+   * go back normally. Otherwise, return to the admin tabs.
+   */
+  const handleBack = () => {
+    if (router.canGoBack()) {
+      router.back();
+      return;
+    }
+
+    router.replace("/staff/(admin)/(tabs)");
+  };
+
   const openAssignModal = (jeepney: TerminalJeepney) => {
     setSelectedJeepney(jeepney);
     setTargetTerminal(jeepney.terminal_id === 1 ? 2 : 1);
@@ -156,27 +173,46 @@ export default function AdminTerminalsScreen() {
             paddingBottom: 140,
           }}
         >
-          {/* HEADER */}
+          {/* =====================================================
+              HEADER
+          ====================================================== */}
 
           <View className="flex-row items-center">
-            <View className="h-[51px] w-[51px] items-center justify-center rounded-[18px] border border-white/90 bg-clay-surface shadow-clay-sm">
-              <MapPin size={23} color={colors.primaryDark} strokeWidth={2.4} />
-            </View>
+            {/* BACK BUTTON */}
+
+            <Pressable
+              onPress={() => router.back()}
+              className="h-[48px] w-[48px] items-center justify-center rounded-[16px] bg-white/80"
+              accessibilityRole="button"
+              accessibilityLabel="Go back"
+            >
+              <ArrowLeft
+                size={19}
+                color={colors.primaryDark}
+                strokeWidth={2.5}
+              />
+            </Pressable>
+
+            {/* TITLE */}
 
             <View className="ml-3 flex-1">
               <Text className="text-[10px] font-extrabold uppercase tracking-[1.3px] text-ocean-700">
                 ADMIN
               </Text>
 
-              <Text className="mt-0.5 text-[24px] font-extrabold text-ink-dark">
+              <Text className="mt-0.5 text-[25px] font-extrabold text-ink-dark">
                 Terminals
               </Text>
             </View>
 
+            {/* REFRESH */}
+
             <Pressable
               onPress={refresh}
               disabled={refreshing}
-              className="h-[44px] w-[44px] items-center justify-center rounded-[16px] border border-white/90 bg-clay-surface"
+              accessibilityRole="button"
+              accessibilityLabel="Refresh terminals"
+              className="h-[44px] w-[44px] items-center justify-center rounded-[16px] border border-white/90 bg-clay-surface shadow-clay-sm"
             >
               <RefreshCw
                 size={18}
@@ -190,7 +226,9 @@ export default function AdminTerminalsScreen() {
             Assign and manage jeepneys between the Donsol and Daraga terminals.
           </Text>
 
-          {/* SEARCH */}
+          {/* =====================================================
+              SEARCH
+          ====================================================== */}
 
           <View className="mt-5 flex-row items-center rounded-[19px] border border-white/90 bg-clay-surface px-4">
             <Search size={18} color="#64748B" strokeWidth={2.3} />
@@ -206,6 +244,8 @@ export default function AdminTerminalsScreen() {
             {search.length > 0 && (
               <Pressable
                 onPress={() => setSearch("")}
+                accessibilityRole="button"
+                accessibilityLabel="Clear search"
                 className="h-[30px] w-[30px] items-center justify-center rounded-full bg-slate-100"
               >
                 <X size={14} color="#64748B" strokeWidth={2.5} />
@@ -213,7 +253,9 @@ export default function AdminTerminalsScreen() {
             )}
           </View>
 
-          {/* OVERVIEW */}
+          {/* =====================================================
+              OVERVIEW
+          ====================================================== */}
 
           <View className="mt-5 flex-row">
             <TerminalSummaryCard
@@ -235,7 +277,9 @@ export default function AdminTerminalsScreen() {
             </View>
           </View>
 
-          {/* TERMINAL 1 */}
+          {/* =====================================================
+              TERMINAL 1
+          ====================================================== */}
 
           <TerminalSection
             terminal={TERMINALS[1]}
@@ -246,7 +290,9 @@ export default function AdminTerminalsScreen() {
             onAssign={openAssignModal}
           />
 
-          {/* TERMINAL 2 */}
+          {/* =====================================================
+              TERMINAL 2
+          ====================================================== */}
 
           <TerminalSection
             terminal={TERMINALS[2]}
@@ -258,6 +304,10 @@ export default function AdminTerminalsScreen() {
           />
         </ScrollView>
 
+        {/* =======================================================
+            ASSIGN MODAL
+        ======================================================== */}
+
         <AssignModal
           visible={modalType === "assign"}
           jeepney={selectedJeepney}
@@ -267,6 +317,10 @@ export default function AdminTerminalsScreen() {
           onChangeTerminal={setTargetTerminal}
           onConfirm={confirmAssignment}
         />
+
+        {/* =======================================================
+            FEEDBACK MODAL
+        ======================================================== */}
 
         <FeedbackModal
           visible={modalType === "success" || modalType === "error"}
@@ -283,9 +337,9 @@ export default function AdminTerminalsScreen() {
   );
 }
 
-/* ============================================================
+/* ================================================================
    HELPERS
-============================================================ */
+================================================================ */
 
 function filterJeepneys(jeepneys: TerminalJeepney[], search: string) {
   const query = search.trim().toLowerCase();
@@ -349,9 +403,9 @@ function getStatusPresentation(status: TerminalJeepney["status"]) {
   }
 }
 
-/* ============================================================
+/* ================================================================
    TERMINAL SUMMARY
-============================================================ */
+================================================================ */
 
 function TerminalSummaryCard({
   name,
@@ -401,9 +455,9 @@ function TerminalSummaryCard({
   );
 }
 
-/* ============================================================
+/* ================================================================
    TERMINAL SECTION
-============================================================ */
+================================================================ */
 
 function TerminalSection({
   terminal,
@@ -476,9 +530,9 @@ function TerminalSection({
   );
 }
 
-/* ============================================================
+/* ================================================================
    MINI STAT
-============================================================ */
+================================================================ */
 
 function MiniStat({
   label,
@@ -506,9 +560,9 @@ function MiniStat({
   );
 }
 
-/* ============================================================
+/* ================================================================
    JEEPNEY CARD
-============================================================ */
+================================================================ */
 
 function JeepneyTerminalCard({
   jeepney,
@@ -532,6 +586,8 @@ function JeepneyTerminalCard({
 
   return (
     <View className="mb-3 rounded-[25px] border border-white/90 bg-clay-surface p-4 shadow-clay-sm">
+      {/* HEADER */}
+
       <View className="flex-row items-center">
         <View className="h-[47px] w-[47px] items-center justify-center rounded-[15px] bg-ocean-100">
           <BusFront size={23} color={colors.primaryDark} strokeWidth={2.3} />
@@ -567,6 +623,8 @@ function JeepneyTerminalCard({
         </View>
       </View>
 
+      {/* DRIVER / BRACKET */}
+
       <View className="mt-4 flex-row">
         <InfoItem
           icon={<Users size={14} color="#64748B" strokeWidth={2.2} />}
@@ -580,6 +638,8 @@ function JeepneyTerminalCard({
           value={String(jeepney.bracket)}
         />
       </View>
+
+      {/* OCCUPANCY / QUEUE */}
 
       <View className="mt-3 flex-row">
         <InfoItem
@@ -596,6 +656,8 @@ function JeepneyTerminalCard({
           }
         />
       </View>
+
+      {/* OCCUPANCY BAR */}
 
       <View className="mt-4">
         <View className="h-[7px] overflow-hidden rounded-full bg-slate-100">
@@ -617,6 +679,8 @@ function JeepneyTerminalCard({
           </Text>
         </View>
       </View>
+
+      {/* GPS / MOVE */}
 
       <View className="mt-4 flex-row items-center">
         <View className="flex-1 flex-row items-center">
@@ -654,9 +718,9 @@ function JeepneyTerminalCard({
   );
 }
 
-/* ============================================================
+/* ================================================================
    INFO ITEM
-============================================================ */
+================================================================ */
 
 function InfoItem({
   icon,
@@ -689,9 +753,9 @@ function InfoItem({
   );
 }
 
-/* ============================================================
+/* ================================================================
    EMPTY
-============================================================ */
+================================================================ */
 
 function EmptyTerminal() {
   return (
@@ -711,9 +775,9 @@ function EmptyTerminal() {
   );
 }
 
-/* ============================================================
+/* ================================================================
    ASSIGN MODAL
-============================================================ */
+================================================================ */
 
 function AssignModal({
   visible,
@@ -760,7 +824,7 @@ function AssignModal({
               </Text>
 
               <Text className="mt-0.5 text-[10px] font-semibold text-ink-muted">
-                Change this jeepney's terminal
+                Change this jeepney&apos;s terminal
               </Text>
             </View>
 
@@ -870,9 +934,9 @@ function AssignModal({
   );
 }
 
-/* ============================================================
+/* ================================================================
    TERMINAL OPTION
-============================================================ */
+================================================================ */
 
 function TerminalOption({
   name,
@@ -932,9 +996,9 @@ function TerminalOption({
   );
 }
 
-/* ============================================================
+/* ================================================================
    FEEDBACK MODAL
-============================================================ */
+================================================================ */
 
 function FeedbackModal({
   visible,
@@ -996,9 +1060,9 @@ function FeedbackModal({
   );
 }
 
-/* ============================================================
+/* ================================================================
    DATE HELPER
-============================================================ */
+================================================================ */
 
 function isToday(dateString: string | null) {
   if (!dateString) {

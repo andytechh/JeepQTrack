@@ -1,7 +1,6 @@
 import { useRouter } from "expo-router";
 import {
   AlertTriangle,
-  ArrowLeft,
   CheckCircle2,
   ChevronRight,
   Eye,
@@ -21,7 +20,6 @@ import { useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
-  Image,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -86,7 +84,9 @@ export default function AdminStaffScreen() {
   const [filter, setFilter] = useState<StaffFilter>("all");
 
   const [showAddModal, setShowAddModal] = useState(false);
+
   const [showSuccessModal, setShowSuccessModal] = useState(false);
+
   const [createdStaffName, setCreatedStaffName] = useState("");
 
   const filteredStaff = useMemo(() => {
@@ -97,9 +97,9 @@ export default function AdminStaffScreen() {
         !query ||
         member.display_name.toLowerCase().includes(query) ||
         member.email.toLowerCase().includes(query) ||
-        Boolean(member.phone_number?.toLowerCase().includes(query)) ||
-        Boolean(member.jeepney_plate_number?.toLowerCase().includes(query)) ||
-        Boolean(member.jeepney_name?.toLowerCase().includes(query));
+        member.phone_number?.toLowerCase().includes(query) ||
+        member.jeepney_plate_number?.toLowerCase().includes(query) ||
+        member.jeepney_name?.toLowerCase().includes(query);
 
       let matchesFilter = true;
 
@@ -137,6 +137,7 @@ export default function AdminStaffScreen() {
       await createStaff(data);
 
       setShowAddModal(false);
+
       setCreatedStaffName(data.display_name);
 
       setTimeout(() => {
@@ -191,30 +192,14 @@ export default function AdminStaffScreen() {
             paddingBottom: 140,
           }}
         >
-          {/* HEADER */}
+          {/* =====================================================
+              HEADER
+          ====================================================== */}
 
           <View className="flex-row items-center">
-            <Pressable
-              onPress={() => {
-                if (router.canGoBack()) {
-                  router.back();
-                }
-              }}
-              className="h-[44px] w-[44px] items-center justify-center rounded-[16px] border border-white/90 bg-clay-surface"
-              hitSlop={8}
-              style={{
-                shadowColor: "#000",
-                shadowOffset: {
-                  width: 0,
-                  height: 2,
-                },
-                shadowOpacity: 0.05,
-                shadowRadius: 5,
-                elevation: 1,
-              }}
-            >
-              <ArrowLeft size={20} color="#475569" strokeWidth={2.5} />
-            </Pressable>
+            <View className="h-[50px] w-[50px] items-center justify-center rounded-[18px] bg-ocean-100">
+              <Users size={24} color={colors.primaryDark} strokeWidth={2.4} />
+            </View>
 
             <View className="ml-3 flex-1">
               <Text className="text-[10px] font-extrabold uppercase tracking-[1.3px] text-ocean-700">
@@ -225,6 +210,8 @@ export default function AdminStaffScreen() {
                 Staff
               </Text>
             </View>
+
+            {/* STAFF COUNT + ADD BUTTON */}
 
             <View className="flex-row items-center">
               <View className="rounded-full bg-ocean-100 px-3 py-2">
@@ -256,7 +243,9 @@ export default function AdminStaffScreen() {
             Manage drivers, dispatchers, and administrators.
           </Text>
 
-          {/* SEARCH */}
+          {/* =====================================================
+              SEARCH
+          ====================================================== */}
 
           <View className="mt-5 flex-row items-center rounded-[20px] border border-white/90 bg-clay-surface px-4">
             <Search size={18} color="#64748B" strokeWidth={2.2} />
@@ -267,18 +256,18 @@ export default function AdminStaffScreen() {
               placeholder="Search staff, email, plate, or jeepney"
               placeholderTextColor="#94A3B8"
               className="ml-3 flex-1 py-4 text-[12px] font-medium text-ink-dark"
-              autoCapitalize="none"
-              autoCorrect={false}
             />
 
             {search.length > 0 && (
-              <Pressable onPress={() => setSearch("")} hitSlop={8}>
+              <Pressable onPress={() => setSearch("")}>
                 <XCircle size={18} color="#94A3B8" strokeWidth={2.2} />
               </Pressable>
             )}
           </View>
 
-          {/* FILTERS */}
+          {/* =====================================================
+              FILTERS
+          ====================================================== */}
 
           <ScrollView
             horizontal
@@ -308,7 +297,9 @@ export default function AdminStaffScreen() {
             })}
           </ScrollView>
 
-          {/* ERROR */}
+          {/* =====================================================
+              ERROR
+          ====================================================== */}
 
           {error && (
             <View className="mt-5 rounded-[24px] border border-red-100 bg-white/90 p-5">
@@ -341,7 +332,9 @@ export default function AdminStaffScreen() {
             </View>
           )}
 
-          {/* DIRECTORY */}
+          {/* =====================================================
+              DIRECTORY
+          ====================================================== */}
 
           <View className="mb-3 mt-7">
             <Text className="text-[16px] font-extrabold text-ink-dark">
@@ -370,11 +363,19 @@ export default function AdminStaffScreen() {
           )}
         </ScrollView>
 
+        {/* =====================================================
+            ADD STAFF MODAL
+        ====================================================== */}
+
         <AddStaffModal
           visible={showAddModal}
           onClose={() => setShowAddModal(false)}
           onSubmit={handleCreateStaff}
         />
+
+        {/* =====================================================
+            SUCCESS MODAL
+        ====================================================== */}
 
         <StaffCreatedSuccessModal
           visible={showSuccessModal}
@@ -410,13 +411,14 @@ function AddStaffModal({
 
   const [role, setRole] = useState<AdminStaffRole>("driver");
 
-  const [terminal, setTerminal] = useState("");
-  const [bracket, setBracket] = useState("");
+  const [terminal, setTerminal] = useState<number | null>(null);
 
   const [showPassword, setShowPassword] = useState(false);
+
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
   const [saving, setSaving] = useState(false);
+
   const [validationError, setValidationError] = useState<string | null>(null);
 
   const reset = () => {
@@ -426,8 +428,7 @@ function AddStaffModal({
     setPassword("");
     setConfirmPassword("");
     setRole("driver");
-    setTerminal("");
-    setBracket("");
+    setTerminal(null);
     setShowPassword(false);
     setShowConfirmPassword(false);
     setValidationError(null);
@@ -498,32 +499,21 @@ function AddStaffModal({
       }
     }
 
-    if (terminal.trim()) {
-      const value = Number(terminal);
-
-      if (!Number.isInteger(value) || value < 1) {
-        return "Preferred terminal must be a positive whole number.";
-      }
-    }
-
-    if (bracket.trim()) {
-      const value = Number(bracket);
-
-      if (!Number.isInteger(value) || value < 1) {
-        return "Preferred bracket must be a positive whole number.";
-      }
-    }
-
     return null;
   };
 
   const submit = async () => {
     setValidationError(null);
 
-    const validationError = validate();
+    const error = validate();
 
-    if (validationError) {
-      setValidationError(validationError);
+    if (error) {
+      setValidationError(error);
+      return;
+    }
+
+    if (role === "dispatcher" && terminal !== 1 && terminal !== 2) {
+      setValidationError("Select Terminal 1 or Terminal 2 for a dispatcher.");
       return;
     }
 
@@ -532,18 +522,25 @@ function AddStaffModal({
 
       await onSubmit({
         display_name: displayName.trim(),
+
         email: email.trim().toLowerCase(),
+
         password,
+
         phone_number: phone.trim() || null,
+
         role,
-        preferred_terminal: terminal.trim() ? Number(terminal) : null,
-        preferred_bracket: bracket.trim() ? Number(bracket) : null,
+
+        preferred_terminal: role === "dispatcher" ? terminal : null,
+
+        preferred_bracket: role === "dispatcher" ? terminal : null,
+
         jeepney_id: null,
       });
 
       reset();
     } catch {
-      // Parent handles the error.
+      // Parent handles creation error.
     } finally {
       setSaving(false);
     }
@@ -562,6 +559,8 @@ function AddStaffModal({
       >
         <View className="flex-1 justify-end bg-slate-900/35">
           <View className="max-h-[92%] rounded-t-[32px] border border-white/90 bg-clay-surface">
+            {/* HEADER */}
+
             <View className="flex-row items-center border-b border-slate-200/50 px-5 py-4">
               <View className="h-[44px] w-[44px] items-center justify-center rounded-[15px] bg-ocean-100">
                 <Plus size={21} color={colors.primaryDark} strokeWidth={2.5} />
@@ -687,30 +686,16 @@ function AddStaffModal({
                 </Text>
 
                 <Text className="mt-1 text-[9px] leading-[15px] text-ink-secondary">
-                  This email and password will be used for the staff
-                  member&apos;s Supabase Auth login.
+                  This email and password will be used for the staff member's
+                  Supabase Auth login.
                 </Text>
               </View>
 
-              <ModalField
-                label="Preferred Terminal"
-                icon={
-                  <ShieldCheck size={16} color="#64748B" strokeWidth={2.2} />
-                }
-                value={terminal}
-                onChangeText={setTerminal}
-                placeholder="Optional"
-                keyboardType="numeric"
-              />
+              {role === "dispatcher" && (
+                <TerminalSelector value={terminal} onChange={setTerminal} />
+              )}
 
-              <ModalField
-                label="Preferred Bracket"
-                icon={<Users size={16} color="#64748B" strokeWidth={2.2} />}
-                value={bracket}
-                onChangeText={setBracket}
-                placeholder="Optional"
-                keyboardType="numeric"
-              />
+              {/* ACTIONS */}
 
               <View className="mt-6 flex-row">
                 <Pressable
@@ -783,6 +768,8 @@ function StaffCreatedSuccessModal({
             elevation: 10,
           }}
         >
+          {/* SUCCESS ICON */}
+
           <View className="items-center">
             <View
               className="h-[78px] w-[78px] items-center justify-center rounded-[27px] bg-emerald-50"
@@ -812,6 +799,8 @@ function StaffCreatedSuccessModal({
             </Text>
           </View>
 
+          {/* STAFF INFORMATION */}
+
           <View className="mt-5 rounded-[22px] border border-white/90 bg-white/60 p-4">
             <View className="flex-row items-center">
               <View className="h-[42px] w-[42px] items-center justify-center rounded-[14px] bg-ocean-100">
@@ -837,6 +826,8 @@ function StaffCreatedSuccessModal({
             </View>
           </View>
 
+          {/* LOGIN INFORMATION */}
+
           <View className="mt-3 rounded-[22px] bg-ocean-50/70 p-4">
             <View className="flex-row items-center">
               <ShieldCheck
@@ -855,6 +846,8 @@ function StaffCreatedSuccessModal({
               assigned during account creation.
             </Text>
           </View>
+
+          {/* DONE */}
 
           <Pressable
             onPress={onClose}
@@ -879,8 +872,76 @@ function StaffCreatedSuccessModal({
 }
 
 /* =========================================================
-   INPUT FIELD
+   MODAL FIELD
 ========================================================= */
+
+function TerminalSelector({
+  value,
+  onChange,
+}: {
+  value: number | null;
+  onChange: (value: number | null) => void;
+}) {
+  return (
+    <View className="mt-5">
+      <Text className="mb-2 text-[10px] font-extrabold uppercase tracking-[0.7px] text-ink-muted">
+        Preferred Terminal
+      </Text>
+      <View className="flex-row">
+        {[1, 2].map((terminal) => {
+          const selected = value === terminal;
+          return (
+            <Pressable
+              key={terminal}
+              onPress={() => onChange(terminal)}
+              className={`flex-1 rounded-[20px] border p-4 ${terminal === 1 ? "mr-2" : "ml-2"} ${selected ? "border-ocean-300 bg-ocean-50" : "border-white/90 bg-white/60"}`}
+              style={selected ? clayShadow() : undefined}
+            >
+              <View className="flex-row items-center">
+                <View
+                  className={`h-[42px] w-[42px] items-center justify-center rounded-[14px] ${selected ? "bg-ocean-400" : "bg-slate-100"}`}
+                >
+                  <ShieldCheck
+                    size={19}
+                    color={selected ? "#FFFFFF" : "#64748B"}
+                    strokeWidth={2.3}
+                  />
+                </View>
+                <View className="ml-3 flex-1">
+                  <Text
+                    className={`text-[12px] font-extrabold ${selected ? "text-ocean-700" : "text-ink-dark"}`}
+                  >
+                    Terminal {terminal}
+                  </Text>
+                  <Text className="mt-0.5 text-[9px] font-semibold text-ink-muted">
+                    Bracket {terminal}
+                  </Text>
+                </View>
+                {selected && (
+                  <CheckCircle2
+                    size={18}
+                    color={colors.primaryDark}
+                    strokeWidth={2.5}
+                  />
+                )}
+              </View>
+            </Pressable>
+          );
+        })}
+      </View>
+    </View>
+  );
+}
+
+function clayShadow() {
+  return {
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.045,
+    shadowRadius: 9,
+    elevation: 2,
+  };
+}
 
 function ModalField({
   label,
@@ -976,49 +1037,6 @@ function PasswordField({
 }
 
 /* =========================================================
-   STAFF AVATAR
-========================================================= */
-
-function StaffAvatar({
-  uri,
-  size = 52,
-}: {
-  uri: string | null;
-  size?: number;
-}) {
-  const [imageError, setImageError] = useState(false);
-
-  const showImage = Boolean(uri) && !imageError;
-
-  return (
-    <View
-      className="overflow-hidden rounded-[17px] bg-ocean-100"
-      style={{
-        width: size,
-        height: size,
-      }}
-    >
-      {showImage ? (
-        <Image
-          source={{ uri: uri! }}
-          className="h-full w-full"
-          resizeMode="cover"
-          onError={() => setImageError(true)}
-        />
-      ) : (
-        <View className="h-full w-full items-center justify-center">
-          <UserRound
-            size={size * 0.46}
-            color={colors.primaryDark}
-            strokeWidth={2.3}
-          />
-        </View>
-      )}
-    </View>
-  );
-}
-
-/* =========================================================
    STAFF CARD
 ========================================================= */
 
@@ -1047,7 +1065,9 @@ function StaffCard({
       }}
     >
       <View className="flex-row items-center">
-        <StaffAvatar uri={member.avatar_url} />
+        <View className="h-[52px] w-[52px] items-center justify-center rounded-[17px] bg-ocean-100">
+          <UserRound size={24} color={colors.primaryDark} strokeWidth={2.3} />
+        </View>
 
         <View className="ml-3 flex-1">
           <Text
@@ -1152,7 +1172,7 @@ function StaffCard({
 }
 
 /* =========================================================
-   INFO BLOCK
+   INFO
 ========================================================= */
 
 function InfoBlock({
@@ -1185,7 +1205,7 @@ function InfoBlock({
 }
 
 /* =========================================================
-   EMPTY STATE
+   EMPTY
 ========================================================= */
 
 function EmptyStaff({ search }: { search: string }) {
@@ -1209,7 +1229,7 @@ function EmptyStaff({ search }: { search: string }) {
 }
 
 /* =========================================================
-   ROLE HELPERS
+   ROLE
 ========================================================= */
 
 function formatRole(role: AdminStaffRole) {

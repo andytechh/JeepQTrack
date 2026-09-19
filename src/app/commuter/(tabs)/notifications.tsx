@@ -10,7 +10,7 @@ import {
   RefreshCw,
   Send,
   Users,
-  X,
+  X
 } from "lucide-react-native";
 import { useEffect, useState } from "react";
 import {
@@ -23,7 +23,6 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-
 import OceanBackground from "../../../src/shared/components/clay/OceanBackground";
 import { supabase } from "../../../src/shared/config/supabase";
 import { useNotifications } from "../../../src/shared/hooks/useNotification";
@@ -458,7 +457,7 @@ function Header({
 }) {
   return (
     <View className=" pt-4">
-      <View className="flex-row items-start justify-between">
+      <View className="flex-row items-center justify-between">
         <View className="flex-1">
           <Text className="text-[11px] font-bold uppercase tracking-[1px] text-ocean-700">
             SMART QUEUE

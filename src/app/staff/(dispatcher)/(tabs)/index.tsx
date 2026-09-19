@@ -35,7 +35,6 @@ import { colors } from "../../../../src/shared/constants/theme";
 import { useDispatcherDashboard } from "../../../../src/shared/hooks/dispatcher/useDispatcherDashboard";
 import { useNotifications } from "../../../../src/shared/hooks/useNotification";
 import { useAuthStore } from "../../../../src/shared/store/authStore";
-import { useNotificationPanel } from "../../../../src/shared/store/notificationPanelStore";
 
 export default function DispatcherDashboardScreen() {
   const router = useRouter();
@@ -53,8 +52,6 @@ export default function DispatcherDashboardScreen() {
     notifyNextDriver,
   } = useDispatcherDashboard();
 
-  // Same notifications source the driver/commuter screens use — the
-  // notifications table is keyed by user_id, so this works for any role.
   const userId = useAuthStore((state) => state.user?.uid ?? null);
   const { unreadCount } = useNotifications(userId);
 
@@ -103,10 +100,8 @@ export default function DispatcherDashboardScreen() {
     );
   };
 
-  const openNotifications = useNotificationPanel((state) => state.open);
-
   const handleNotifications = () => {
-    openNotifications();
+    router.push("/staff/(dispatcher)/notifications");
   };
 
   if (loading) {
@@ -395,6 +390,7 @@ function DashboardHeader({
         <Pressable
           onPress={onNotifications}
           className="relative h-[48px] w-[48px] items-center justify-center rounded-full border border-white/90 bg-clay-surface shadow-clay-sm"
+          hitSlop={10}
         >
           <Bell size={21} color={colors.primaryDark} strokeWidth={2.2} />
 

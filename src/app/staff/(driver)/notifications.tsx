@@ -1,5 +1,6 @@
 import { colors } from "@/src/shared/constants/theme";
 import {
+  ArrowLeft,
   Bell,
   Check,
   CheckCheck,
@@ -23,10 +24,10 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { router } from "expo-router";
 import OceanBackground from "../../../src/shared/components/clay/OceanBackground";
 import { useNotifications } from "../../../src/shared/hooks/useNotification";
 import { useAuthStore } from "../../../src/shared/store/authStore";
-
 type NotificationType =
   "arrival" | "dispatch" | "occupancy" | "eta" | "status" | "queue" | "system";
 
@@ -406,8 +407,17 @@ function Header({
 }) {
   return (
     <View className=" pt-4">
-      <View className="flex-row items-start justify-between">
-        <View className="flex-1">
+      <View className="flex-row items-center justify-between">
+        <Pressable
+          onPress={() => router.back()}
+          className="h-[48px] w-[48px] items-center justify-center rounded-[16px] bg-white/80"
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
+        >
+          <ArrowLeft size={19} color={colors.primaryDark} strokeWidth={2.5} />
+        </Pressable>
+
+        <View className="flex-1 ml-2">
           <Text className="text-[11px] font-bold uppercase tracking-[1px] text-ocean-700">
             SMART QUEUE
           </Text>

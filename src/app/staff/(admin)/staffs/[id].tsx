@@ -61,8 +61,9 @@ export default function AdminStaffDetailsScreen() {
   const [displayName, setDisplayName] = useState("");
   const [phoneNumber, setPhoneNumber] = useState("");
   const [role, setRole] = useState<AdminStaffRole>("driver");
-  const [preferredTerminal, setPreferredTerminal] = useState("");
-  const [preferredBracket, setPreferredBracket] = useState("");
+  const [preferredTerminal, setPreferredTerminal] = useState<number | null>(
+    null,
+  );
 
   const [modalType, setModalType] = useState<ModalType>(null);
   const [modalTitle, setModalTitle] = useState("");
@@ -79,12 +80,8 @@ export default function AdminStaffDetailsScreen() {
 
     setPreferredTerminal(
       member.preferred_terminal == null
-        ? ""
-        : String(member.preferred_terminal),
-    );
-
-    setPreferredBracket(
-      member.preferred_bracket == null ? "" : String(member.preferred_bracket),
+        ? null
+        : Number(member.preferred_terminal),
     );
   }, [member]);
 
@@ -99,12 +96,8 @@ export default function AdminStaffDetailsScreen() {
 
     setPreferredTerminal(
       member.preferred_terminal == null
-        ? ""
-        : String(member.preferred_terminal),
-    );
-
-    setPreferredBracket(
-      member.preferred_bracket == null ? "" : String(member.preferred_bracket),
+        ? null
+        : Number(member.preferred_terminal),
     );
   };
 
@@ -143,8 +136,8 @@ export default function AdminStaffDetailsScreen() {
 
     const trimmedName = displayName.trim();
     const trimmedPhone = phoneNumber.trim();
-    const trimmedTerminal = preferredTerminal.trim();
-    const trimmedBracket = preferredBracket.trim();
+    const normalizedPhone = normalizePhilippinePhone(trimmedPhone);
+    const terminalNumber = role === "dispatcher" ? preferredTerminal : null;
 
     if (!trimmedName) {
       showModal(
@@ -155,31 +148,20 @@ export default function AdminStaffDetailsScreen() {
       return;
     }
 
-    const terminalNumber =
-      trimmedTerminal === "" ? null : Number(trimmedTerminal);
-
-    const bracketNumber = trimmedBracket === "" ? null : Number(trimmedBracket);
-
-    if (
-      terminalNumber !== null &&
-      (!Number.isFinite(terminalNumber) || terminalNumber < 0)
-    ) {
+    if (trimmedPhone && !normalizedPhone) {
       showModal(
         "error",
-        "Invalid terminal",
-        "Preferred Terminal must be a valid number.",
+        "Invalid phone number",
+        "Enter a valid Philippine mobile number using +63, for example +639171234567.",
       );
       return;
     }
 
-    if (
-      bracketNumber !== null &&
-      (!Number.isFinite(bracketNumber) || bracketNumber < 0)
-    ) {
+    if (role === "dispatcher" && terminalNumber !== 1 && terminalNumber !== 2) {
       showModal(
         "error",
-        "Invalid bracket",
-        "Preferred Bracket must be a valid number.",
+        "Terminal required",
+        "Select Terminal 1 or Terminal 2 for this dispatcher.",
       );
       return;
     }
@@ -194,10 +176,10 @@ export default function AdminStaffDetailsScreen() {
        */
       await updateStaff(member.id, {
         display_name: trimmedName,
-        phone_number: trimmedPhone || null,
+        phone_number: normalizedPhone || null,
         role,
         preferred_terminal: terminalNumber,
-        preferred_bracket: bracketNumber,
+        preferred_bracket: terminalNumber,
       });
 
       setEditing(false);
@@ -526,9 +508,12 @@ export default function AdminStaffDetailsScreen() {
                   label="Phone Number"
                   icon={<Phone size={16} color="#64748B" strokeWidth={2.2} />}
                   value={phoneNumber}
-                  onChangeText={setPhoneNumber}
-                  placeholder="Phone number"
+                  onChangeText={(value) =>
+                    setPhoneNumber(formatPhilippinePhoneInput(value))
+                  }
+                  placeholder="+639XXXXXXXXX"
                   keyboardType="phone-pad"
+                  maxLength={13}
                 />
 
                 <Text className="mb-2 mt-5 text-[10px] font-extrabold uppercase tracking-[0.7px] text-ink-muted">
@@ -561,23 +546,12 @@ export default function AdminStaffDetailsScreen() {
                   )}
                 </View>
 
-                <Field
-                  label="Preferred Terminal"
-                  icon={<MapPin size={16} color="#64748B" strokeWidth={2.2} />}
-                  value={preferredTerminal}
-                  onChangeText={setPreferredTerminal}
-                  placeholder="Terminal number"
-                  keyboardType="numeric"
-                />
-
-                <Field
-                  label="Preferred Bracket"
-                  icon={<Users size={16} color="#64748B" strokeWidth={2.2} />}
-                  value={preferredBracket}
-                  onChangeText={setPreferredBracket}
-                  placeholder="Bracket number"
-                  keyboardType="numeric"
-                />
+                {role === "dispatcher" && (
+                  <TerminalSelector
+                    value={preferredTerminal}
+                    onChange={setPreferredTerminal}
+                  />
+                )}
 
                 <View className="mt-5 flex-row">
                   <Pressable
@@ -704,7 +678,7 @@ export default function AdminStaffDetailsScreen() {
                   value={
                     member.preferred_bracket == null
                       ? "Not set"
-                      : String(member.preferred_bracket)
+                      : `Bracket ${member.preferred_bracket}`
                   }
                 />
               </View>
@@ -1029,6 +1003,41 @@ function ClayModal({
    SECTION TITLE
    ============================================================ */
 
+function formatPhilippinePhoneInput(value: string) {
+  const digits = value.replace(/\D/g, "");
+
+  if (value.trim().startsWith("+")) {
+    if (digits.startsWith("63")) {
+      return `+${digits.slice(0, 12)}`;
+    }
+    return `+${digits.slice(0, 12)}`;
+  }
+
+  if (digits.startsWith("63")) {
+    return `+${digits.slice(0, 12)}`;
+  }
+
+  if (digits.startsWith("0")) {
+    return `+63${digits.slice(1, 11)}`;
+  }
+
+  if (digits.length > 0) {
+    return `+63${digits.slice(0, 10)}`;
+  }
+
+  return "";
+}
+
+function normalizePhilippinePhone(value: string): string | null {
+  const digits = value.replace(/\D/g, "");
+
+  if (digits.length === 12 && digits.startsWith("63") && digits[2] === "9") {
+    return `+${digits}`;
+  }
+
+  return null;
+}
+
 function SectionTitle({ title }: { title: string }) {
   return (
     <View className="mb-2 mt-6 px-1">
@@ -1050,6 +1059,7 @@ function Field({
   onChangeText,
   placeholder,
   keyboardType,
+  maxLength,
 }: {
   label: string;
   icon: React.ReactNode;
@@ -1057,6 +1067,7 @@ function Field({
   onChangeText: (value: string) => void;
   placeholder: string;
   keyboardType?: "default" | "phone-pad" | "numeric";
+  maxLength?: number;
 }) {
   return (
     <View className="mt-4">
@@ -1073,16 +1084,13 @@ function Field({
           placeholder={placeholder}
           placeholderTextColor="#94A3B8"
           keyboardType={keyboardType}
+          maxLength={maxLength}
           className="ml-3 flex-1 py-3.5 text-[12px] font-semibold text-ink-dark"
         />
       </View>
     </View>
   );
 }
-
-/* ============================================================
-   DETAIL ROW
-   ============================================================ */
 
 function DetailRow({
   icon,
@@ -1115,9 +1123,83 @@ function DetailRow({
   );
 }
 
-/* ============================================================
-   CLAY SHADOW
-   ============================================================ */
+function TerminalSelector({
+  value,
+  onChange,
+}: {
+  value: number | null;
+  onChange: (value: number | null) => void;
+}) {
+  return (
+    <View className="mt-5">
+      <Text className="mb-2 text-[10px] font-extrabold uppercase tracking-[0.7px] text-ink-muted">
+        Preferred Terminal
+      </Text>
+
+      <View className="flex-row">
+        {[1, 2].map((terminal) => {
+          const selected = value === terminal;
+
+          return (
+            <Pressable
+              key={terminal}
+              onPress={() => onChange(terminal)}
+              className={`flex-1 rounded-[17px] border px-3 py-3 ${
+                terminal === 1 ? "mr-1.5" : "ml-1.5"
+              } ${
+                selected
+                  ? "border-ocean-300 bg-ocean-50"
+                  : "border-white/90 bg-white/60"
+              }`}
+              style={selected ? clayShadow() : undefined}
+            >
+              <View className="flex-row items-center">
+                <View
+                  className={`h-[34px] w-[34px] shrink-0 items-center justify-center rounded-[11px] ${
+                    selected ? "bg-ocean-400" : "bg-slate-100"
+                  }`}
+                >
+                  <MapPin
+                    size={16}
+                    color={selected ? "#FFFFFF" : "#64748B"}
+                    strokeWidth={2.3}
+                  />
+                </View>
+
+                <View className="ml-2 flex-1 min-w-0">
+                  <Text
+                    numberOfLines={1}
+                    ellipsizeMode="tail"
+                    className={`text-[11px] font-extrabold ${
+                      selected ? "text-ocean-700" : "text-ink-dark"
+                    }`}
+                  >
+                    Terminal {terminal}
+                  </Text>
+
+                  <Text
+                    numberOfLines={1}
+                    className="mt-0.5 text-[8px] font-semibold text-ink-muted"
+                  >
+                    Bracket {terminal}
+                  </Text>
+                </View>
+
+                {selected && (
+                  <CheckCircle2
+                    size={15}
+                    color={colors.primaryDark}
+                    strokeWidth={2.5}
+                  />
+                )}
+              </View>
+            </Pressable>
+          );
+        })}
+      </View>
+    </View>
+  );
+}
 
 function clayShadow() {
   return {

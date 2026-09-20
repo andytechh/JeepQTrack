@@ -12,6 +12,7 @@ import {
 export interface QueueJeepney {
   id: string;
   plate_number: string;
+  image_url: string | null;
   jeep_name: string | null;
   driver_name: string | null;
   driver_id: string | null;
@@ -85,7 +86,7 @@ interface UseDispatcherQueueResult {
 }
 
 interface DoorCountRow {
-  jeepney_id: string;
+  jeep_id: string;
   front_count: number | null;
   rear_count: number | null;
   updated_at: string | null;
@@ -101,6 +102,58 @@ const TERMINAL_NAMES = {
     subtitle: "Terminal 2",
   },
 } as const;
+
+async function sendExpoPushNotification(
+  token: string,
+  title: string,
+  body: string,
+  data: Record<string, unknown>,
+) {
+  const response = await fetch("https://exp.host/--/api/v2/push/send", {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      to: token,
+      sound: "default",
+      title,
+      body,
+      data,
+      priority: "high",
+      channelId: "dispatch",
+    }),
+  });
+
+  const result = await response.json().catch(() => null);
+
+  if (!response.ok) {
+    throw new Error(
+      result?.errors?.[0]?.message ?? "Expo push notification failed.",
+    );
+  }
+
+  if (result?.data?.status === "error") {
+    throw new Error(result.data.message ?? "Expo push notification failed.");
+  }
+}
+
+async function getDriverPushToken(jeepneyId: string) {
+  const { data, error } = await supabase
+    .from("users")
+    .select("id, display_name, expo_push_token, fcm_token")
+    .eq("jeepney_id", jeepneyId)
+    .eq("role", "driver")
+    .eq("is_active", true)
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  return data;
+}
 
 export function useDispatcherQueue(): UseDispatcherQueueResult {
   const { user } = useAuthStore();
@@ -130,8 +183,8 @@ export function useDispatcherQueue(): UseDispatcherQueueResult {
    * front_count + rear_count
    *
    * NOTE:
-   * This assumes the door_counts table contains:
-   * jeepney_id
+   * The door_counts table contains:
+   * jeep_id
    * front_count
    * rear_count
    * updated_at
@@ -154,13 +207,13 @@ export function useDispatcherQueue(): UseDispatcherQueueResult {
       .from("door_counts")
       .select(
         `
-          jeepney_id,
+          jeep_id,
           front_count,
           rear_count,
           updated_at
         `,
       )
-      .in("jeepney_id", jeepneyIds)
+      .in("jeep_id", jeepneyIds)
       .order("updated_at", {
         ascending: false,
         nullsLast: true,
@@ -171,16 +224,16 @@ export function useDispatcherQueue(): UseDispatcherQueueResult {
     }
 
     for (const row of (data ?? []) as DoorCountRow[]) {
-      if (!row.jeepney_id) {
+      if (!row.jeep_id) {
         continue;
       }
 
       // Keep only the newest row for each jeepney.
-      if (result.has(row.jeepney_id)) {
+      if (result.has(row.jeep_id)) {
         continue;
       }
 
-      result.set(row.jeepney_id, {
+      result.set(row.jeep_id, {
         front_count: Math.max(0, Number(row.front_count ?? 0)),
         rear_count: Math.max(0, Number(row.rear_count ?? 0)),
         occupancy_updated_at: row.updated_at ?? null,
@@ -204,12 +257,65 @@ export function useDispatcherQueue(): UseDispatcherQueueResult {
 
     setIsOperatingHours(currentlyOperating);
 
+    const {
+      data: { user: authenticatedUser },
+      error: authError,
+    } = await supabase.auth.getUser();
+
+    if (authError) {
+      throw authError;
+    }
+
+    if (!authenticatedUser) {
+      throw new Error("No authenticated dispatcher session was found.");
+    }
+
+    const { data: assignment, error: assignmentError } = await supabase
+      .from("terminal_dispatchers")
+      .select("terminal_id, is_active")
+      .eq("dispatcher_id", authenticatedUser.id)
+      .eq("is_active", true)
+      .maybeSingle();
+
+    if (assignmentError) {
+      throw new Error(
+        `Unable to load dispatcher terminal assignment: ${assignmentError.message}`,
+      );
+    }
+
+    if (!assignment) {
+      throw new Error(
+        "No active terminal assignment was found for this dispatcher.",
+      );
+    }
+
+    const { data: terminal, error: terminalError } = await supabase
+      .from("terminals")
+      .select("id, terminal_number, name, is_active")
+      .eq("id", assignment.terminal_id)
+      .maybeSingle();
+
+    if (terminalError) {
+      throw terminalError;
+    }
+
+    if (!terminal) {
+      throw new Error("The assigned terminal could not be found.");
+    }
+
+    if (!terminal.is_active) {
+      throw new Error(
+        `Terminal ${terminal.terminal_number} is currently inactive.`,
+      );
+    }
+
     const { data, error: queueError } = await supabase
       .from("jeepneys")
       .select(
         `
           id,
           plate_number,
+          image_url,
           jeep_name,
           driver_name,
           driver_id,
@@ -227,7 +333,8 @@ export function useDispatcherQueue(): UseDispatcherQueueResult {
           departed_at
         `,
       )
-      .in("status", ["waiting", "loading"])
+      .eq("terminal_id", terminal.terminal_number)
+
       .order("terminal_id", {
         ascending: true,
         nullsLast: true,
@@ -245,18 +352,6 @@ export function useDispatcherQueue(): UseDispatcherQueueResult {
     }
 
     const rows = (data ?? []) as QueueJeepney[];
-
-    /**
-     * After 9 PM / before 5 AM:
-     * hide active queue from the dispatcher.
-     *
-     * IMPORTANT:
-     * No Supabase status is changed.
-     */
-    if (!currentlyOperating) {
-      setJeepneys([]);
-      return;
-    }
 
     const doorCounts = await fetchDoorCounts(rows.map((jeepney) => jeepney.id));
 
@@ -295,7 +390,25 @@ export function useDispatcherQueue(): UseDispatcherQueueResult {
       };
     });
 
-    setJeepneys(normalized);
+    const displayJeepneys = currentlyOperating
+      ? normalized
+      : normalized.map((jeepney) => {
+          const status = jeepney.status?.toLowerCase();
+
+          if (
+            status === "waiting" ||
+            status === "loading" ||
+            status === "en_route" ||
+            status === "dispatched" ||
+            status === "arrived"
+          ) {
+            return { ...jeepney, status: "inactive", queue_position: null };
+          }
+
+          return { ...jeepney, queue_position: null };
+        });
+
+    setJeepneys(displayJeepneys);
   }, [fetchDoorCounts]);
 
   /**
@@ -435,11 +548,43 @@ export function useDispatcherQueue(): UseDispatcherQueueResult {
           };
         }
 
+        const driver = await getDriverPushToken(jeepney.id);
+
+        if (!driver) {
+          return {
+            success: false,
+            message: "No active driver is assigned to this jeepney.",
+          };
+        }
+
+        if (!driver.expo_push_token) {
+          return {
+            success: false,
+            message: "The assigned driver does not have an Expo push token.",
+          };
+        }
+
+        await sendExpoPushNotification(
+          driver.expo_push_token,
+          "Ready for Dispatch",
+          `${jeepney.plate_number} is ready for dispatch from ${
+            jeepney.terminal_id === 1 ? "Donsol" : "Daraga"
+          } Terminal.`,
+          {
+            type: "dispatch",
+            notification_type: "dispatch",
+            jeepney_id: jeepney.id,
+            terminal_number: jeepney.terminal_id,
+            queue_position: jeepney.queue_position ?? null,
+            image_url: jeepney.image_url ?? null,
+          },
+        );
+
         await Promise.all([fetchQueue(), fetchRecentTrips()]);
 
         return {
           success: true,
-          message: `Dispatch alert sent to ${
+          message: `Dispatch alert and push notification sent to ${
             jeepney.jeep_name || jeepney.plate_number
           }.`,
         };
@@ -609,7 +754,7 @@ export function useDispatcherQueue(): UseDispatcherQueueResult {
 
           const row = payload.new as Partial<DoorCountRow>;
 
-          if (!row.jeepney_id) {
+          if (!row.jeep_id) {
             return;
           }
 
@@ -621,7 +766,7 @@ export function useDispatcherQueue(): UseDispatcherQueueResult {
 
           setJeepneys((current) =>
             current.map((jeepney) =>
-              jeepney.id === row.jeepney_id
+              jeepney.id === row.jeep_id
                 ? {
                     ...jeepney,
 
@@ -666,7 +811,7 @@ export function useDispatcherQueue(): UseDispatcherQueueResult {
 
           const row = payload.new as Partial<DoorCountRow>;
 
-          if (!row.jeepney_id) {
+          if (!row.jeep_id) {
             return;
           }
 
@@ -678,7 +823,7 @@ export function useDispatcherQueue(): UseDispatcherQueueResult {
 
           setJeepneys((current) =>
             current.map((jeepney) =>
-              jeepney.id === row.jeepney_id
+              jeepney.id === row.jeep_id
                 ? {
                     ...jeepney,
 
@@ -736,22 +881,28 @@ export function useDispatcherQueue(): UseDispatcherQueueResult {
    * Split the queue by terminal.
    */
   const sections = useMemo<QueueTerminalSection[]>(() => {
-    const terminalOne = jeepneys.filter((item) => item.terminal_id === 1);
+    if (jeepneys.length === 0) {
+      return [];
+    }
 
-    const terminalTwo = jeepneys.filter((item) => item.terminal_id === 2);
+    const terminalId = (jeepneys[0].terminal_id ?? 1) as 1 | 2;
 
     return [
       {
-        terminalId: 1,
-        terminalName: TERMINAL_NAMES[1].name,
-        subtitle: TERMINAL_NAMES[1].subtitle,
-        jeepneys: terminalOne,
-      },
-      {
-        terminalId: 2,
-        terminalName: TERMINAL_NAMES[2].name,
-        subtitle: TERMINAL_NAMES[2].subtitle,
-        jeepneys: terminalTwo,
+        terminalId,
+        terminalName: TERMINAL_NAMES[terminalId].name,
+        subtitle: TERMINAL_NAMES[terminalId].subtitle,
+        jeepneys: [...jeepneys].sort((a, b) => {
+          const aStatus =
+            a.status === "waiting" || a.status === "loading" ? 0 : 1;
+          const bStatus =
+            b.status === "waiting" || b.status === "loading" ? 0 : 1;
+          if (aStatus !== bStatus) return aStatus - bStatus;
+          const aPosition = a.queue_position ?? Number.MAX_SAFE_INTEGER;
+          const bPosition = b.queue_position ?? Number.MAX_SAFE_INTEGER;
+          if (aPosition !== bPosition) return aPosition - bPosition;
+          return (a.bracket ?? 999) - (b.bracket ?? 999);
+        }),
       },
     ];
   }, [jeepneys]);
@@ -760,7 +911,9 @@ export function useDispatcherQueue(): UseDispatcherQueueResult {
    * Waiting count.
    */
   const waitingCount = useMemo(
-    () => jeepneys.filter((item) => item.status === "waiting").length,
+    () =>
+      jeepneys.filter((item) => item.status?.toLowerCase() === "waiting")
+        .length,
     [jeepneys],
   );
 
@@ -768,7 +921,9 @@ export function useDispatcherQueue(): UseDispatcherQueueResult {
    * Loading count.
    */
   const loadingCount = useMemo(
-    () => jeepneys.filter((item) => item.status === "loading").length,
+    () =>
+      jeepneys.filter((item) => item.status?.toLowerCase() === "loading")
+        .length,
     [jeepneys],
   );
 

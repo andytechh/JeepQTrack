@@ -1,5 +1,4 @@
 import {
-  Activity,
   AlertTriangle,
   BusFront,
   CheckCircle2,
@@ -9,7 +8,7 @@ import {
   Radio,
   RefreshCw,
   Route,
-  Users,
+  Users
 } from "lucide-react-native";
 
 import { useRouter } from "expo-router";
@@ -426,14 +425,6 @@ export default function AdminDashboardScreen() {
                       Admin Dashboard
                     </Text>
                   </View>
-                </View>
-
-                <View className="h-[42px] w-[42px] items-center justify-center rounded-full bg-ocean-100">
-                  <Activity
-                    size={19}
-                    color={colors.primaryDark}
-                    strokeWidth={2.4}
-                  />
                 </View>
               </View>
 

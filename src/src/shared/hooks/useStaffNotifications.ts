@@ -23,6 +23,12 @@ export interface StaffNotification {
   updated_at: string;
 }
 
+interface NotificationRead {
+  notification_id: string;
+  user_id: string;
+  read_at: string;
+}
+
 interface UseStaffNotificationsResult {
   notifications: StaffNotification[];
   unreadCount: number;
@@ -60,12 +66,6 @@ export function useStaffNotifications(): UseStaffNotificationsResult {
 
   const mountedRef = useRef(true);
 
-  /*
-   * Each mounted hook instance gets its own Realtime topic.
-   *
-   * This is important because the notification badge and the
-   * notification screen may both use this hook at the same time.
-   */
   const instanceIdRef = useRef(
     `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
   );
@@ -81,13 +81,6 @@ export function useStaffNotifications(): UseStaffNotificationsResult {
     );
   }, []);
 
-  /*
-   * Get the currently authenticated staff user.
-   *
-   * We intentionally do not pass a role from the UI.
-   * Driver / dispatcher / admin access should be enforced by
-   * Supabase authentication + RLS rather than trusting the client.
-   */
   const loadCurrentUser = useCallback(async () => {
     const {
       data: { user },
@@ -104,6 +97,31 @@ export function useStaffNotifications(): UseStaffNotificationsResult {
 
     return user;
   }, []);
+
+  const applyReadState = useCallback(
+    (
+      rows: StaffNotification[],
+      reads: NotificationRead[],
+    ): StaffNotification[] => {
+      const readSet = new Set(
+        reads
+          .filter((item) => item.user_id === userId)
+          .map((item) => item.notification_id),
+      );
+
+      return rows.map((notification) => {
+        if (notification.user_id === null) {
+          return {
+            ...notification,
+            read: readSet.has(notification.id),
+          };
+        }
+
+        return notification;
+      });
+    },
+    [userId],
+  );
 
   const loadNotifications = useCallback(
     async (isRefresh = false) => {
@@ -139,14 +157,6 @@ export function useStaffNotifications(): UseStaffNotificationsResult {
               updated_at
             `,
           )
-          /*
-           * A staff notification may be:
-           *
-           * 1. specifically addressed to this staff member
-           * 2. staff-wide with user_id = null
-           *
-           * RLS remains the actual security boundary.
-           */
           .or(`user_id.eq.${user.id},user_id.is.null`)
           .in("type", STAFF_NOTIFICATION_TYPES)
           .order("created_at", {
@@ -169,15 +179,46 @@ export function useStaffNotifications(): UseStaffNotificationsResult {
           isStaffNotificationType(row.type),
         ) as StaffNotification[];
 
+        const globalNotificationIds = rows
+          .filter((row) => row.user_id === null)
+          .map((row) => row.id);
+
+        let reads: NotificationRead[] = [];
+
+        if (globalNotificationIds.length > 0) {
+          const { data: readData, error: readError } = await supabase
+            .from("notification_reads")
+            .select("notification_id, user_id, read_at")
+            .eq("user_id", user.id)
+            .in("notification_id", globalNotificationIds);
+
+          if (readError) {
+            console.error(
+              "❌ Staff notification read-state query failed:",
+              readError,
+            );
+
+            if (mountedRef.current) {
+              setError(readError.message);
+              setNotifications([]);
+            }
+
+            return;
+          }
+
+          reads = (readData ?? []) as NotificationRead[];
+        }
+
+        const finalRows = applyReadState(rows, reads);
+
         if (mountedRef.current) {
-          setNotifications(rows);
+          setNotifications(finalRows);
         }
       } catch (err: any) {
         console.error("❌ Staff notification loading error:", err);
 
         if (mountedRef.current) {
           setError(err?.message ?? "Unable to load staff notifications.");
-
           setNotifications([]);
         }
       } finally {
@@ -187,12 +228,9 @@ export function useStaffNotifications(): UseStaffNotificationsResult {
         }
       }
     },
-    [isStaffNotificationType, loadCurrentUser],
+    [applyReadState, isStaffNotificationType, loadCurrentUser],
   );
 
-  /*
-   * Track component lifecycle.
-   */
   useEffect(() => {
     mountedRef.current = true;
 
@@ -201,12 +239,6 @@ export function useStaffNotifications(): UseStaffNotificationsResult {
     };
   }, []);
 
-  /*
-   * Auth state.
-   *
-   * When the staff session changes, the notification hook will
-   * reload using the new authenticated user.
-   */
   useEffect(() => {
     let active = true;
 
@@ -266,14 +298,6 @@ export function useStaffNotifications(): UseStaffNotificationsResult {
     };
   }, []);
 
-  /*
-   * Initial fetch + Realtime subscription.
-   *
-   * Do NOT await loadNotifications() before creating the channel.
-   * Your commuter hook already uses this pattern to avoid the
-   * Supabase "cannot add postgres_changes callbacks after subscribe"
-   * race.
-   */
   useEffect(() => {
     let isActive = true;
 
@@ -287,24 +311,14 @@ export function useStaffNotifications(): UseStaffNotificationsResult {
           return;
         }
 
-        /*
-         * Initial data load.
-         *
-         * We intentionally don't await it before creating the channel.
-         */
         loadNotifications(false);
 
-        /*
-         * Remove any previous channel synchronously.
-         */
         if (channelRef.current) {
           supabase.removeChannel(channelRef.current);
           channelRef.current = null;
         }
 
         const channelName = `staff-notifications-${user.id}-${instanceIdRef.current}`;
-
-        console.log("📡 Creating staff notification channel:", channelName);
 
         const channel = supabase.channel(channelName);
 
@@ -316,7 +330,7 @@ export function useStaffNotifications(): UseStaffNotificationsResult {
               schema: "public",
               table: "notifications",
             },
-            (payload) => {
+            async (payload) => {
               if (!isActive || !mountedRef.current) {
                 return;
               }
@@ -327,23 +341,38 @@ export function useStaffNotifications(): UseStaffNotificationsResult {
                 return;
               }
 
-              /*
-               * Only accept:
-               * - notifications addressed to this user
-               * - staff-wide notifications
-               */
               if (incoming.user_id !== null && incoming.user_id !== user.id) {
                 return;
               }
 
+              let read = incoming.read;
+
+              if (incoming.user_id === null) {
+                const { data } = await supabase
+                  .from("notification_reads")
+                  .select("notification_id")
+                  .eq("notification_id", incoming.id)
+                  .eq("user_id", user.id)
+                  .maybeSingle();
+
+                read = !!data;
+              }
+
+              const notification: StaffNotification = {
+                ...incoming,
+                read,
+              };
+
               setNotifications((current) => {
-                const exists = current.some((item) => item.id === incoming.id);
+                const exists = current.some(
+                  (item) => item.id === notification.id,
+                );
 
                 if (exists) {
                   return current;
                 }
 
-                return [incoming, ...current]
+                return [notification, ...current]
                   .sort(
                     (a, b) =>
                       new Date(b.created_at).getTime() -
@@ -360,7 +389,7 @@ export function useStaffNotifications(): UseStaffNotificationsResult {
               schema: "public",
               table: "notifications",
             },
-            (payload) => {
+            async (payload) => {
               if (!isActive || !mountedRef.current) {
                 return;
               }
@@ -375,11 +404,31 @@ export function useStaffNotifications(): UseStaffNotificationsResult {
                 return;
               }
 
+              let read = updated.read;
+
+              if (updated.user_id === null) {
+                const { data } = await supabase
+                  .from("notification_reads")
+                  .select("notification_id")
+                  .eq("notification_id", updated.id)
+                  .eq("user_id", user.id)
+                  .maybeSingle();
+
+                read = !!data;
+              }
+
+              const notification: StaffNotification = {
+                ...updated,
+                read,
+              };
+
               setNotifications((current) => {
-                const exists = current.some((item) => item.id === updated.id);
+                const exists = current.some(
+                  (item) => item.id === notification.id,
+                );
 
                 if (!exists) {
-                  return [updated, ...current]
+                  return [notification, ...current]
                     .sort(
                       (a, b) =>
                         new Date(b.created_at).getTime() -
@@ -389,7 +438,7 @@ export function useStaffNotifications(): UseStaffNotificationsResult {
                 }
 
                 return current.map((item) =>
-                  item.id === updated.id ? updated : item,
+                  item.id === notification.id ? notification : item,
                 );
               });
             },
@@ -423,18 +472,6 @@ export function useStaffNotifications(): UseStaffNotificationsResult {
             }
 
             console.log("📡 Staff notification realtime:", status);
-
-            if (status === "SUBSCRIBED") {
-              console.log("✅ Staff notification realtime connected");
-            }
-
-            if (status === "CHANNEL_ERROR") {
-              console.error("❌ Staff notification realtime CHANNEL_ERROR");
-            }
-
-            if (status === "TIMED_OUT") {
-              console.error("⏱️ Staff notification realtime TIMED_OUT");
-            }
           });
 
         channelRef.current = channel;
@@ -453,8 +490,6 @@ export function useStaffNotifications(): UseStaffNotificationsResult {
       channelRef.current = null;
 
       if (activeChannel) {
-        console.log("📡 Cleaning staff notification channel");
-
         supabase.removeChannel(activeChannel);
       }
     };
@@ -466,30 +501,62 @@ export function useStaffNotifications(): UseStaffNotificationsResult {
         return false;
       }
 
+      const notification = notifications.find(
+        (item) => item.id === notificationId,
+      );
+
+      if (!notification) {
+        return false;
+      }
+
       const previous = notifications;
 
-      /*
-       * Optimistic update.
-       */
       setNotifications((current) =>
-        current.map((notification) =>
-          notification.id === notificationId
+        current.map((item) =>
+          item.id === notificationId
             ? {
-                ...notification,
+                ...item,
                 read: true,
               }
-            : notification,
+            : item,
         ),
       );
 
       try {
+        if (notification.user_id === null) {
+          const { error: insertError } = await supabase
+            .from("notification_reads")
+            .upsert(
+              {
+                notification_id: notificationId,
+                user_id: userId,
+              },
+              {
+                onConflict: "notification_id,user_id",
+              },
+            );
+
+          if (insertError) {
+            console.error(
+              "❌ Mark global staff notification read failed:",
+              insertError,
+            );
+
+            setNotifications(previous);
+
+            return false;
+          }
+
+          return true;
+        }
+
         const { error: updateError } = await supabase
           .from("notifications")
           .update({
             read: true,
           })
           .eq("id", notificationId)
-          .or(`user_id.eq.${userId},user_id.is.null`);
+          .eq("user_id", userId);
 
         if (updateError) {
           console.error("❌ Mark staff notification read failed:", updateError);
@@ -518,9 +585,6 @@ export function useStaffNotifications(): UseStaffNotificationsResult {
 
     const previous = notifications;
 
-    /*
-     * Optimistic update.
-     */
     setNotifications((current) =>
       current.map((notification) => ({
         ...notification,
@@ -529,21 +593,62 @@ export function useStaffNotifications(): UseStaffNotificationsResult {
     );
 
     try {
-      const { error: updateError } = await supabase
-        .from("notifications")
-        .update({
-          read: true,
-        })
-        .or(`user_id.eq.${userId},user_id.is.null`)
-        .eq("read", false)
-        .in("type", STAFF_NOTIFICATION_TYPES);
+      const userSpecificIds = notifications
+        .filter(
+          (notification) =>
+            !notification.read && notification.user_id === userId,
+        )
+        .map((notification) => notification.id);
 
-      if (updateError) {
-        console.error("❌ Mark all staff notifications failed:", updateError);
+      const globalIds = notifications
+        .filter(
+          (notification) => !notification.read && notification.user_id === null,
+        )
+        .map((notification) => notification.id);
 
-        setNotifications(previous);
+      if (userSpecificIds.length > 0) {
+        const { error: updateError } = await supabase
+          .from("notifications")
+          .update({
+            read: true,
+          })
+          .eq("user_id", userId)
+          .in("id", userSpecificIds);
 
-        return false;
+        if (updateError) {
+          console.error(
+            "❌ Mark staff-specific notifications failed:",
+            updateError,
+          );
+
+          setNotifications(previous);
+
+          return false;
+        }
+      }
+
+      if (globalIds.length > 0) {
+        const readRows = globalIds.map((notificationId) => ({
+          notification_id: notificationId,
+          user_id: userId,
+        }));
+
+        const { error: insertError } = await supabase
+          .from("notification_reads")
+          .upsert(readRows, {
+            onConflict: "notification_id,user_id",
+          });
+
+        if (insertError) {
+          console.error(
+            "❌ Mark global staff notifications failed:",
+            insertError,
+          );
+
+          setNotifications(previous);
+
+          return false;
+        }
       }
 
       return true;

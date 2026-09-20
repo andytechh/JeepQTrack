@@ -18,8 +18,8 @@ import { AuthService } from "../src/shared/services/AuthService";
 import { useAuthStore } from "../src/shared/store/authStore";
 import { useChatStore } from "../src/shared/store/chatStore";
 import { getAppFlavor, isStaffApp } from "../src/shared/utils/flavor";
-
 // Keep the native splash up until the animated JeepQ launch screen is mounted.
+import SUSFeedbackPrompt from "../src/shared/components/feedback/SUSFeedbackPrompt";
 NativeSplashScreen.preventAutoHideAsync().catch(() => {
   // It may already be hidden during Fast Refresh.
 });
@@ -452,10 +452,20 @@ export default function RootLayout() {
   return (
     <SafeAreaProvider>
       <StatusBar style="auto" />
+
       <AppThemeProvider>
         <Slot />
+
         <Toast />
+
         <ConnectivityStatus />
+
+        <SUSFeedbackPrompt
+          userId={user?.uid}
+          role={user?.role}
+          enabled={isAuthenticated && isReady && !showSplash}
+        />
+
         {showSplash ? (
           <JeepQLaunchSplash
             isAppReady={isReady}

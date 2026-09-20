@@ -10,7 +10,7 @@ import {
   RefreshCw,
   Send,
   Users,
-  X
+  X,
 } from "lucide-react-native";
 import { useEffect, useState } from "react";
 import {
@@ -25,7 +25,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import OceanBackground from "../../../src/shared/components/clay/OceanBackground";
 import { supabase } from "../../../src/shared/config/supabase";
-import { useNotifications } from "../../../src/shared/hooks/useNotification";
+import { useNotifications } from "../../../src/shared/hooks/useCommuterNotifications";
 
 type NotificationType =
   "arrival" | "dispatch" | "occupancy" | "eta" | "status" | "queue" | "system";

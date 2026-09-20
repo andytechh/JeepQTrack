@@ -30,6 +30,8 @@ import {
 
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import JeepneyImage from "../../../../src/shared/components/jeepney/JeepneyImage";
+
 import OceanBackground from "../../../../src/shared/components/clay/OceanBackground";
 import { colors } from "../../../../src/shared/constants/theme";
 import { useDispatcherDashboard } from "../../../../src/shared/hooks/dispatcher/useDispatcherDashboard";
@@ -567,9 +569,12 @@ function NextDispatchCard({
       }}
     >
       <View className="flex-row items-center">
-        <View className="h-[52px] w-[52px] items-center justify-center rounded-[17px] bg-ocean-100">
-          <BusFront size={25} color={colors.primaryDark} strokeWidth={2.2} />
-        </View>
+        <JeepneyImage
+          imageUrl={jeepney.image_url}
+          size={52}
+          rounded={17}
+          iconSize={25}
+        />
 
         <View className="ml-3 flex-1">
           <Text className="text-[15px] font-extrabold text-ink-dark">
@@ -763,11 +768,12 @@ function JeepneyCard({
       }}
     >
       <View className="flex-row items-center">
-        <View className="h-[43px] w-[43px] items-center justify-center rounded-[14px] bg-ocean-400">
-          <Text className="text-[15px] font-extrabold text-white">
-            {jeepney.queue_position ?? index + 1}
-          </Text>
-        </View>
+        <JeepneyImage
+          imageUrl={jeepney.image_url}
+          size={43}
+          rounded={14}
+          iconSize={21}
+        />
 
         <View className="ml-3 flex-1">
           <Text
@@ -832,9 +838,26 @@ function JeepneyCard({
           </Text>
         </View>
 
-        <Text className="text-[9px] font-semibold text-ocean-700">
-          View details
-        </Text>
+        <View className="flex-row items-center">
+          {(jeepney.status === "waiting" || jeepney.status === "loading") &&
+          jeepney.queue_position != null ? (
+            <View className="mr-3 rounded-full bg-ocean-100 px-2.5 py-1">
+              <Text className="text-[8px] font-extrabold text-ocean-700">
+                Queue #{jeepney.queue_position}
+              </Text>
+            </View>
+          ) : (
+            <View className="mr-3 rounded-full bg-slate-100 px-2.5 py-1">
+              <Text className="text-[8px] font-extrabold text-slate-500">
+                No queue number
+              </Text>
+            </View>
+          )}
+
+          <Text className="text-[9px] font-semibold text-ocean-700">
+            View details
+          </Text>
+        </View>
       </View>
     </Pressable>
   );

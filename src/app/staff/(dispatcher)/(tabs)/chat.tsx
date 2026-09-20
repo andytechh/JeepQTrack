@@ -1,5 +1,11 @@
 import { useFocusEffect } from "expo-router";
-import { Check, MessageCircle, SendHorizontal, X } from "lucide-react-native";
+import {
+  ArrowLeft,
+  Check,
+  MessageCircle,
+  SendHorizontal,
+  X,
+} from "lucide-react-native";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -19,6 +25,7 @@ import { supabase } from "@/src/shared/config/supabase";
 import { useTheme } from "@/src/shared/context/ThemeContext";
 import { useOptimizedChat } from "@/src/shared/hooks/useOptimizedChat";
 import { useAuthStore } from "@/src/shared/store/authStore";
+import { router } from "expo-router";
 
 const PRESENCE_CHANNEL = "staff-presence";
 const BATCH_SIZE = 10;
@@ -555,11 +562,18 @@ export default function DispatcherChatScreen() {
                 elevation: 4,
               }}
             >
-              <MessageCircle
-                size={24}
-                color={colors.primaryDark}
-                strokeWidth={2.5}
-              />
+              <Pressable
+                onPress={() => router.back()}
+                className="h-[48px] w-[48px] items-center justify-center rounded-[16px] bg-white/80"
+                accessibilityRole="button"
+                accessibilityLabel="Go back"
+              >
+                <ArrowLeft
+                  size={19}
+                  color={colors.primaryDark}
+                  strokeWidth={2.5}
+                />
+              </Pressable>
             </View>
 
             <View

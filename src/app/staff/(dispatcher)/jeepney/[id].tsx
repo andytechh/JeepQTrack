@@ -3,6 +3,7 @@ import { router, useLocalSearchParams } from "expo-router";
 import { ArrowLeft, MessageCircle, Navigation } from "lucide-react-native";
 import { ReactNode, useCallback, useEffect, useState } from "react";
 import {
+  Image,
   ActivityIndicator as RNActivityIndicator,
   SafeAreaView,
   ScrollView,
@@ -11,8 +12,6 @@ import {
   View,
 } from "react-native";
 
-import { Card } from "../../../../src/shared/components/ui/Card";
-import { StatusPill } from "../../../../src/shared/components/ui/StatusPill";
 import { supabase } from "../../../../src/shared/config/supabase";
 import { theme } from "../../../../src/shared/constants/theme";
 import { useTheme } from "../../../../src/shared/context/ThemeContext";
@@ -31,19 +30,17 @@ interface JeepneyDetail {
   terminal_id: number;
   loading_started_at: string | null;
   loading_ends_at: string | null;
+  jeep_name: string | null;
+  image_url: string | null;
 }
 
 function occupancyStatus(occupancy: number, capacity: number) {
-  if (!capacity)
-    return { label: "No occupancy data", color: theme.colors.status.offline };
+  if (!capacity) return { label: "No occupancy data", color: "#64748b" };
   const pct = Math.round((occupancy / capacity) * 100);
-  if (pct >= 100)
-    return { label: "FULL", color: theme.colors.status.error, pct };
-  if (pct >= 90)
-    return { label: "NEAR CAPACITY", color: theme.colors.status.error, pct };
-  if (pct >= 70)
-    return { label: "MODERATE", color: theme.colors.status.busy, pct };
-  return { label: "NORMAL", color: theme.colors.status.online, pct };
+  if (pct >= 100) return { label: "FULL", color: "#ef4444", pct };
+  if (pct >= 90) return { label: "NEAR CAPACITY", color: "#ef4444", pct };
+  if (pct >= 70) return { label: "MODERATE", color: "#f59e0b", pct };
+  return { label: "NORMAL", color: "#22c55e", pct };
 }
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
@@ -55,7 +52,17 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
       >
         {title}
       </Text>
-      <Card style={{ padding: theme.spacing.md }}>{children}</Card>
+      <View
+        style={{
+          padding: theme.spacing.md,
+          borderRadius: 20,
+          backgroundColor: isDark ? "#172033" : "#EAF9FE",
+          borderWidth: 1,
+          borderColor: isDark ? "#26354D" : "#C4E4EF",
+        }}
+      >
+        {children}
+      </View>
     </View>
   );
 }
@@ -96,7 +103,7 @@ export default function JeepneyDetailsScreen() {
       const { data, error: fetchError } = await supabase
         .from("jeepneys")
         .select(
-          "id, plate_number, driver_name, status, capacity, current_occupancy, queue_position, bracket, terminal_id, loading_started_at, loading_ends_at",
+          "id, plate_number, jeep_name, driver_name, status, capacity, current_occupancy, queue_position, bracket, terminal_id, loading_started_at, loading_ends_at, image_url",
         )
         .eq("id", id)
         .single();
@@ -174,7 +181,14 @@ export default function JeepneyDetailsScreen() {
     );
   }
 
-  const occ = occupancyStatus(jeepney.current_occupancy, jeepney.capacity);
+  const safeOccupancy = Number.isFinite(Number(jeepney.current_occupancy))
+    ? Number(jeepney.current_occupancy)
+    : 0;
+  const safeCapacity =
+    Number.isFinite(Number(jeepney.capacity)) && Number(jeepney.capacity) > 0
+      ? Number(jeepney.capacity)
+      : 0;
+  const occ = occupancyStatus(safeOccupancy, safeCapacity);
   const canDispatch = ["waiting", "loading"].includes(jeepney.status);
 
   return (
@@ -202,11 +216,38 @@ export default function JeepneyDetailsScreen() {
             {jeepney.driver_name || "No driver assigned"}
           </Text>
         </View>
-        <StatusPill status={jeepney.status as any} dot isDark={isDark} />
+        <View
+          style={{
+            paddingHorizontal: 10,
+            paddingVertical: 5,
+            borderRadius: 999,
+            backgroundColor: isDark ? "#26354D" : "#DDF4FC",
+          }}
+        >
+          <Text
+            style={{
+              color: isDark ? "#FFFFFF" : "#167BAA",
+              fontSize: 11,
+              fontWeight: "800",
+              textTransform: "uppercase",
+            }}
+          >
+            {jeepney.status.replace("_", " ")}
+          </Text>
+        </View>
       </View>
 
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
         <Section title="Vehicle">
+          {jeepney.image_url ? (
+            <View className="mb-3 overflow-hidden rounded-2xl">
+              <Image
+                source={{ uri: jeepney.image_url }}
+                style={{ width: "100%", height: 180 }}
+                resizeMode="cover"
+              />
+            </View>
+          ) : null}
           <Row label="Jeepney Number" value={jeepney.plate_number} />
           <Row label="Driver" value={jeepney.driver_name || "N/A"} />
           <Row label="Capacity" value={`${jeepney.capacity}`} />
@@ -217,7 +258,10 @@ export default function JeepneyDetailsScreen() {
           <Row
             label="Queue Position"
             value={
-              jeepney.queue_position ? `#${jeepney.queue_position}` : "N/A"
+              ["waiting", "loading"].includes(jeepney.status) &&
+              jeepney.queue_position != null
+                ? `#${jeepney.queue_position}`
+                : "Not in queue"
             }
           />
           <Row
@@ -235,7 +279,7 @@ export default function JeepneyDetailsScreen() {
             <Text
               className={`text-2xl font-bold ${isDark ? "text-white" : "text-slate-900"}`}
             >
-              {jeepney.current_occupancy}/{jeepney.capacity}
+              {safeOccupancy}/{safeCapacity}
             </Text>
             {occ.pct !== undefined && (
               <View
@@ -326,8 +370,8 @@ export default function JeepneyDetailsScreen() {
           <View
             style={{
               backgroundColor: isDark ? "#0f172a" : "#ffffff",
-              borderTopLeftRadius: theme.borderRadius.xxl,
-              borderTopRightRadius: theme.borderRadius.xxl,
+              borderTopLeftRadius: theme.radius.xxl,
+              borderTopRightRadius: theme.radius.xxl,
               padding: theme.spacing.lg,
             }}
           >

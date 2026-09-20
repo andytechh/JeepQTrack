@@ -1,4 +1,5 @@
 import { colors } from "@/src/shared/constants/theme";
+import { router } from "expo-router";
 import {
   ArrowLeft,
   Bell,
@@ -13,6 +14,7 @@ import {
   Users,
   X,
 } from "lucide-react-native";
+import { useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -23,20 +25,13 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-
-import { router } from "expo-router";
 import OceanBackground from "../../../src/shared/components/clay/OceanBackground";
-import { useNotifications } from "../../../src/shared/hooks/useNotification";
-import { useAuthStore } from "../../../src/shared/store/authStore";
-type NotificationType =
-  "arrival" | "dispatch" | "occupancy" | "eta" | "status" | "queue" | "system";
-
-export default function CommuterNotificationsScreen() {
-  // Was: const userId = useCurrentUserId();  (relied on supabase.auth.getUser(),
-  // which is always null for staff — this app authenticates against the
-  // custom `users` table via authStore, not Supabase Auth sessions.)
-  const userId = useAuthStore((state) => state.user?.uid ?? null);
-
+import {
+  StaffNotification,
+  StaffNotificationType,
+  useStaffNotifications,
+} from "../../../src/shared/hooks/useStaffNotifications";
+export default function DriverNotificationsScreen() {
   const {
     notifications,
     unreadCount,
@@ -46,7 +41,9 @@ export default function CommuterNotificationsScreen() {
     refresh,
     markAsRead,
     markAllAsRead,
-  } = useNotifications(userId);
+  } = useStaffNotifications();
+
+  const [markingAll, setMarkingAll] = useState(false);
 
   const handleMarkAsRead = async (notificationId: string) => {
     const success = await markAsRead(notificationId);
@@ -60,15 +57,21 @@ export default function CommuterNotificationsScreen() {
   };
 
   const handleMarkAllAsRead = async () => {
-    if (unreadCount === 0) return;
+    if (unreadCount === 0 || markingAll) return;
 
-    const success = await markAllAsRead();
+    setMarkingAll(true);
 
-    if (!success) {
-      Alert.alert(
-        "Unable to update notifications",
-        "The notifications could not be marked as read.",
-      );
+    try {
+      const success = await markAllAsRead();
+
+      if (!success) {
+        Alert.alert(
+          "Unable to update notifications",
+          "The notifications could not be marked as read.",
+        );
+      }
+    } finally {
+      setMarkingAll(false);
     }
   };
 
@@ -108,7 +111,7 @@ export default function CommuterNotificationsScreen() {
           <Header
             unreadCount={unreadCount}
             onMarkAll={handleMarkAllAsRead}
-            markingAll={false}
+            markingAll={markingAll}
           />
 
           {error ? (
@@ -166,14 +169,7 @@ function NotificationCard({
   notification,
   onPress,
 }: {
-  notification: {
-    id: string;
-    title: string;
-    message: string;
-    type: NotificationType;
-    read: boolean;
-    created_at: string;
-  };
+  notification: StaffNotification;
   onPress: () => void;
 }) {
   const isUnread = !notification.read;
@@ -282,7 +278,7 @@ function NotificationCard({
                 fontWeight: "500",
               }}
             >
-              {notification.message}
+              Jeep Name :{notification.message}
             </Text>
 
             <View className="mt-3 flex-row items-center">
@@ -406,7 +402,7 @@ function Header({
   markingAll: boolean;
 }) {
   return (
-    <View className=" pt-4">
+    <View className="pt-4">
       <View className="flex-row items-center justify-between">
         <Pressable
           onPress={() => router.back()}
@@ -416,7 +412,6 @@ function Header({
         >
           <ArrowLeft size={19} color={colors.primaryDark} strokeWidth={2.5} />
         </Pressable>
-
         <View className="flex-1 ml-2">
           <Text className="text-[11px] font-bold uppercase tracking-[1px] text-ocean-700">
             SMART QUEUE
@@ -454,6 +449,7 @@ function Header({
     </View>
   );
 }
+
 function ErrorState({
   message,
   onRetry,
@@ -570,8 +566,8 @@ function EmptyNotifications() {
   );
 }
 
-function getNotificationIcon(type: NotificationType) {
-  const colorsByType: Record<NotificationType, string> = {
+function getNotificationIcon(type: StaffNotificationType) {
+  const colorsByType: Record<StaffNotificationType, string> = {
     arrival: "#16A34A",
     dispatch: "#2563EB",
     occupancy: "#D97706",
@@ -579,6 +575,7 @@ function getNotificationIcon(type: NotificationType) {
     status: "#0284C7",
     queue: "#0284C7",
     system: "#64748B",
+    chat: "#7C3AED",
   };
 
   const color = colorsByType[type];
@@ -603,12 +600,15 @@ function getNotificationIcon(type: NotificationType) {
     case "queue":
       return <Users size={size} color={color} strokeWidth={2.3} />;
 
+    case "chat":
+      return <Bell size={size} color={color} strokeWidth={2.3} />;
+
     default:
       return <Bell size={size} color={color} strokeWidth={2.3} />;
   }
 }
 
-function getNotificationColor(type: NotificationType) {
+function getNotificationColor(type: StaffNotificationType) {
   switch (type) {
     case "arrival":
       return "#DCFCE7";
@@ -628,12 +628,15 @@ function getNotificationColor(type: NotificationType) {
     case "queue":
       return "#E0F2FE";
 
+    case "chat":
+      return "#EDE9FE";
+
     default:
       return "#F1F5F9";
   }
 }
 
-function getTypeLabel(type: NotificationType) {
+function getTypeLabel(type: StaffNotificationType) {
   switch (type) {
     case "arrival":
       return "Arrival";
@@ -652,6 +655,9 @@ function getTypeLabel(type: NotificationType) {
 
     case "queue":
       return "Queue";
+
+    case "chat":
+      return "Chat";
 
     default:
       return "System";

@@ -351,10 +351,15 @@ export default function AdminStaffDetailsScreen() {
           <View className="flex-1 px-5 pt-4">
             <Pressable
               onPress={() => router.back()}
-              className="h-[44px] w-[44px] items-center justify-center rounded-full border border-white/90 bg-clay-surface"
-              style={clayShadow()}
+              className="h-[48px] w-[48px] items-center justify-center rounded-[16px] bg-white/80"
+              accessibilityRole="button"
+              accessibilityLabel="Go back"
             >
-              <ArrowLeft size={20} color="#475569" strokeWidth={2.4} />
+              <ArrowLeft
+                size={19}
+                color={colors.primaryDark}
+                strokeWidth={2.5}
+              />
             </Pressable>
 
             <View
@@ -397,10 +402,15 @@ export default function AdminStaffDetailsScreen() {
           <View className="flex-row items-center">
             <Pressable
               onPress={() => router.back()}
-              className="h-[44px] w-[44px] items-center justify-center rounded-full border border-white/90 bg-clay-surface"
-              style={clayShadow()}
+              className="h-[48px] w-[48px] items-center justify-center rounded-[16px] bg-white/80"
+              accessibilityRole="button"
+              accessibilityLabel="Go back"
             >
-              <ArrowLeft size={20} color="#475569" strokeWidth={2.4} />
+              <ArrowLeft
+                size={19}
+                color={colors.primaryDark}
+                strokeWidth={2.5}
+              />
             </Pressable>
 
             <View className="ml-3 flex-1">

@@ -40,6 +40,7 @@ type TerminalAssignment = {
 type Jeepney = {
   id: string;
   plate_number: string;
+  image_url: string | null;
   jeep_name: string | null;
   status: string | null;
   capacity: number | null;
@@ -61,7 +62,7 @@ type Jeepney = {
 };
 
 type DoorCountRow = {
-  jeepney_id: string;
+  jeep_id: string;
   front_count: number | null;
   rear_count: number | null;
   updated_at: string | null;
@@ -106,6 +107,45 @@ const EMPTY_STATS: DashboardStats = {
   queue: 0,
 };
 
+async function sendExpoPushNotification(
+  token: string,
+  title: string,
+  body: string,
+  data: Record<string, unknown>,
+) {
+  const response = await fetch("https://exp.host/--/api/v2/push/send", {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      to: token,
+      sound: "default",
+      title,
+      body,
+      data,
+      priority: "high",
+      channelId: "dispatch",
+    }),
+  });
+
+  const result = await response.json().catch(() => null);
+
+  if (!response.ok) {
+    throw new Error(
+      result?.errors?.[0]?.message ?? "Expo push notification failed.",
+    );
+  }
+
+  const ticket = result?.data;
+  if (ticket?.status === "error") {
+    throw new Error(ticket.message ?? "Expo push notification failed.");
+  }
+
+  return result;
+}
+
 export function useDispatcherDashboard() {
   const [state, setState] = useState<DispatcherDashboardState>({
     dispatcher: null,
@@ -138,8 +178,8 @@ export function useDispatcherDashboard() {
    *
    * front_count + rear_count
    *
-   * Assumed door_counts columns:
-   * - jeepney_id
+   * door_counts columns:
+   * - jeep_id
    * - front_count
    * - rear_count
    * - updated_at
@@ -162,13 +202,13 @@ export function useDispatcherDashboard() {
       .from("door_counts")
       .select(
         `
-            jeepney_id,
+            jeep_id,
             front_count,
             rear_count,
             updated_at
           `,
       )
-      .in("jeepney_id", jeepneyIds)
+      .in("jeep_id", jeepneyIds)
       .order("updated_at", {
         ascending: false,
         nullsLast: true,
@@ -179,13 +219,13 @@ export function useDispatcherDashboard() {
     }
 
     for (const row of (data ?? []) as DoorCountRow[]) {
-      if (!row.jeepney_id) {
+      if (!row.jeep_id) {
         continue;
       }
 
       // The query is newest first.
       // Keep only the newest row for each jeepney.
-      if (doorMap.has(row.jeepney_id)) {
+      if (doorMap.has(row.jeep_id)) {
         continue;
       }
 
@@ -193,7 +233,7 @@ export function useDispatcherDashboard() {
 
       const rearCount = Math.max(0, Number(row.rear_count ?? 0));
 
-      doorMap.set(row.jeepney_id, {
+      doorMap.set(row.jeep_id, {
         front_count: frontCount,
         rear_count: rearCount,
         occupancy_updated_at: row.updated_at ?? null,
@@ -371,7 +411,7 @@ export function useDispatcherDashboard() {
               is_active
             `,
           )
-          .eq("dispatcher_id", dispatcher.id)
+          .eq("dispatcher_id", user.id)
           .eq("is_active", true)
           .maybeSingle();
 
@@ -648,7 +688,7 @@ export function useDispatcherDashboard() {
 
           const row = payload.new as Partial<DoorCountRow>;
 
-          if (!row.jeepney_id) {
+          if (!row.jeep_id) {
             return;
           }
 
@@ -660,7 +700,7 @@ export function useDispatcherDashboard() {
 
           setState((current) => {
             const exists = current.jeepneys.some(
-              (jeepney) => jeepney.id === row.jeepney_id,
+              (jeepney) => jeepney.id === row.jeep_id,
             );
 
             if (!exists) {
@@ -668,7 +708,7 @@ export function useDispatcherDashboard() {
             }
 
             const updatedJeepneys = current.jeepneys.map((jeepney) =>
-              jeepney.id === row.jeepney_id
+              jeepney.id === row.jeep_id
                 ? {
                     ...jeepney,
 
@@ -722,7 +762,7 @@ export function useDispatcherDashboard() {
 
           const row = payload.new as Partial<DoorCountRow>;
 
-          if (!row.jeepney_id) {
+          if (!row.jeep_id) {
             return;
           }
 
@@ -734,7 +774,7 @@ export function useDispatcherDashboard() {
 
           setState((current) => {
             const updatedJeepneys = current.jeepneys.map((jeepney) =>
-              jeepney.id === row.jeepney_id
+              jeepney.id === row.jeep_id
                 ? {
                     ...jeepney,
 
@@ -875,11 +915,22 @@ export function useDispatcherDashboard() {
           terminal_number: state.terminal?.terminal_number ?? null,
 
           bracket_number: state.terminal?.bracket_number ?? null,
+          image_url: jeepney.image_url ?? null,
         },
       });
 
     if (notificationError) {
       throw notificationError;
+    }
+
+    if (driver.expo_push_token) {
+      await sendExpoPushNotification(driver.expo_push_token, title, message, {
+        type: "dispatch",
+        notification_type: "dispatch",
+        jeepney_id: jeepney.id,
+        terminal_number: state.terminal?.terminal_number ?? null,
+        queue_position: jeepney.queue_position ?? null,
+      });
     }
 
     return true;

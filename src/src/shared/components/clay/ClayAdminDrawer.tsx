@@ -95,7 +95,7 @@ const systemItems: DrawerItem[] = [
   {
     label: "Announcements",
     icon: Bell,
-    route: "/staff/(admin)/(tabs)/notifications",
+    route: "/staff/(admin)/announcements",
   },
 ];
 

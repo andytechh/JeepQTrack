@@ -1,6 +1,7 @@
 import { useRouter } from "expo-router";
 import {
   AlertTriangle,
+  ArrowLeft,
   CheckCircle2,
   ChevronRight,
   Eye,
@@ -198,7 +199,18 @@ export default function AdminStaffScreen() {
 
           <View className="flex-row items-center">
             <View className="h-[50px] w-[50px] items-center justify-center rounded-[18px] bg-ocean-100">
-              <Users size={24} color={colors.primaryDark} strokeWidth={2.4} />
+              <Pressable
+                onPress={() => router.back()}
+                className="h-[48px] w-[48px] items-center justify-center rounded-[16px] bg-white/80"
+                accessibilityRole="button"
+                accessibilityLabel="Go back"
+              >
+                <ArrowLeft
+                  size={19}
+                  color={colors.primaryDark}
+                  strokeWidth={2.5}
+                />
+              </Pressable>
             </View>
 
             <View className="ml-3 flex-1">

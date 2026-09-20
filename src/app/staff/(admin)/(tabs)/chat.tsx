@@ -1,5 +1,6 @@
-import { useFocusEffect } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
 import {
+  ArrowLeft,
   Check,
   MessageCircle,
   MoreVertical,
@@ -612,11 +613,18 @@ export default function AdminChatScreen() {
                 elevation: 4,
               }}
             >
-              <MessageCircle
-                size={24}
-                color={colors.primaryDark}
-                strokeWidth={2.5}
-              />
+              <Pressable
+                onPress={() => router.back()}
+                className="h-[48px] w-[48px] items-center justify-center rounded-[16px] bg-white/80"
+                accessibilityRole="button"
+                accessibilityLabel="Go back"
+              >
+                <ArrowLeft
+                  size={19}
+                  color={colors.primaryDark}
+                  strokeWidth={2.5}
+                />
+              </Pressable>
             </View>
 
             {/* CHAT TITLE */}

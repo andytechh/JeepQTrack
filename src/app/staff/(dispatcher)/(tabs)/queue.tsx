@@ -22,6 +22,8 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import JeepneyImage from "@/src/shared/components/jeepney/JeepneyImage";
+
 import { ClayCard } from "@/src/shared/components/clay/ClayCard";
 import OceanBackground from "@/src/shared/components/clay/OceanBackground";
 import { colors } from "@/src/shared/constants/theme";
@@ -478,9 +480,12 @@ function QueueJeepneyCard({
       {/* TOP */}
 
       <View className="flex-row items-center">
-        <View className="h-[47px] w-[47px] items-center justify-center rounded-[15px] bg-ocean-100">
-          <BusFront size={23} color={colors.primaryDark} strokeWidth={2.3} />
-        </View>
+        <JeepneyImage
+          imageUrl={jeepney.image_url}
+          size={47}
+          rounded={15}
+          iconSize={23}
+        />
 
         <View className="ml-3 flex-1">
           <Text
@@ -531,7 +536,10 @@ function QueueJeepneyCard({
           icon={<Clock3 size={14} color="#64748B" strokeWidth={2.2} />}
           label="Queue"
           value={
-            jeepney.queue_position !== null ? `#${jeepney.queue_position}` : "—"
+            (jeepney.status === "waiting" || jeepney.status === "loading") &&
+            jeepney.queue_position !== null
+              ? `#${jeepney.queue_position}`
+              : "No queue number"
           }
         />
       </View>
@@ -603,8 +611,16 @@ function QueueJeepneyCard({
           <View className="flex-row items-center rounded-full bg-slate-100 px-3.5 py-2.5">
             <Clock3 size={13} color="#64748B" strokeWidth={2.3} />
 
-            <Text className="ml-1.5 text-[9px] font-extrabold text-slate-500">
-              Loading
+            <Text className="ml-1.5 text-[9px] font-extrabold capitalize text-slate-500">
+              {jeepney.status === "loading"
+                ? "Loading"
+                : jeepney.status === "en_route"
+                  ? "En Route"
+                  : jeepney.status === "dispatched"
+                    ? "Dispatched"
+                    : jeepney.status === "arrived"
+                      ? "Arrived"
+                      : "Inactive"}
             </Text>
           </View>
         )}
@@ -816,121 +832,127 @@ function DispatchConfirmModal({
           padding={20}
           radiusSize="xxxl"
           shadow="default"
-          className="w-full max-w-[430px]"
+          className="max-h-[86%] w-full max-w-[430px]"
         >
-          <View className="flex-row items-center">
-            <View className="h-[48px] w-[48px] items-center justify-center rounded-[16px] bg-ocean-100">
-              <CheckCircle2
-                size={23}
-                color={colors.primaryDark}
-                strokeWidth={2.4}
-              />
-            </View>
-
-            <View className="ml-3 flex-1">
-              <Text className="text-[16px] font-extrabold text-ink-dark">
-                Send Dispatch Alert
-              </Text>
-
-              <Text className="mt-0.5 text-[10px] font-semibold text-ink-muted">
-                Notify this jeepney that it is ready to dispatch.
-              </Text>
-            </View>
-
-            <Pressable
-              onPress={onClose}
-              disabled={dispatching}
-              className="h-[34px] w-[34px] items-center justify-center rounded-full bg-white"
-            >
-              <X size={16} color="#64748B" strokeWidth={2.5} />
-            </Pressable>
-          </View>
-
-          <View className="mt-5 rounded-[20px] border border-white/90 bg-white/70 p-4">
+          <ScrollView
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={{ paddingBottom: 2 }}
+          >
             <View className="flex-row items-center">
-              <View className="h-[42px] w-[42px] items-center justify-center rounded-[13px] bg-ocean-100">
-                <BusFront
-                  size={20}
+              <View className="h-[48px] w-[48px] items-center justify-center rounded-[16px] bg-ocean-100">
+                <CheckCircle2
+                  size={23}
                   color={colors.primaryDark}
-                  strokeWidth={2.3}
+                  strokeWidth={2.4}
                 />
               </View>
 
               <View className="ml-3 flex-1">
-                <Text className="text-[13px] font-extrabold text-ink-dark">
-                  {jeepney.jeep_name || jeepney.plate_number}
+                <Text className="text-[16px] font-extrabold text-ink-dark">
+                  Send Dispatch Alert
                 </Text>
 
-                <Text className="mt-0.5 text-[9px] font-semibold text-ink-secondary">
-                  {jeepney.plate_number}
+                <Text className="mt-0.5 text-[10px] font-semibold text-ink-muted">
+                  Notify this jeepney that it is ready to dispatch.
                 </Text>
+              </View>
+
+              <Pressable
+                onPress={onClose}
+                disabled={dispatching}
+                className="h-[34px] w-[34px] items-center justify-center rounded-full bg-white"
+              >
+                <X size={16} color="#64748B" strokeWidth={2.5} />
+              </Pressable>
+            </View>
+
+            <View className="mt-5 rounded-[20px] border border-white/90 bg-white/70 p-4">
+              <View className="flex-row items-center">
+                <JeepneyImage
+                  imageUrl={jeepney.image_url}
+                  size={42}
+                  rounded={13}
+                  iconSize={20}
+                />
+
+                <View className="ml-3 flex-1">
+                  <Text className="text-[13px] font-extrabold text-ink-dark">
+                    {jeepney.jeep_name || jeepney.plate_number}
+                  </Text>
+
+                  <Text className="mt-0.5 text-[9px] font-semibold text-ink-secondary">
+                    {jeepney.plate_number}
+                  </Text>
+                </View>
+              </View>
+
+              <View className="mt-4 flex-row">
+                <ModalInfo
+                  label="Terminal"
+                  value={getTerminalName(jeepney.terminal_id)}
+                />
+
+                <ModalInfo label="Bracket" value={String(jeepney.bracket)} />
+              </View>
+
+              <View className="mt-3 flex-row">
+                <ModalInfo
+                  label="Occupancy"
+                  value={`${jeepney.current_occupancy}/${jeepney.capacity}`}
+                />
+
+                <ModalInfo
+                  label="Queue"
+                  value={
+                    (jeepney.status === "waiting" ||
+                      jeepney.status === "loading") &&
+                    jeepney.queue_position !== null
+                      ? `#${jeepney.queue_position}`
+                      : "No queue number"
+                  }
+                />
               </View>
             </View>
 
-            <View className="mt-4 flex-row">
-              <ModalInfo
-                label="Terminal"
-                value={getTerminalName(jeepney.terminal_id)}
-              />
-
-              <ModalInfo label="Bracket" value={String(jeepney.bracket)} />
-            </View>
-
-            <View className="mt-3 flex-row">
-              <ModalInfo
-                label="Occupancy"
-                value={`${jeepney.current_occupancy}/${jeepney.capacity}`}
-              />
-
-              <ModalInfo
-                label="Queue"
-                value={
-                  jeepney.queue_position !== null
-                    ? `#${jeepney.queue_position}`
-                    : "—"
-                }
-              />
-            </View>
-          </View>
-
-          <View className="mt-5 rounded-[17px] bg-ocean-50 px-4 py-3">
-            <Text className="text-[10px] font-bold leading-[16px] text-ocean-700">
-              The dispatcher will send the dispatch alert. The driver will
-              receive the notification through the existing dispatch system.
-            </Text>
-          </View>
-
-          <View className="mt-5 flex-row">
-            <Pressable
-              onPress={onClose}
-              disabled={dispatching}
-              className="flex-1 items-center justify-center rounded-full bg-white py-3.5"
-            >
-              <Text className="text-[11px] font-extrabold text-slate-600">
-                Cancel
+            <View className="mt-5 rounded-[17px] bg-ocean-50 px-4 py-3">
+              <Text className="text-[10px] font-bold leading-[16px] text-ocean-700">
+                The dispatcher will send the dispatch alert. The driver will
+                receive the notification through the existing dispatch system.
               </Text>
-            </Pressable>
+            </View>
 
-            <Pressable
-              onPress={onConfirm}
-              disabled={dispatching}
-              className={`ml-2 flex-1 flex-row items-center justify-center rounded-full py-3.5 ${
-                dispatching ? "bg-ocean-200" : "bg-ocean-400"
-              }`}
-            >
-              {dispatching ? (
-                <ActivityIndicator size="small" color="#FFFFFF" />
-              ) : (
-                <>
-                  <CheckCircle2 size={15} color="#FFFFFF" strokeWidth={2.5} />
+            <View className="mt-5 flex-row">
+              <Pressable
+                onPress={onClose}
+                disabled={dispatching}
+                className="flex-1 items-center justify-center rounded-full bg-white py-3.5"
+              >
+                <Text className="text-[11px] font-extrabold text-slate-600">
+                  Cancel
+                </Text>
+              </Pressable>
 
-                  <Text className="ml-1.5 text-[11px] font-extrabold text-white">
-                    Send Alert
-                  </Text>
-                </>
-              )}
-            </Pressable>
-          </View>
+              <Pressable
+                onPress={onConfirm}
+                disabled={dispatching}
+                className={`ml-2 flex-1 flex-row items-center justify-center rounded-full py-3.5 ${
+                  dispatching ? "bg-ocean-200" : "bg-ocean-400"
+                }`}
+              >
+                {dispatching ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <>
+                    <CheckCircle2 size={15} color="#FFFFFF" strokeWidth={2.5} />
+
+                    <Text className="ml-1.5 text-[11px] font-extrabold text-white">
+                      Send Alert
+                    </Text>
+                  </>
+                )}
+              </Pressable>
+            </View>
+          </ScrollView>
         </ClayCard>
       </View>
     </Modal>

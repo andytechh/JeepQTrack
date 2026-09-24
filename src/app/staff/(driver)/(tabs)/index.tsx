@@ -23,7 +23,6 @@ import {
   DriverJeepney,
   useDriverDashboard,
 } from "../../../../src/shared/hooks/driver/useDriverDashboard";
-import { useStaffNotifications } from "../../../../src/shared/hooks/useStaffNotifications";
 
 function getStatusLabel(status: string) {
   switch (status?.toLowerCase()) {
@@ -46,13 +45,11 @@ function getStatusLabel(status: string) {
 
 function getOccupancyPercentage(occupancy: number, capacity: number) {
   if (!capacity || capacity <= 0) return 0;
-
   return Math.min(100, Math.round((occupancy / capacity) * 100));
 }
 
 function formatTime(timestamp: string | null) {
   if (!timestamp) return "Not available";
-
   try {
     return new Date(timestamp).toLocaleTimeString([], {
       hour: "numeric",
@@ -98,9 +95,7 @@ function MyJeepneyCard({
     jeepney.current_occupancy,
     jeepney.capacity,
   );
-
   const seatsLeft = Math.max(0, jeepney.capacity - jeepney.current_occupancy);
-
   const highlighted = isNextInLine || isLoadingNow;
 
   return (
@@ -138,7 +133,6 @@ function MyJeepneyCard({
           <Text className="text-[52px] font-extrabold leading-[52px] text-white">
             {jeepney.queue_position ?? "#"}
           </Text>
-
           <Text className="mb-1.5 ml-2 text-[13px] font-semibold text-white/75">
             queue position
           </Text>
@@ -148,15 +142,12 @@ function MyJeepneyCard({
           {jeepney.queue_position
             ? aheadOfMe === 0
               ? "You're at the front of the line"
-              : `${aheadOfMe} ${
-                  aheadOfMe === 1 ? "jeepney" : "jeepneys"
-                } ahead of you`
+              : `${aheadOfMe} ${aheadOfMe === 1 ? "jeepney" : "jeepneys"} ahead of you`
             : "Not currently queued"}
         </Text>
 
         <View className="mt-2 flex-row items-center">
           <MapPin size={13} color="#FFFFFF" strokeWidth={2.2} />
-
           <Text className="ml-1 text-[10px] font-semibold text-white/80">
             {jeepney.terminal_id === 1
               ? "Donsol Terminal"
@@ -171,7 +162,6 @@ function MyJeepneyCard({
         <View className="flex-row items-center justify-between">
           <View className="flex-row items-center rounded-full bg-ocean-100 px-3 py-2">
             <View className="mr-2 h-[7px] w-[7px] rounded-full bg-ocean-600" />
-
             <Text className="text-[10px] font-extrabold text-ocean-700">
               {getStatusLabel(jeepney.status)}
             </Text>
@@ -186,7 +176,6 @@ function MyJeepneyCard({
           <View className="flex-row items-center justify-between">
             <View className="flex-row items-center">
               <Users size={15} color={colors.textSecondary} strokeWidth={2.2} />
-
               <Text className="ml-2 text-[11px] font-bold text-ink-secondary">
                 Occupancy
               </Text>
@@ -220,7 +209,6 @@ function MyJeepneyCard({
                     ? "Moderate"
                     : "Seats available"}
             </Text>
-
             <Text className="text-[10px] font-semibold text-ink-secondary">
               {seatsLeft} {seatsLeft === 1 ? "seat" : "seats"} left
             </Text>
@@ -237,7 +225,6 @@ function MyJeepneyCard({
               <Text className="text-[9px] font-bold uppercase tracking-[0.6px] text-ink-muted">
                 Loading ends
               </Text>
-
               <Text className="mt-0.5 text-[13px] font-extrabold text-ink-dark">
                 {formatTime(jeepney.loading_ends_at)}
               </Text>
@@ -257,15 +244,14 @@ export default function DriverDashboardScreen() {
     aheadOfMe,
     isNextInLine,
     isLoadingNow,
+    notifications,
+    unreadNotificationCount,
     loading,
     refreshing,
     error,
     lastUpdated,
     refresh,
   } = useDriverDashboard();
-
-  const { notifications, unreadCount: unreadNotificationCount } =
-    useStaffNotifications();
 
   const handleNotifications = () => {
     router.push("/staff/(driver)/notifications");
@@ -280,7 +266,6 @@ export default function DriverDashboardScreen() {
       <OceanBackground intensity={0.3}>
         <SafeAreaView className="flex-1 items-center justify-center">
           <ActivityIndicator size="large" color={colors.primaryDark} />
-
           <Text className="mt-4 text-[13px] font-semibold text-ink-secondary">
             Loading your dashboard...
           </Text>
@@ -307,16 +292,15 @@ export default function DriverDashboardScreen() {
             paddingBottom: 120,
           }}
         >
+          {/* HEADER */}
           <View className="flex-row items-start justify-between">
             <View className="flex-1">
               <Text className="text-[11px] font-bold uppercase tracking-[1.4px] text-ocean-700">
                 SMART QUEUE
               </Text>
-
               <Text className="mt-1 text-[28px] font-extrabold text-ink-dark">
                 My Dashboard
               </Text>
-
               {myJeepney?.plate_number && (
                 <Text className="mt-2 text-[11px] font-medium text-ink-secondary">
                   {myJeepney.plate_number}
@@ -330,7 +314,6 @@ export default function DriverDashboardScreen() {
               className="relative h-[48px] w-[48px] items-center justify-center rounded-full border border-white/90 bg-clay-surface shadow-clay-sm"
             >
               <Bell size={21} color={colors.primaryDark} strokeWidth={2.2} />
-
               {unreadNotificationCount > 0 && (
                 <View className="absolute right-[-1px] top-[-2px] min-h-[20px] min-w-[20px] items-center justify-center rounded-full border-2 border-white bg-red-500 px-1">
                   <Text className="text-[9px] font-extrabold text-white">
@@ -343,16 +326,15 @@ export default function DriverDashboardScreen() {
             </Pressable>
           </View>
 
+          {/* ERROR */}
           {error && (
             <View className="mt-5 rounded-[20px] border border-red-200 bg-red-50 p-4">
               <Text className="text-[12px] font-bold text-red-700">
                 Unable to load your dashboard
               </Text>
-
               <Text className="mt-1 text-[10px] leading-[15px] text-red-600">
                 {error}
               </Text>
-
               <Pressable
                 onPress={refresh}
                 className="mt-3 self-start rounded-full bg-red-100 px-4 py-2"
@@ -364,6 +346,7 @@ export default function DriverDashboardScreen() {
             </View>
           )}
 
+          {/* MY JEEPNEY — the highlighted, driver-specific card */}
           <MyJeepneyCard
             jeepney={myJeepney}
             aheadOfMe={aheadOfMe}
@@ -371,6 +354,7 @@ export default function DriverDashboardScreen() {
             isLoadingNow={isLoadingNow}
           />
 
+          {/* VIEW QUEUE */}
           <Pressable
             onPress={handleQueue}
             className="mt-4 flex-row items-center justify-center rounded-full border border-ocean-200 bg-white px-5 py-4 shadow-clay-sm"
@@ -378,7 +362,6 @@ export default function DriverDashboardScreen() {
             <Text className="text-[12px] font-extrabold text-ocean-700">
               View Full Terminal Queue
             </Text>
-
             <ChevronRight
               size={17}
               color={colors.primaryDark}
@@ -386,6 +369,7 @@ export default function DriverDashboardScreen() {
             />
           </Pressable>
 
+          {/* TERMINAL SNAPSHOT */}
           <View className="mt-7">
             <Text className="mb-3 text-[11px] font-bold uppercase tracking-[1.1px] text-ocean-700">
               Terminal Overview
@@ -400,11 +384,9 @@ export default function DriverDashboardScreen() {
                     strokeWidth={2.2}
                   />
                 </View>
-
                 <Text className="mt-4 text-[25px] font-extrabold text-ink-dark">
                   {totalInQueue}
                 </Text>
-
                 <Text className="mt-0.5 text-[10px] font-semibold text-ink-secondary">
                   Jeepneys in queue
                 </Text>
@@ -414,11 +396,9 @@ export default function DriverDashboardScreen() {
                 <View className="h-[38px] w-[38px] items-center justify-center rounded-[13px] bg-amber-100">
                   <Users size={19} color="#B45309" strokeWidth={2.2} />
                 </View>
-
                 <Text className="mt-4 text-[25px] font-extrabold text-ink-dark">
                   {aheadOfMe}
                 </Text>
-
                 <Text className="mt-0.5 text-[10px] font-semibold text-ink-secondary">
                   Ahead of you
                 </Text>
@@ -426,6 +406,7 @@ export default function DriverDashboardScreen() {
             </View>
           </View>
 
+          {/* QUEUE LIST WITH "YOU" HIGHLIGHTED */}
           <View className="mt-7">
             <Text className="mb-3 text-[18px] font-extrabold text-ink-dark">
               Queue Order
@@ -441,7 +422,6 @@ export default function DriverDashboardScreen() {
               ) : (
                 queueJeepneys.map((jeep, index) => {
                   const isMe = jeep.id === myJeepney?.id;
-
                   return (
                     <View
                       key={jeep.id}
@@ -469,7 +449,6 @@ export default function DriverDashboardScreen() {
                         <Text className="text-[11px] font-extrabold text-ink-dark">
                           {jeep.plate_number} {isMe ? "(You)" : ""}
                         </Text>
-
                         <Text className="mt-0.5 text-[9px] text-ink-secondary">
                           {getStatusLabel(jeep.status)}
                         </Text>
@@ -485,12 +464,12 @@ export default function DriverDashboardScreen() {
             </View>
           </View>
 
+          {/* NOTIFICATION PREVIEW */}
           <View className="mt-7">
             <View className="flex-row items-center justify-between">
               <Text className="text-[18px] font-extrabold text-ink-dark">
                 Notifications
               </Text>
-
               <Pressable
                 onPress={handleNotifications}
                 className="flex-row items-center"
@@ -498,7 +477,6 @@ export default function DriverDashboardScreen() {
                 <Text className="text-[10px] font-extrabold text-ocean-700">
                   See all
                 </Text>
-
                 <ChevronRight size={15} color={colors.primaryDark} />
               </Pressable>
             </View>
@@ -507,7 +485,6 @@ export default function DriverDashboardScreen() {
               {notifications.length === 0 ? (
                 <View className="items-center px-5 py-7">
                   <Bell size={25} color={colors.textMuted} strokeWidth={2} />
-
                   <Text className="mt-3 text-[12px] font-bold text-ink-dark">
                     You're all caught up
                   </Text>
@@ -524,12 +501,10 @@ export default function DriverDashboardScreen() {
                         notification.read ? "bg-slate-300" : "bg-ocean-500"
                       }`}
                     />
-
                     <View className="ml-3 flex-1">
                       <Text className="text-[11px] font-extrabold text-ink-dark">
                         {notification.title}
                       </Text>
-
                       <Text
                         numberOfLines={1}
                         className="mt-1 text-[9px] text-ink-secondary"

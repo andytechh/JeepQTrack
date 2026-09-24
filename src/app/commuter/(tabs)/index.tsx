@@ -1,4 +1,4 @@
-import { useRouter } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import {
   ArrowRight,
   Bell,
@@ -11,7 +11,7 @@ import {
   RefreshCw,
   Users,
 } from "lucide-react-native";
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
 import {
   ActivityIndicator,
   Pressable,
@@ -26,8 +26,8 @@ import ServiceClosedState from "@/src/shared/components/clay/ClayServiceClosedSt
 import OceanBackground from "../../../src/shared/components/clay/OceanBackground";
 import { colors } from "../../../src/shared/constants/theme";
 import { useCommuterDashboard } from "../../../src/shared/hooks/useCommuterDashboard";
+import { useNotifications } from "../../../src/shared/hooks/useCommuterNotifications";
 import { useCurrentUserId } from "../../../src/shared/hooks/useCurrentUserId";
-import { useNotifications } from "../../../src/shared/hooks/useNotification";
 import { useOperatingSchedule } from "../../../src/shared/hooks/useOperatingSchedule";
 
 /* ============================================================
@@ -498,9 +498,17 @@ export default function CommuterDashboardScreen() {
 
   const notificationsUserId = useCurrentUserId();
 
-  const { notifications, unreadCount: unreadNotificationCount } =
-    useNotifications(notificationsUserId);
+  const {
+    notifications,
+    unreadCount: unreadNotificationCount,
+    refresh: refreshNotifications,
+  } = useNotifications(notificationsUserId);
 
+  useFocusEffect(
+    useCallback(() => {
+      refreshNotifications();
+    }, [refreshNotifications]),
+  );
   /* ==========================================================
      TERMINAL COUNTS
   ========================================================== */

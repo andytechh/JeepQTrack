@@ -56,15 +56,18 @@ const MAX_NOTIFICATIONS = 50;
 
 export function useStaffNotifications(): UseStaffNotificationsResult {
   const [notifications, setNotifications] = useState<StaffNotification[]>([]);
-
   const [userId, setUserId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
-
   const mountedRef = useRef(true);
+  const notificationChannelRef = useRef<ReturnType<
+    typeof supabase.channel
+  > | null>(null);
+  const readChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(
+    null,
+  );
 
   const instanceIdRef = useRef(
     `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
@@ -98,29 +101,45 @@ export function useStaffNotifications(): UseStaffNotificationsResult {
     return user;
   }, []);
 
-  const applyReadState = useCallback(
-    (
-      rows: StaffNotification[],
-      reads: NotificationRead[],
-    ): StaffNotification[] => {
-      const readSet = new Set(
-        reads
-          .filter((item) => item.user_id === userId)
-          .map((item) => item.notification_id),
-      );
+  const getGlobalReadIds = useCallback(
+    async (uid: string, notificationIds: string[]) => {
+      if (notificationIds.length === 0) {
+        return new Set<string>();
+      }
 
+      const { data, error: readError } = await supabase
+        .from("notification_reads")
+        .select("notification_id")
+        .eq("user_id", uid)
+        .in("notification_id", notificationIds);
+
+      if (readError) {
+        throw readError;
+      }
+
+      return new Set(
+        (data ?? []).map(
+          (row: { notification_id: string }) => row.notification_id,
+        ),
+      );
+    },
+    [],
+  );
+
+  const applyReadState = useCallback(
+    (rows: StaffNotification[], readIds: Set<string>): StaffNotification[] => {
       return rows.map((notification) => {
         if (notification.user_id === null) {
           return {
             ...notification,
-            read: readSet.has(notification.id),
+            read: readIds.has(notification.id),
           };
         }
 
         return notification;
       });
     },
-    [userId],
+    [],
   );
 
   const loadNotifications = useCallback(
@@ -165,51 +184,20 @@ export function useStaffNotifications(): UseStaffNotificationsResult {
           .limit(MAX_NOTIFICATIONS);
 
         if (fetchError) {
-          console.error("❌ Staff notification query failed:", fetchError);
-
-          if (mountedRef.current) {
-            setError(fetchError.message);
-            setNotifications([]);
-          }
-
-          return;
+          throw fetchError;
         }
 
         const rows = (data ?? []).filter((row) =>
           isStaffNotificationType(row.type),
         ) as StaffNotification[];
 
-        const globalNotificationIds = rows
+        const globalIds = rows
           .filter((row) => row.user_id === null)
           .map((row) => row.id);
 
-        let reads: NotificationRead[] = [];
+        const readIds = await getGlobalReadIds(user.id, globalIds);
 
-        if (globalNotificationIds.length > 0) {
-          const { data: readData, error: readError } = await supabase
-            .from("notification_reads")
-            .select("notification_id, user_id, read_at")
-            .eq("user_id", user.id)
-            .in("notification_id", globalNotificationIds);
-
-          if (readError) {
-            console.error(
-              "❌ Staff notification read-state query failed:",
-              readError,
-            );
-
-            if (mountedRef.current) {
-              setError(readError.message);
-              setNotifications([]);
-            }
-
-            return;
-          }
-
-          reads = (readData ?? []) as NotificationRead[];
-        }
-
-        const finalRows = applyReadState(rows, reads);
+        const finalRows = applyReadState(rows, readIds);
 
         if (mountedRef.current) {
           setNotifications(finalRows);
@@ -228,8 +216,17 @@ export function useStaffNotifications(): UseStaffNotificationsResult {
         }
       }
     },
-    [applyReadState, isStaffNotificationType, loadCurrentUser],
+    [
+      applyReadState,
+      getGlobalReadIds,
+      isStaffNotificationType,
+      loadCurrentUser,
+    ],
   );
+
+  const refresh = useCallback(async () => {
+    await loadNotifications(true);
+  }, [loadNotifications]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -242,7 +239,7 @@ export function useStaffNotifications(): UseStaffNotificationsResult {
   useEffect(() => {
     let active = true;
 
-    const loadUser = async () => {
+    const initializeAuth = async () => {
       try {
         const {
           data: { user },
@@ -254,28 +251,32 @@ export function useStaffNotifications(): UseStaffNotificationsResult {
 
         setUserId(user?.id ?? null);
 
-        if (!user) {
+        if (user) {
+          await loadNotifications(false);
+        } else {
           setNotifications([]);
           setLoading(false);
+          setRefreshing(false);
           setError(null);
         }
-      } catch (err) {
-        console.error("❌ Staff auth lookup failed:", err);
+      } catch (err: any) {
+        console.error("❌ Staff auth initialization failed:", err);
 
         if (active && mountedRef.current) {
           setUserId(null);
           setNotifications([]);
           setLoading(false);
-          setError("Unable to determine the staff session.");
+          setRefreshing(false);
+          setError(err?.message ?? "Unable to determine the staff session.");
         }
       }
     };
 
-    loadUser();
+    initializeAuth();
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
+    } = supabase.auth.onAuthStateChange(async (_event, session) => {
       if (!active || !mountedRef.current) {
         return;
       }
@@ -289,40 +290,41 @@ export function useStaffNotifications(): UseStaffNotificationsResult {
         setLoading(false);
         setRefreshing(false);
         setError(null);
+        return;
       }
+
+      await loadNotifications(false);
     });
 
     return () => {
       active = false;
       subscription.unsubscribe();
     };
-  }, []);
+  }, [loadNotifications]);
 
   useEffect(() => {
-    let isActive = true;
+    if (!userId) {
+      return;
+    }
 
-    const setup = async () => {
+    let active = true;
+
+    const setupRealtime = async () => {
       try {
-        const {
-          data: { user },
-        } = await supabase.auth.getUser();
-
-        if (!user || !isActive) {
-          return;
+        if (notificationChannelRef.current) {
+          await supabase.removeChannel(notificationChannelRef.current);
+          notificationChannelRef.current = null;
         }
 
-        loadNotifications(false);
-
-        if (channelRef.current) {
-          supabase.removeChannel(channelRef.current);
-          channelRef.current = null;
+        if (readChannelRef.current) {
+          await supabase.removeChannel(readChannelRef.current);
+          readChannelRef.current = null;
         }
 
-        const channelName = `staff-notifications-${user.id}-${instanceIdRef.current}`;
+        const notificationChannelName = `staff-notifications-${userId}-${instanceIdRef.current}`;
 
-        const channel = supabase.channel(channelName);
-
-        channel
+        const notificationChannel = supabase
+          .channel(notificationChannelName)
           .on(
             "postgres_changes",
             {
@@ -331,7 +333,7 @@ export function useStaffNotifications(): UseStaffNotificationsResult {
               table: "notifications",
             },
             async (payload) => {
-              if (!isActive || !mountedRef.current) {
+              if (!active || !mountedRef.current) {
                 return;
               }
 
@@ -341,7 +343,7 @@ export function useStaffNotifications(): UseStaffNotificationsResult {
                 return;
               }
 
-              if (incoming.user_id !== null && incoming.user_id !== user.id) {
+              if (incoming.user_id !== null && incoming.user_id !== userId) {
                 return;
               }
 
@@ -352,7 +354,7 @@ export function useStaffNotifications(): UseStaffNotificationsResult {
                   .from("notification_reads")
                   .select("notification_id")
                   .eq("notification_id", incoming.id)
-                  .eq("user_id", user.id)
+                  .eq("user_id", userId)
                   .maybeSingle();
 
                 read = !!data;
@@ -390,7 +392,7 @@ export function useStaffNotifications(): UseStaffNotificationsResult {
               table: "notifications",
             },
             async (payload) => {
-              if (!isActive || !mountedRef.current) {
+              if (!active || !mountedRef.current) {
                 return;
               }
 
@@ -400,7 +402,7 @@ export function useStaffNotifications(): UseStaffNotificationsResult {
                 return;
               }
 
-              if (updated.user_id !== null && updated.user_id !== user.id) {
+              if (updated.user_id !== null && updated.user_id !== userId) {
                 return;
               }
 
@@ -411,7 +413,7 @@ export function useStaffNotifications(): UseStaffNotificationsResult {
                   .from("notification_reads")
                   .select("notification_id")
                   .eq("notification_id", updated.id)
-                  .eq("user_id", user.id)
+                  .eq("user_id", userId)
                   .maybeSingle();
 
                 read = !!data;
@@ -451,7 +453,7 @@ export function useStaffNotifications(): UseStaffNotificationsResult {
               table: "notifications",
             },
             (payload) => {
-              if (!isActive || !mountedRef.current) {
+              if (!active || !mountedRef.current) {
                 return;
               }
 
@@ -467,33 +469,143 @@ export function useStaffNotifications(): UseStaffNotificationsResult {
             },
           )
           .subscribe((status) => {
-            if (!isActive) {
-              return;
+            if (active) {
+              console.log("📡 Staff notification realtime:", status);
             }
-
-            console.log("📡 Staff notification realtime:", status);
           });
 
-        channelRef.current = channel;
+        notificationChannelRef.current = notificationChannel;
+
+        const readChannelName = `staff-notification-reads-${userId}-${instanceIdRef.current}`;
+
+        const readChannel = supabase
+          .channel(readChannelName)
+          .on(
+            "postgres_changes",
+            {
+              event: "INSERT",
+              schema: "public",
+              table: "notification_reads",
+              filter: `user_id=eq.${userId}`,
+            },
+            (payload) => {
+              if (!active || !mountedRef.current) {
+                return;
+              }
+
+              const inserted = payload.new as NotificationRead;
+
+              if (!inserted.notification_id || inserted.user_id !== userId) {
+                return;
+              }
+
+              setNotifications((current) =>
+                current.map((notification) =>
+                  notification.id === inserted.notification_id
+                    ? {
+                        ...notification,
+                        read: true,
+                      }
+                    : notification,
+                ),
+              );
+            },
+          )
+          .on(
+            "postgres_changes",
+            {
+              event: "UPDATE",
+              schema: "public",
+              table: "notification_reads",
+              filter: `user_id=eq.${userId}`,
+            },
+            (payload) => {
+              if (!active || !mountedRef.current) {
+                return;
+              }
+
+              const updated = payload.new as NotificationRead;
+
+              if (!updated.notification_id || updated.user_id !== userId) {
+                return;
+              }
+
+              setNotifications((current) =>
+                current.map((notification) =>
+                  notification.id === updated.notification_id
+                    ? {
+                        ...notification,
+                        read: true,
+                      }
+                    : notification,
+                ),
+              );
+            },
+          )
+          .on(
+            "postgres_changes",
+            {
+              event: "DELETE",
+              schema: "public",
+              table: "notification_reads",
+              filter: `user_id=eq.${userId}`,
+            },
+            (payload) => {
+              if (!active || !mountedRef.current) {
+                return;
+              }
+
+              const deleted = payload.old as Partial<NotificationRead>;
+
+              if (!deleted.notification_id || deleted.user_id !== userId) {
+                return;
+              }
+
+              setNotifications((current) =>
+                current.map((notification) =>
+                  notification.id === deleted.notification_id
+                    ? {
+                        ...notification,
+                        read: false,
+                      }
+                    : notification,
+                ),
+              );
+            },
+          )
+          .subscribe((status) => {
+            if (active) {
+              console.log("📡 Staff notification-read realtime:", status);
+            }
+          });
+
+        readChannelRef.current = readChannel;
       } catch (err) {
         console.error("❌ Staff notification realtime setup failed:", err);
       }
     };
 
-    setup();
+    setupRealtime();
 
     return () => {
-      isActive = false;
+      active = false;
 
-      const activeChannel = channelRef.current;
+      const notificationChannel = notificationChannelRef.current;
 
-      channelRef.current = null;
+      const readChannel = readChannelRef.current;
 
-      if (activeChannel) {
-        supabase.removeChannel(activeChannel);
+      notificationChannelRef.current = null;
+      readChannelRef.current = null;
+
+      if (notificationChannel) {
+        supabase.removeChannel(notificationChannel);
+      }
+
+      if (readChannel) {
+        supabase.removeChannel(readChannel);
       }
     };
-  }, [isStaffNotificationType, loadNotifications]);
+  }, [isStaffNotificationType, userId]);
 
   const markAsRead = useCallback(
     async (notificationId: string): Promise<boolean> => {
@@ -585,6 +697,18 @@ export function useStaffNotifications(): UseStaffNotificationsResult {
 
     const previous = notifications;
 
+    const unreadNotifications = notifications.filter(
+      (notification) => !notification.read,
+    );
+
+    const userSpecificIds = unreadNotifications
+      .filter((notification) => notification.user_id === userId)
+      .map((notification) => notification.id);
+
+    const globalIds = unreadNotifications
+      .filter((notification) => notification.user_id === null)
+      .map((notification) => notification.id);
+
     setNotifications((current) =>
       current.map((notification) => ({
         ...notification,
@@ -593,19 +717,6 @@ export function useStaffNotifications(): UseStaffNotificationsResult {
     );
 
     try {
-      const userSpecificIds = notifications
-        .filter(
-          (notification) =>
-            !notification.read && notification.user_id === userId,
-        )
-        .map((notification) => notification.id);
-
-      const globalIds = notifications
-        .filter(
-          (notification) => !notification.read && notification.user_id === null,
-        )
-        .map((notification) => notification.id);
-
       if (userSpecificIds.length > 0) {
         const { error: updateError } = await supabase
           .from("notifications")
@@ -666,10 +777,6 @@ export function useStaffNotifications(): UseStaffNotificationsResult {
       current.filter((notification) => notification.id !== notificationId),
     );
   }, []);
-
-  const refresh = useCallback(async () => {
-    await loadNotifications(true);
-  }, [loadNotifications]);
 
   return {
     notifications,

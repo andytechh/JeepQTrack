@@ -1,6 +1,10 @@
 // src/shared/services/AuthService.ts
+import { AuthError } from "@supabase/supabase-js";
 import { supabase } from "../config/supabase";
 import { User } from "../types";
+
+const isSessionMissingError = (error: unknown): boolean =>
+  error instanceof AuthError && error.name === "AuthSessionMissingError";
 
 export class AuthService {
   static async login(credentials: {
@@ -19,12 +23,15 @@ export class AuthService {
     if (error) throw error;
     if (!data?.user) throw new Error("No user data returned");
 
-    // Get user profile
-    const { data: userData } = await supabase
+    const { data: userData, error: profileError } = await supabase
       .from("users")
       .select("*")
       .eq("id", data.user.id)
       .single();
+
+    if (profileError) {
+      console.error("Failed to load user profile after sign in:", profileError);
+    }
 
     return {
       uid: data.user.id,
@@ -82,6 +89,7 @@ export class AuthService {
       isActive: userData.is_active,
     };
   }
+
   static async resetPassword(email: string): Promise<void> {
     const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
       redirectTo: "smartqs-staff://reset-password",
@@ -98,32 +106,59 @@ export class AuthService {
   }
 
   static async signOut(): Promise<void> {
-    const { error } = await supabase.auth.signOut();
-    if (error) throw error;
+    try {
+      const { error } = await supabase.auth.signOut();
+      if (error) throw error;
+    } catch (error) {
+      // Signing out with no active session is not a real failure.
+      if (isSessionMissingError(error)) return;
+      throw error;
+    }
   }
 
+  /**
+   * Returns the current authenticated user, or null if there isn't one.
+   * A missing session (logged out / fresh install) is an EXPECTED state,
+   * not an error — getUser() can reject with AuthSessionMissingError
+   * instead of returning it in `error`, so this must be try/caught, not
+   * just destructured.
+   */
   static async getCurrentUser(): Promise<User | null> {
-    const {
-      data: { user },
-      error,
-    } = await supabase.auth.getUser();
-    if (error || !user) return null;
+    try {
+      const {
+        data: { user },
+        error,
+      } = await supabase.auth.getUser();
 
-    const { data: userData } = await supabase
-      .from("users")
-      .select("*")
-      .eq("id", user.id)
-      .single();
+      if (error || !user) return null;
 
-    return {
-      uid: user.id,
-      email: user.email!,
-      displayName:
-        userData?.display_name || user.user_metadata?.display_name || "",
-      phoneNumber: userData?.phone_number || null,
-      role: userData?.role || user.user_metadata?.role || "commuter",
-      jeepneyId: userData?.jeepney_id || null,
-      isActive: userData?.is_active ?? true,
-    };
+      const { data: userData, error: profileError } = await supabase
+        .from("users")
+        .select("*")
+        .eq("id", user.id)
+        .single();
+
+      if (profileError) {
+        console.error("Failed to load user profile:", profileError);
+      }
+
+      return {
+        uid: user.id,
+        email: user.email!,
+        displayName:
+          userData?.display_name || user.user_metadata?.display_name || "",
+        phoneNumber: userData?.phone_number || null,
+        role: userData?.role || user.user_metadata?.role || "commuter",
+        jeepneyId: userData?.jeepney_id || null,
+        isActive: userData?.is_active ?? true,
+      };
+    } catch (error) {
+      if (isSessionMissingError(error)) {
+        // No session at all — normal for a logged-out user, not a real error.
+        return null;
+      }
+      console.error("getCurrentUser failed:", error);
+      return null;
+    }
   }
 }

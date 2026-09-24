@@ -35,7 +35,7 @@ import JeepneyImage from "../../../../src/shared/components/jeepney/JeepneyImage
 import OceanBackground from "../../../../src/shared/components/clay/OceanBackground";
 import { colors } from "../../../../src/shared/constants/theme";
 import { useDispatcherDashboard } from "../../../../src/shared/hooks/dispatcher/useDispatcherDashboard";
-import { useNotifications } from "../../../../src/shared/hooks/useNotification";
+import { useStaffNotifications } from "../../../../src/shared/hooks/useStaffNotifications";
 import { useAuthStore } from "../../../../src/shared/store/authStore";
 
 export default function DispatcherDashboardScreen() {
@@ -55,7 +55,7 @@ export default function DispatcherDashboardScreen() {
   } = useDispatcherDashboard();
 
   const userId = useAuthStore((state) => state.user?.uid ?? null);
-  const { unreadCount } = useNotifications(userId);
+  const { unreadCount } = useStaffNotifications();
 
   const [notifying, setNotifying] = useState(false);
 

@@ -6,32 +6,31 @@ import { useAuthStore } from "../src/shared/store/authStore";
 import { getAppFlavor } from "../src/shared/utils/flavor";
 
 export default function Index() {
-  const { user, isLoading } = useAuthStore();
+  const { user, isAuthenticated, isLoading } = useAuthStore();
   const APP_FLAVOR = getAppFlavor();
 
   useEffect(() => {
-    if (!isLoading) {
-      if (APP_FLAVOR === "staff") {
-        // 🔥 Check user role to determine correct tab group
-        if (user) {
-          const role = user.role;
-          if (role === "driver") {
-            router.replace("/staff/(driver)");
-          } else if (role === "dispatcher") {
-            router.replace("/staff/(dispatcher)");
-          } else if (role === "admin") {
-            router.replace("/staff/(admin)");
-          } else {
-            router.replace("/staff/login");
-          }
+    if (isLoading) return;
+
+    if (APP_FLAVOR === "staff") {
+      if (isAuthenticated && user) {
+        const role = user.role;
+        if (role === "driver") {
+          router.replace("/staff/(driver)");
+        } else if (role === "dispatcher") {
+          router.replace("/staff/(dispatcher)");
+        } else if (role === "admin") {
+          router.replace("/staff/(admin)");
         } else {
           router.replace("/staff/login");
         }
       } else {
-        router.replace("/commuter");
+        router.replace("/staff/login");
       }
+    } else {
+      router.replace("/commuter");
     }
-  }, [isLoading, user]);
+  }, [isLoading, isAuthenticated, user]);
 
   return (
     <View className="flex-1 items-center justify-center bg-white dark:bg-slate-900">

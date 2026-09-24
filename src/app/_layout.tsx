@@ -9,17 +9,17 @@ import { AppState, Platform } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import Toast from "react-native-toast-message";
 import "../../global.css";
+import SUSFeedbackPrompt from "../src/shared/components/feedback/SUSFeedbackPrompt";
 import ConnectivityStatus from "../src/shared/components/ui/ConnectivityStatus";
 import JeepQLaunchSplash from "../src/shared/components/ui/splashscreen";
 import { supabase } from "../src/shared/config/supabase";
 import { ThemeProvider as AppThemeProvider } from "../src/shared/context/ThemeContext";
 import { useGlobalChatListener } from "../src/shared/hooks/useGlobalChatListener";
-import { AuthService } from "../src/shared/services/AuthService";
 import { useAuthStore } from "../src/shared/store/authStore";
 import { useChatStore } from "../src/shared/store/chatStore";
 import { getAppFlavor, isStaffApp } from "../src/shared/utils/flavor";
+
 // Keep the native splash up until the animated JeepQ launch screen is mounted.
-import SUSFeedbackPrompt from "../src/shared/components/feedback/SUSFeedbackPrompt";
 NativeSplashScreen.preventAutoHideAsync().catch(() => {
   // It may already be hidden during Fast Refresh.
 });
@@ -84,13 +84,19 @@ Notifications.setNotificationHandler({
 });
 
 export default function RootLayout() {
-  const [isReady, setIsReady] = useState(false);
   const [showSplash, setShowSplash] = useState(true);
   const segments = useSegments();
   const cleanupRef = useRef<(() => void) | null>(null);
-  const { resetUnreadCount } = useChatStore();
-  const { user, setUser, isAuthenticated } = useAuthStore();
-  const { clearStore } = useChatStore();
+  const resetUnreadOnceRef = useRef(false);
+
+  const { resetUnreadCount, clearStore } = useChatStore();
+  const { user, isAuthenticated, isLoading, initializeAuthListener } =
+    useAuthStore();
+
+  // isReady mirrors the store's own loading state instead of a second,
+  // independently-computed boot flag.
+  const isReady = !isLoading;
+
   const APP_FLAVOR = getAppFlavor();
   useGlobalChatListener();
 
@@ -113,58 +119,37 @@ export default function RootLayout() {
     NavigationBar.setHidden(true);
   }, []);
 
-  // ─── CHECK AUTH ON APP START ──────────────────────────────────────
+  // ─── AUTH: single source of truth is the store ────────────────────
+  // authStore.hydrate() already runs automatically via onRehydrateStorage,
+  // and getSession()/profile-fetch errors are handled inside it. All this
+  // layout needs to do is subscribe to future auth changes.
   useEffect(() => {
-    let mounted = true;
+    const unsubscribe = initializeAuthListener();
+    return unsubscribe;
+  }, [initializeAuthListener]);
 
-    const checkAuth = async () => {
-      try {
-        // First check if we have a user in the store (from persistence)
-        if (user) {
-          console.log("✅ User found in store:", user.email);
-          if (mounted) {
-            setIsReady(true);
-          }
-          return;
-        }
-        resetUnreadCount();
-        // If no user in store, try to get from Supabase
-        const currentUser = await AuthService.getCurrentUser();
-        if (currentUser) {
-          console.log("✅ User found in Supabase:", currentUser.email);
-          if (mounted) setUser(currentUser);
-        } else {
-          console.log("❌ No user found");
-          if (mounted) setUser(null);
-        }
-      } catch (error) {
-        console.error("Auth check error:", error);
-        if (mounted) setUser(null);
-      } finally {
-        if (mounted) {
-          setIsReady(true);
-        }
-      }
-    };
-
-    checkAuth();
-
-    return () => {
-      mounted = false;
-    };
-  }, [user, setUser]);
+  // Preserve the original "clear unread badge if nobody's logged in" intent,
+  // but fire it once, off the store's own settled state, instead of running
+  // a second parallel Supabase check.
+  useEffect(() => {
+    if (!isLoading && !isAuthenticated && !resetUnreadOnceRef.current) {
+      resetUnreadOnceRef.current = true;
+      resetUnreadCount();
+    }
+  }, [isLoading, isAuthenticated, resetUnreadCount]);
 
   // ─── REGISTER PUSH TOKEN WHEN USER LOGS IN ────────────────────────
   useEffect(() => {
     if (user?.uid && isReady) {
       registerPushToken();
     }
-  }, [user?.id, isReady]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.uid, isReady]);
 
   useEffect(() => {
     if (Platform.OS === "web") return;
 
-    if (user?.id && isReady) {
+    if (user?.uid && isReady) {
       const cleanup = setupNotificationListeners();
       cleanupRef.current = cleanup;
 
@@ -173,10 +158,11 @@ export default function RootLayout() {
         cleanupRef.current = null;
       };
     }
-  }, [user?.id, isReady]);
+  }, [user?.uid, isReady]);
 
   useEffect(() => {
     clearStore();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ─── REGISTER PUSH TOKEN ───────────────────────────────────────────
@@ -246,7 +232,7 @@ export default function RootLayout() {
           const { error } = await supabase
             .from("users")
             .update({ expo_push_token: token.data })
-            .eq("id", user?.id);
+            .eq("id", user?.uid);
 
           if (error) {
             throw error;
@@ -294,11 +280,10 @@ export default function RootLayout() {
         visibilityTime: 4000,
       });
     }
-  }, [user?.id]);
+  }, [user?.uid]);
 
   // ─── SETUP NOTIFICATION LISTENERS ─────────────────────────────────
   const setupNotificationListeners = () => {
-    // When notification is received in foreground
     const notificationListener = Notifications.addNotificationReceivedListener(
       (notification) => {
         console.log("📱 Foreground notification received:", {
@@ -307,7 +292,6 @@ export default function RootLayout() {
           data: notification.request.content.data,
         });
 
-        // Show toast for foreground notifications
         if (notification.request.content.title) {
           Toast.show({
             type: "info",
@@ -320,7 +304,6 @@ export default function RootLayout() {
       },
     );
 
-    // When user taps notification
     const responseListener =
       Notifications.addNotificationResponseReceivedListener((response) => {
         console.log("👆 User tapped notification:", {
@@ -330,18 +313,15 @@ export default function RootLayout() {
 
         const data = response.notification.request.content.data;
 
-        // Dismiss the notification when tapped
         Notifications.dismissNotificationAsync(
           response.notification.request.identifier,
         ).catch((err) => {
           console.error("Failed to dismiss notification:", err);
         });
 
-        // Navigate based on notification type
         handleNotificationNavigation(data);
       });
 
-    // Return cleanup function
     return () => {
       try {
         notificationListener.remove();
@@ -393,10 +373,7 @@ export default function RootLayout() {
 
   // ─── NAVIGATION LOGIC ──────────────────────────────────────────────
   useEffect(() => {
-    // Don't navigate while splash is showing or not ready
     if (!isReady || showSplash) return;
-
-    // Only handle staff app routing
     if (!isStaffApp()) return;
 
     const inLogin = segments[0] === "staff" && segments[1] === "login";
@@ -410,7 +387,6 @@ export default function RootLayout() {
       role: user?.role,
     });
 
-    // If user is authenticated and trying to access login, redirect to dashboard
     if (isAuthenticated && inLogin) {
       const route = getRouteByRole(user?.role);
       console.log(`✅ Authenticated, redirecting to: ${route}`);
@@ -418,14 +394,12 @@ export default function RootLayout() {
       return;
     }
 
-    // If user is NOT authenticated and trying to access staff routes (except login), redirect to login
     if (!isAuthenticated && inStaff && !inLogin) {
       console.log("🔒 Not authenticated, redirecting to login");
       router.replace("/staff/login");
       return;
     }
 
-    // If user is authenticated and on staff root, redirect to their dashboard
     if (isAuthenticated && segments[0] === "staff" && !segments[1]) {
       const route = getRouteByRole(user?.role);
       console.log(`✅ Authenticated on staff root, redirecting to: ${route}`);
@@ -433,7 +407,6 @@ export default function RootLayout() {
       return;
     }
 
-    // If user is authenticated and on the root path, redirect to staff
     if (isAuthenticated && segments.length === 0) {
       const route = getRouteByRole(user?.role);
       console.log(`✅ Authenticated on root, redirecting to: ${route}`);
@@ -441,7 +414,6 @@ export default function RootLayout() {
       return;
     }
 
-    // If user is NOT authenticated and on root, redirect to staff login
     if (!isAuthenticated && segments.length === 0) {
       console.log("🔒 Not authenticated on root, redirecting to login");
       router.replace("/staff/login");

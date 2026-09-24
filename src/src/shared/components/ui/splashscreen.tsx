@@ -5,7 +5,7 @@ import Svg, {
   Defs,
   LinearGradient,
   Path,
-  Stop
+  Stop,
 } from "react-native-svg";
 
 interface JeepQLaunchSplashProps {
@@ -177,7 +177,7 @@ export default function JeepQLaunchSplash({
         <View pointerEvents="none" style={styles.brandHighlight} />
 
         <Text accessibilityRole="header" style={styles.wordmark}>
-          JeepQ
+          SmartQs
         </Text>
 
         <View style={styles.wordmarkRule} />

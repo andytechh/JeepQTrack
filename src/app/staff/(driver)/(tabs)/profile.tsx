@@ -46,7 +46,9 @@ import { useAuthStore } from "@/src/shared/store/authStore";
 type AlertButton = {
   text: string;
   style?: "default" | "cancel" | "destructive";
-  onPress: () => void;
+  // Allow async handlers (e.g. sign-out) so the modal can await them
+  // before dismissing — see ClayAlertModal below.
+  onPress: () => void | Promise<void>;
 };
 
 type AlertConfig = {
@@ -358,25 +360,20 @@ export default function DriverProfileScreen() {
 
             setSigningOut(true);
 
-            // Clear local auth state and navigate immediately —
-            // don't make the UI wait on the network call, since a
-            // slow/hanging request would otherwise leave the user
-            // stuck on this screen. The root layout's auth-guard
-            // effect sees isAuthenticated === false right away and
-            // won't redirect back into the driver stack.
-            logout();
-            router.replace("/staff/login");
-
             try {
-              const { error: signOutError } = await supabase.auth.signOut();
-
-              if (signOutError) {
-                console.error("Driver sign out error:", signOutError);
-              }
+              // logout() already calls supabase.auth.signOut(), clears
+              // the persisted auth store, and resets state. Don't call
+              // supabase.auth.signOut() again here — doing so fired two
+              // concurrent sign-out calls that raced each other and
+              // could leave a stale session behind. Wait for logout()
+              // to fully resolve before navigating, so the redirect
+              // never fires ahead of the actual state change.
+              await logout();
             } catch (err) {
               console.error("Driver sign out error:", err);
             } finally {
               setSigningOut(false);
+              router.replace("/staff/login");
             }
           },
         },
@@ -1181,8 +1178,13 @@ function ClayAlertModal({
               return (
                 <Pressable
                   key={`${button.text}-${index}`}
-                  onPress={() => {
-                    button.onPress();
+                  onPress={async () => {
+                    // Await the handler before dismissing. Sign-out's
+                    // handler is async (it calls the auth store and
+                    // navigates only once that settles) — closing the
+                    // modal immediately, as before, would race ahead of
+                    // that and hide any failure silently.
+                    await button.onPress();
                     onClose();
                   }}
                   className={`min-h-[48px] min-w-[100px] flex-1 items-center justify-center rounded-full border ${borderClass} ${backgroundClass}`}

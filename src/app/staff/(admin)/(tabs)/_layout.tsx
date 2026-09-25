@@ -1,21 +1,33 @@
 import { Tabs } from "expo-router";
 
 import ClayTabBar from "@/src/shared/components/clay/ClayTabBar";
+import { useStaffNotifications } from "@/src/shared/hooks/useStaffNotifications";
 import { useChatStore } from "@/src/shared/store/chatStore";
 
 export default function AdminTabsLayout() {
-  const unreadCount = useChatStore((state) => state.unreadCount);
+  const chatUnreadCount = useChatStore((state) => state.unreadCount);
+
+  const { unreadCount: notificationsUnreadCount } = useStaffNotifications();
 
   return (
     <Tabs
       tabBar={(props) => {
         const currentRoute = props.state.routes[props.state.index];
 
+        /*
+         * Hide tab bar while inside chat.
+         */
         if (currentRoute?.name === "chat") {
           return null;
         }
 
-        return <ClayTabBar {...(props as any)} chatUnreadCount={unreadCount} />;
+        return (
+          <ClayTabBar
+            {...(props as any)}
+            chatUnreadCount={chatUnreadCount}
+            notificationsUnreadCount={notificationsUnreadCount}
+          />
+        );
       }}
       screenOptions={{
         headerShown: false,

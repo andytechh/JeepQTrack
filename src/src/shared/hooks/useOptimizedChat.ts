@@ -18,6 +18,8 @@ interface ChatMessage {
   deleted_at?: string;
   read_by: string[];
   reactions?: Record<string, string[]>;
+  attachment_url?: string | null;
+  attachment_type?: string | null;
   status?: string;
   sender?: {
     id: string;
@@ -34,6 +36,13 @@ const CACHE_SIZE = 500;
 const CHAT_CHANNEL = "staff-chat-staff-general-chat";
 const NOTIFICATION_CHANNEL = "chat";
 const NOTIFICATION_SOUND = "chat.wav";
+
+export interface ChatMember {
+  id: string;
+  display_name: string;
+  role: string;
+  avatar_url?: string | null;
+}
 
 const setupNotificationChannel = async () => {
   if (Platform.OS !== "android") {
@@ -330,12 +339,18 @@ class ChatConnection {
       await setupNotificationChannel();
 
       await this.destroyChannel();
+      await this.destroyOrphanedChatChannels();
 
       // Something newer superseded us while we were awaiting above.
       if (myGeneration !== this.generation) {
         return;
       }
 
+      // Supabase does not allow postgres_changes handlers to be added
+      // after a channel has entered SUBSCRIBED/JOINED state. Make sure
+      // there is no stale channel with the same topic before creating
+      // the new one. This also protects against Fast Refresh and old
+      // connection attempts that lost the shared `this.channel` reference.
       const channel = supabase.channel(CHAT_CHANNEL);
 
       this.channel = channel;
@@ -517,6 +532,38 @@ class ChatConnection {
     await this.destroyChannel();
 
     this.currentUserId = null;
+  }
+
+  private async destroyOrphanedChatChannels() {
+    try {
+      const channels = supabase.getChannels();
+      const staleChannels = channels.filter(
+        (channel: any) => channel?.topic === `realtime:${CHAT_CHANNEL}`,
+      );
+
+      if (!staleChannels.length) {
+        return;
+      }
+
+      await Promise.all(
+        staleChannels.map(async (channel: any) => {
+          if (channel === this.channel) {
+            return;
+          }
+
+          try {
+            await supabase.removeChannel(channel);
+          } catch (error) {
+            console.warn(
+              "⚠️ Failed to remove stale staff chat channel:",
+              error,
+            );
+          }
+        }),
+      );
+    } catch (error) {
+      console.warn("⚠️ Failed to inspect staff chat channels:", error);
+    }
   }
 
   private async destroyChannel() {
@@ -844,20 +891,67 @@ export function useOptimizedChat() {
   }, [cache, hasMore]);
 
   const sendMessage = useCallback(
-    async (text: string) => {
-      if (!text.trim() || !user?.uid) {
+    async (
+      text: string,
+      attachment?: {
+        uri: string;
+        mimeType?: string | null;
+        fileName?: string | null;
+      },
+    ) => {
+      if ((!text.trim() && !attachment) || !user?.uid) {
         return;
       }
 
       setSending(true);
 
       try {
+        let attachmentUrl: string | null = null;
+        let attachmentType: string | null = null;
+
+        if (attachment?.uri) {
+          const response = await fetch(attachment.uri);
+          const arrayBuffer = await response.arrayBuffer();
+          const mimeType =
+            attachment.mimeType ||
+            response.headers.get("content-type") ||
+            "image/jpeg";
+          const extension = (mimeType.split("/")[1] || "jpg").replace(
+            "jpeg",
+            "jpg",
+          );
+          const safeName = (attachment.fileName || `image-${Date.now()}`)
+            .replace(/\.[^/.]+$/, "")
+            .replace(/[^a-zA-Z0-9._-]/g, "_");
+          const path = `${ROOM_ID}/${user.uid}/${Date.now()}-${safeName}.${extension}`;
+
+          const { error: uploadError } = await supabase.storage
+            .from("chat-attachments")
+            .upload(path, arrayBuffer, {
+              contentType: mimeType,
+              upsert: false,
+            });
+
+          if (uploadError) {
+            throw uploadError;
+          }
+
+          const { data: publicData } = supabase.storage
+            .from("chat-attachments")
+            .getPublicUrl(path);
+
+          attachmentUrl = publicData.publicUrl;
+          attachmentType = mimeType;
+        }
+
         const { data, error } = await supabase
           .from("chat_messages")
           .insert({
             room_id: ROOM_ID,
             sender_id: user.uid,
             message: text.trim(),
+            attachment_url: attachmentUrl,
+            attachment_type: attachmentType,
             read_by: [user.uid],
           })
           .select(
@@ -871,12 +965,10 @@ export function useOptimizedChat() {
 
         if (data && mountedRef.current) {
           cache.addOrUpdate(data);
-
           setMessages(cache.getAll());
         }
       } catch (error) {
         console.error("❌ Send error:", error);
-
         throw error;
       } finally {
         if (mountedRef.current) {
@@ -885,6 +977,77 @@ export function useOptimizedChat() {
       }
     },
     [user?.uid, cache],
+  );
+
+  const [chatMembers, setChatMembers] = useState<ChatMember[]>([]);
+
+  const loadChatMembers = useCallback(async () => {
+    if (!user?.uid) return;
+
+    const { data: membershipRows, error: membershipError } = await supabase
+      .from("chat_room_members")
+      .select("user_id")
+      .eq("room_id", ROOM_ID);
+
+    if (membershipError) {
+      console.error("❌ Load chat members error:", membershipError);
+      throw membershipError;
+    }
+
+    const ids = (membershipRows || [])
+      .map((row: any) => row.user_id)
+      .filter(Boolean);
+    if (!ids.length) {
+      setChatMembers([]);
+      return [];
+    }
+
+    const { data: users, error: usersError } = await supabase
+      .from("users")
+      .select("id, display_name, role, avatar_url")
+      .in("id", ids)
+      .order("display_name", { ascending: true });
+
+    if (usersError) {
+      console.error("❌ Load chat user details error:", usersError);
+      throw usersError;
+    }
+
+    const result = (users || []) as ChatMember[];
+    setChatMembers(result);
+    return result;
+  }, [user?.uid]);
+
+  const removeChatMember = useCallback(
+    async (memberId: string) => {
+      if (!user?.uid || !memberId || memberId === user.uid) {
+        throw new Error("Invalid member.");
+      }
+
+      const { data: admin, error: adminError } = await supabase
+        .from("users")
+        .select("role")
+        .eq("id", user.uid)
+        .maybeSingle();
+
+      if (adminError) throw adminError;
+      if (admin?.role?.toLowerCase() !== "admin") {
+        throw new Error("Only administrators can remove chat members.");
+      }
+
+      const { error } = await supabase
+        .from("chat_room_members")
+        .delete()
+        .eq("room_id", ROOM_ID)
+        .eq("user_id", memberId);
+
+      if (error) throw error;
+
+      setChatMembers((current) =>
+        current.filter((member) => member.id !== memberId),
+      );
+    },
+    [user?.uid],
   );
 
   const editMessage = useCallback(
@@ -1254,11 +1417,14 @@ export function useOptimizedChat() {
     sending,
     hasMore,
     unreadCount,
+    chatMembers,
 
     sendMessage,
     loadOlderMessages,
     markAsRead,
     refreshMessages,
+    loadChatMembers,
+    removeChatMember,
 
     editMessage,
     deleteMessage,

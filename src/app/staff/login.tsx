@@ -458,7 +458,15 @@ const StaffLoginScreen: React.FC<Props> = ({
         throw new Error("Invalid user data received");
       }
 
+      // ─── Inactive account: sign out immediately ──────────────────
+      // signInWithPassword() already created a live Supabase session
+      // before we ever get here. If we don't explicitly sign out,
+      // that session stays valid — anything elsewhere in the app that
+      // reads supabase.auth.getSession() / onAuthStateChange (root
+      // layout, authStore rehydration, etc.) will treat the user as
+      // logged in even though this screen rejected them.
       if (!user.isActive) {
+        await AuthService.signOut();
         Toast.show({
           type: "error",
           text1: "Account Inactive",
@@ -469,11 +477,21 @@ const StaffLoginScreen: React.FC<Props> = ({
         return;
       }
 
+      // ─── Role mismatch: sign out immediately ─────────────────────
+      // Same reasoning as above — without signOut(), a correct
+      // password for the WRONG role still leaves a valid session
+      // sitting in storage, and the user ends up routed to their
+      // actual role instead of being blocked.
       if (selectedRole !== user.role) {
+        await AuthService.signOut();
+        // Deliberately generic: never reveal the account's actual role.
+        // Revealing it here would let anyone with a valid email/password
+        // pair (or someone testing leaked/guessed credentials) discover
+        // which accounts are admin accounts, making them easier to target.
         Toast.show({
           type: "error",
-          text1: "Role Mismatch",
-          text2: `This account is registered as a ${user.role}. Please select the correct role.`,
+          text1: "Login Failed",
+          text2: "Invalid email, password, or role selection.",
         });
         rateLimiter.current.recordAttempt(sanitizedEmail);
         setIsLoading(false);

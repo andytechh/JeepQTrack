@@ -9,6 +9,7 @@ import { AppState, Platform } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import Toast from "react-native-toast-message";
 import "../../global.css";
+import SUSFeedbackPrompt from "../src/shared/components/feedback/SUSFeedbackPrompt";
 import ConnectivityStatus from "../src/shared/components/ui/ConnectivityStatus";
 import JeepQLaunchSplash from "../src/shared/components/ui/splashscreen";
 import { supabase } from "../src/shared/config/supabase";
@@ -18,8 +19,7 @@ import { AuthService } from "../src/shared/services/AuthService";
 import { useAuthStore } from "../src/shared/store/authStore";
 import { useChatStore } from "../src/shared/store/chatStore";
 import { getAppFlavor, isStaffApp } from "../src/shared/utils/flavor";
-// Keep the native splash up until the animated JeepQ launch screen is mounted.
-import SUSFeedbackPrompt from "../src/shared/components/feedback/SUSFeedbackPrompt";
+
 NativeSplashScreen.preventAutoHideAsync().catch(() => {
   // It may already be hidden during Fast Refresh.
 });
@@ -113,29 +113,60 @@ export default function RootLayout() {
     NavigationBar.setHidden(true);
   }, []);
 
-  // ─── CHECK AUTH ON APP START ──────────────────────────────────────
+  // ─── ACTIVATE THE AUTH STORE'S OWN LISTENER ───────────────────────
+  // This is the single, authoritative source for auth state changes —
+  // it listens directly to Supabase's onAuthStateChange stream, so
+  // `isAuthenticated`/`user` in the store are always driven by real
+  // SIGNED_IN / SIGNED_OUT events rather than manual polling. Without
+  // this activated, nothing in the app was subscribed to Supabase's
+  // real auth events at all.
+  useEffect(() => {
+    const unsubscribe = useAuthStore.getState().initializeAuthListener();
+    return () => {
+      unsubscribe?.();
+    };
+  }, []);
+
+  // ─── CHECK AUTH ON APP START (ONCE) ───────────────────────────────
+  // IMPORTANT: this must run exactly once, on mount — NOT whenever
+  // `user` changes. It previously depended on [user, setUser], which
+  // meant it re-ran every time logout() set user to null. That re-run
+  // immediately called AuthService.getCurrentUser() again, which could
+  // race against logout()'s own in-flight supabase.auth.signOut() call
+  // and read a session that hadn't been invalidated yet — silently
+  // calling setUser(currentUser) right after logout() had just cleared
+  // it. That race is what caused the dashboard to reappear after
+  // repeated login/logout cycles instead of staying on the login
+  // screen. Auth state changes after the initial check are now handled
+  // exclusively by the listener above and by direct store calls
+  // (login screen's setUser, profile screen's logout).
   useEffect(() => {
     let mounted = true;
 
     const checkAuth = async () => {
       try {
-        // First check if we have a user in the store (from persistence)
-        if (user) {
-          console.log("✅ User found in store:", user.email);
+        const storeUser = useAuthStore.getState().user;
+
+        if (storeUser) {
+          console.log("✅ User found in store:", storeUser.email);
           if (mounted) {
             setIsReady(true);
           }
           return;
         }
+
         resetUnreadCount();
-        // If no user in store, try to get from Supabase
+
         const currentUser = await AuthService.getCurrentUser();
+
+        if (!mounted) return;
+
         if (currentUser) {
           console.log("✅ User found in Supabase:", currentUser.email);
-          if (mounted) setUser(currentUser);
+          setUser(currentUser);
         } else {
           console.log("❌ No user found");
-          if (mounted) setUser(null);
+          setUser(null);
         }
       } catch (error) {
         console.error("Auth check error:", error);
@@ -152,7 +183,7 @@ export default function RootLayout() {
     return () => {
       mounted = false;
     };
-  }, [user, setUser]);
+  }, []); // ← run once, not on every `user` change
 
   // ─── REGISTER PUSH TOKEN WHEN USER LOGS IN ────────────────────────
   useEffect(() => {
@@ -184,13 +215,11 @@ export default function RootLayout() {
     try {
       console.log("🔔 Registering push token...");
 
-      // 1. Check if physical device
       if (!Constants.isDevice) {
         console.log("⚠️ Push notifications only work on physical devices");
         return;
       }
 
-      // 2. Request permissions
       const { status: existingStatus } =
         await Notifications.getPermissionsAsync();
       let finalStatus = existingStatus;
@@ -212,7 +241,6 @@ export default function RootLayout() {
         return;
       }
 
-      // 3. Get Project ID
       const projectId = Constants.expoConfig?.extra?.eas?.projectId;
 
       if (!projectId) {
@@ -229,14 +257,12 @@ export default function RootLayout() {
 
       console.log("📋 Project ID:", projectId);
 
-      // 4. Get Expo push token
       const token = await Notifications.getExpoPushTokenAsync({
         projectId: projectId,
       });
 
       console.log("✅ Expo Push Token:", token.data);
 
-      // 5. Save to Supabase with retry logic
       let saveSuccess = false;
       let retries = 0;
       const maxRetries = 3;
@@ -280,7 +306,6 @@ export default function RootLayout() {
         return;
       }
 
-      // 6. Send test push only in development
       if (__DEV__) {
         await sendTestPush(token.data);
       }
@@ -298,7 +323,6 @@ export default function RootLayout() {
 
   // ─── SETUP NOTIFICATION LISTENERS ─────────────────────────────────
   const setupNotificationListeners = () => {
-    // When notification is received in foreground
     const notificationListener = Notifications.addNotificationReceivedListener(
       (notification) => {
         console.log("📱 Foreground notification received:", {
@@ -307,7 +331,6 @@ export default function RootLayout() {
           data: notification.request.content.data,
         });
 
-        // Show toast for foreground notifications
         if (notification.request.content.title) {
           Toast.show({
             type: "info",
@@ -320,7 +343,6 @@ export default function RootLayout() {
       },
     );
 
-    // When user taps notification
     const responseListener =
       Notifications.addNotificationResponseReceivedListener((response) => {
         console.log("👆 User tapped notification:", {
@@ -330,18 +352,15 @@ export default function RootLayout() {
 
         const data = response.notification.request.content.data;
 
-        // Dismiss the notification when tapped
         Notifications.dismissNotificationAsync(
           response.notification.request.identifier,
         ).catch((err) => {
           console.error("Failed to dismiss notification:", err);
         });
 
-        // Navigate based on notification type
         handleNotificationNavigation(data);
       });
 
-    // Return cleanup function
     return () => {
       try {
         notificationListener.remove();
@@ -393,10 +412,7 @@ export default function RootLayout() {
 
   // ─── NAVIGATION LOGIC ──────────────────────────────────────────────
   useEffect(() => {
-    // Don't navigate while splash is showing or not ready
     if (!isReady || showSplash) return;
-
-    // Only handle staff app routing
     if (!isStaffApp()) return;
 
     const inLogin = segments[0] === "staff" && segments[1] === "login";
@@ -410,7 +426,6 @@ export default function RootLayout() {
       role: user?.role,
     });
 
-    // If user is authenticated and trying to access login, redirect to dashboard
     if (isAuthenticated && inLogin) {
       const route = getRouteByRole(user?.role);
       console.log(`✅ Authenticated, redirecting to: ${route}`);
@@ -418,14 +433,12 @@ export default function RootLayout() {
       return;
     }
 
-    // If user is NOT authenticated and trying to access staff routes (except login), redirect to login
     if (!isAuthenticated && inStaff && !inLogin) {
       console.log("🔒 Not authenticated, redirecting to login");
       router.replace("/staff/login");
       return;
     }
 
-    // If user is authenticated and on staff root, redirect to their dashboard
     if (isAuthenticated && segments[0] === "staff" && !segments[1]) {
       const route = getRouteByRole(user?.role);
       console.log(`✅ Authenticated on staff root, redirecting to: ${route}`);
@@ -433,7 +446,6 @@ export default function RootLayout() {
       return;
     }
 
-    // If user is authenticated and on the root path, redirect to staff
     if (isAuthenticated && segments.length === 0) {
       const route = getRouteByRole(user?.role);
       console.log(`✅ Authenticated on root, redirecting to: ${route}`);
@@ -441,7 +453,6 @@ export default function RootLayout() {
       return;
     }
 
-    // If user is NOT authenticated and on root, redirect to staff login
     if (!isAuthenticated && segments.length === 0) {
       console.log("🔒 Not authenticated on root, redirecting to login");
       router.replace("/staff/login");

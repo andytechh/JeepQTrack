@@ -1,9 +1,7 @@
-import { useCallback, useEffect, useMemo } from "react";
-
-import { useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "../../config/supabase";
 import { useAuthStore } from "../../store/authStore";
-import { useNotifications } from "../useNotification";
+import { useStaffNotifications } from "../useStaffNotifications";
 
 export interface DriverJeepney {
   id: string;
@@ -17,6 +15,7 @@ export interface DriverJeepney {
   queue_position: number | null;
   terminal_id: number;
   loading_ends_at: string | null;
+  eta_at: string | null; // estimated arrival time once dispatched/en route
   departed_at: string | null;
   updated_at: string;
 }
@@ -33,9 +32,14 @@ export function useDriverDashboard() {
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
-  // Single source of truth for notifications — same hook the
-  // notifications screen uses, so read/unread state can never
-  // drift between the two screens.
+  // Single source of truth for notifications — the SAME hook the
+  // Notifications screen uses. It resolves read/unread state for global
+  // notifications via the notification_reads join table.
+  //
+  // Do NOT swap this for the old "commuter" useNotifications hook: that
+  // hook checks the raw notifications.read column directly, which never
+  // gets updated per-user for global notifications, so it always reports
+  // them as unread — that mismatch was the cause of the stuck "9+" badge.
   const {
     notifications,
     unreadCount: unreadNotificationCount,
@@ -44,7 +48,7 @@ export function useDriverDashboard() {
     refresh: refreshNotifications,
     markAsRead,
     markAllAsRead,
-  } = useNotifications(driverId);
+  } = useStaffNotifications();
 
   const fetchJeepneyData = useCallback(async () => {
     if (!driverId) {
@@ -108,8 +112,8 @@ export function useDriverDashboard() {
     fetchJeepneyData();
   }, [fetchJeepneyData]);
 
-  // Realtime: only jeepneys now — notifications realtime is owned
-  // entirely by useNotifications.
+  // Realtime: jeepneys only. Notification realtime is owned entirely by
+  // useStaffNotifications.
   useEffect(() => {
     if (!driverId) return;
 

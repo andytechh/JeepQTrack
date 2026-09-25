@@ -57,10 +57,6 @@ export default function CommuterEntry() {
         <View className="flex-1 justify-between px-6 pb-8 pt-8">
           {/* BRAND */}
           <View className="items-center">
-            <View className="h-[62px] w-[62px] items-center justify-center rounded-[24px] border border-white/90 bg-clay-surface shadow-clay">
-              <Text className="text-[30px]">🐋</Text>
-            </View>
-
             <Text className="mt-4 text-[13px] font-bold tracking-[2px] text-ocean-700">
               DONSOL
             </Text>

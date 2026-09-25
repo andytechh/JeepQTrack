@@ -98,6 +98,15 @@ function MyJeepneyCard({
   const seatsLeft = Math.max(0, jeepney.capacity - jeepney.current_occupancy);
   const highlighted = isNextInLine || isLoadingNow;
 
+  // Status-aware timing block: while the jeep is actually "loading",
+  // show "Loading ends". Once it's dispatched/en route, switch to "ETA"
+  // instead — never show a stale loading_ends_at once the jeep has left.
+  const isEnRouteOrDispatched =
+    jeepney.status === "dispatched" || jeepney.status === "en_route";
+
+  const showLoadingEnds = isLoadingNow && !!jeepney.loading_ends_at;
+  const showEta = isEnRouteOrDispatched && !!jeepney.eta_at;
+
   return (
     <View
       className={`mt-5 overflow-hidden rounded-[28px] shadow-clay-floating ${
@@ -215,7 +224,7 @@ function MyJeepneyCard({
           </View>
         </View>
 
-        {jeepney.loading_ends_at && (
+        {showLoadingEnds && (
           <View className="mt-5 flex-row items-center rounded-[18px] bg-ocean-50 px-4 py-3">
             <View className="h-[35px] w-[35px] items-center justify-center rounded-full bg-white">
               <Clock3 size={16} color={colors.primaryDark} strokeWidth={2.2} />
@@ -227,6 +236,23 @@ function MyJeepneyCard({
               </Text>
               <Text className="mt-0.5 text-[13px] font-extrabold text-ink-dark">
                 {formatTime(jeepney.loading_ends_at)}
+              </Text>
+            </View>
+          </View>
+        )}
+
+        {showEta && (
+          <View className="mt-5 flex-row items-center rounded-[18px] bg-ocean-50 px-4 py-3">
+            <View className="h-[35px] w-[35px] items-center justify-center rounded-full bg-white">
+              <Clock3 size={16} color={colors.primaryDark} strokeWidth={2.2} />
+            </View>
+
+            <View className="ml-3">
+              <Text className="text-[9px] font-bold uppercase tracking-[0.6px] text-ink-muted">
+                ETA
+              </Text>
+              <Text className="mt-0.5 text-[13px] font-extrabold text-ink-dark">
+                {formatTime(jeepney.eta_at)}
               </Text>
             </View>
           </View>

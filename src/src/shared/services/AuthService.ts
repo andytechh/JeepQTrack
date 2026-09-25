@@ -82,9 +82,22 @@ export class AuthService {
       isActive: userData.is_active,
     };
   }
+
+  // ─── Password Reset ───────────────────────────────────────────────
+  // IMPORTANT: redirectTo must be an https URL, not the raw custom
+  // scheme (smartqs-staff://...). Most mail clients (Gmail, Outlook,
+  // etc.) block/strip custom URI schemes tapped from inside an email,
+  // which is what causes the "opens to a blank page" symptom. The
+  // https URL below is a small static landing page that JS-redirects
+  // into the app's custom scheme, which mail clients allow because
+  // it happens inside a normal browser/webview, not the email client
+  // itself.
+  //
+  // This exact URL must also be added to:
+  // Supabase Dashboard → Authentication → URL Configuration → Redirect URLs
   static async resetPassword(email: string): Promise<void> {
     const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
-      redirectTo: "smartqs-staff://reset-password",
+      redirectTo: "https://YOUR-DOMAIN-HERE/reset-password.html",
     });
 
     if (error) throw error;

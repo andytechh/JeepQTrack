@@ -6,13 +6,13 @@ import {
   MoreVertical,
   SendHorizontal,
   Shield,
+  Trash2,
   Users,
   X,
 } from "lucide-react-native";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   AppState,
   FlatList,
   KeyboardAvoidingView,
@@ -67,6 +67,10 @@ export default function AdminChatScreen() {
 
   const [adminMenuVisible, setAdminMenuVisible] = useState(false);
   const [memberModalVisible, setMemberModalVisible] = useState(false);
+  const [deleteModalVisible, setDeleteModalVisible] = useState(false);
+  const [deleteMessageId, setDeleteMessageId] = useState<string | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const flatListRef = useRef<FlatList>(null);
   const inputRef = useRef<TextInput>(null);
@@ -402,42 +406,45 @@ export default function AdminChatScreen() {
 
   /*
    * DELETE / ADMIN DELETE
+   *
+   * Uses the custom clay confirmation modal below instead of
+   * React Native Alert.alert().
    */
-  const handleDelete = useCallback(
-    (messageId: string) => {
-      Alert.alert(
-        "Delete message",
-        isAdmin ? "Delete this message for everyone?" : "Delete your message?",
-        [
-          {
-            text: "Cancel",
-            style: "cancel",
-          },
-          {
-            text: "Delete",
-            style: "destructive",
-            onPress: async () => {
-              try {
-                if (isAdmin && typeof adminDeleteMessage === "function") {
-                  await adminDeleteMessage(messageId);
-                } else {
-                  await deleteMessage(messageId);
-                }
-              } catch (error) {
-                console.error("Delete message error:", error);
+  const handleDelete = useCallback((messageId: string) => {
+    setDeleteMessageId(messageId);
+    setDeleteError(null);
+    setDeleteModalVisible(true);
+  }, []);
 
-                Alert.alert(
-                  "Unable to delete",
-                  "You do not have permission to delete this message.",
-                );
-              }
-            },
-          },
-        ],
-      );
-    },
-    [isAdmin, adminDeleteMessage, deleteMessage],
-  );
+  const closeDeleteModal = useCallback(() => {
+    if (deleteBusy) return;
+    setDeleteModalVisible(false);
+    setDeleteMessageId(null);
+    setDeleteError(null);
+  }, [deleteBusy]);
+
+  const confirmDeleteMessage = useCallback(async () => {
+    if (!deleteMessageId || deleteBusy) return;
+
+    setDeleteBusy(true);
+    setDeleteError(null);
+
+    try {
+      if (isAdmin && typeof adminDeleteMessage === "function") {
+        await adminDeleteMessage(deleteMessageId);
+      } else {
+        await deleteMessage(deleteMessageId);
+      }
+
+      setDeleteModalVisible(false);
+      setDeleteMessageId(null);
+    } catch (error) {
+      console.error("Delete message error:", error);
+      setDeleteError("You do not have permission to delete this message.");
+    } finally {
+      setDeleteBusy(false);
+    }
+  }, [deleteMessageId, deleteBusy, isAdmin, adminDeleteMessage, deleteMessage]);
 
   /*
    * RENDER MESSAGE
@@ -467,6 +474,8 @@ export default function AdminChatScreen() {
           edited={!!item.edited_at}
           deleted={!!item.deleted_at}
           reactions={item.reactions || {}}
+          attachment_url={item.attachment_url ?? undefined}
+          attachment_type={item.attachment_type ?? undefined}
           onEdit={handleEditMessage}
           onDelete={handleDelete}
           onAddReaction={addReaction}
@@ -1042,6 +1051,170 @@ export default function AdminChatScreen() {
             </Pressable>
           </View>
         </View>
+
+        {/* ====================================================== */}
+        {/* CLAY UNSEND CONFIRMATION */}
+        {/* ====================================================== */}
+        <Modal
+          visible={deleteModalVisible}
+          transparent
+          animationType="fade"
+          onRequestClose={closeDeleteModal}
+        >
+          <Pressable
+            onPress={closeDeleteModal}
+            style={{
+              flex: 1,
+              backgroundColor: "rgba(15,23,42,0.48)",
+              alignItems: "center",
+              justifyContent: "center",
+              paddingHorizontal: 24,
+            }}
+          >
+            <Pressable
+              onPress={(event) => event.stopPropagation()}
+              style={{
+                width: "100%",
+                maxWidth: 360,
+                borderRadius: 30,
+                padding: 7,
+                backgroundColor: isDark ? "#164E63" : "#EAF9FE",
+                borderWidth: 1,
+                borderColor: isDark ? "#286B82" : "#C4E4EF",
+                shadowColor: isDark ? "#000000" : "#43B9E8",
+                shadowOffset: { width: 0, height: 12 },
+                shadowOpacity: isDark ? 0.35 : 0.22,
+                shadowRadius: 20,
+                elevation: 14,
+              }}
+            >
+              <View
+                style={{
+                  borderRadius: 24,
+                  padding: 20,
+                  backgroundColor: isDark ? "#12536A" : "#F4FCFF",
+                  borderWidth: 1,
+                  borderColor: isDark ? "#1C6078" : "#D5EEF7",
+                }}
+              >
+                <View style={{ alignItems: "center" }}>
+                  <View
+                    style={{
+                      width: 64,
+                      height: 64,
+                      borderRadius: 21,
+                      alignItems: "center",
+                      justifyContent: "center",
+                      backgroundColor: isDark ? "#713B3B" : "#FDECEC",
+                      shadowColor: "#EF4444",
+                      shadowOffset: { width: 0, height: 4 },
+                      shadowOpacity: 0.15,
+                      shadowRadius: 7,
+                      elevation: 4,
+                    }}
+                  >
+                    <Trash2 size={28} color="#EF4444" strokeWidth={2.4} />
+                  </View>
+
+                  <Text
+                    style={{
+                      marginTop: 15,
+                      color: isDark ? "#FFFFFF" : "#17445A",
+                      fontSize: 19,
+                      fontWeight: "900",
+                      textAlign: "center",
+                    }}
+                  >
+                    {isAdmin ? "Unsend message?" : "Delete message?"}
+                  </Text>
+
+                  <Text
+                    style={{
+                      marginTop: 7,
+                      color: isDark ? "#B9D9E5" : "#477386",
+                      fontSize: 13,
+                      lineHeight: 20,
+                      fontWeight: "500",
+                      textAlign: "center",
+                    }}
+                  >
+                    {deleteError ||
+                      (isAdmin
+                        ? "This message will be removed from the chat for everyone."
+                        : "This message will be removed from your chat.")}
+                  </Text>
+
+                  <View
+                    style={{
+                      width: "100%",
+                      flexDirection: "row",
+                      gap: 10,
+                      marginTop: 20,
+                    }}
+                  >
+                    <Pressable
+                      onPress={closeDeleteModal}
+                      disabled={deleteBusy}
+                      style={{
+                        flex: 1,
+                        minHeight: 48,
+                        borderRadius: 17,
+                        alignItems: "center",
+                        justifyContent: "center",
+                        backgroundColor: isDark ? "#1D6078" : "#DDF4FC",
+                        borderWidth: 1,
+                        borderColor: isDark ? "#2A7891" : "#C4E4EF",
+                        opacity: deleteBusy ? 0.55 : 1,
+                      }}
+                    >
+                      <Text
+                        style={{
+                          color: isDark ? "#D8F3FC" : "#167BAA",
+                          fontSize: 13,
+                          fontWeight: "800",
+                        }}
+                      >
+                        Cancel
+                      </Text>
+                    </Pressable>
+
+                    <Pressable
+                      onPress={confirmDeleteMessage}
+                      disabled={deleteBusy}
+                      style={{
+                        flex: 1,
+                        minHeight: 48,
+                        borderRadius: 17,
+                        alignItems: "center",
+                        justifyContent: "center",
+                        backgroundColor: deleteBusy ? "#8ADBF4" : "#43B9E8",
+                        shadowColor: "#167BAA",
+                        shadowOffset: { width: 0, height: 5 },
+                        shadowOpacity: 0.22,
+                        shadowRadius: 8,
+                        elevation: 5,
+                      }}
+                    >
+                      {deleteBusy ? (
+                        <ActivityIndicator size="small" color="#FFFFFF" />
+                      ) : (
+                        <Text
+                          style={{
+                            color: "#FFFFFF",
+                            fontSize: 13,
+                            fontWeight: "900",
+                          }}
+                        >
+                          {isAdmin ? "Unsend" : "Delete"}
+                        </Text>
+                      )}
+                    </Pressable>
+                  </View>
+                </View>
+              </View>
+            </Pressable>
+          </Pressable>
+        </Modal>
 
         {/* ====================================================== */}
         {/* ADMIN MENU */}

@@ -19,7 +19,15 @@ type ClayTabBarProps = {
     }>;
   };
 
-  notificationBadge?: number;
+  /**
+   * Unread notification count.
+   * Used by Admin, Driver, and Dispatcher.
+   */
+  notificationsUnreadCount?: number;
+
+  /**
+   * Unread chat count.
+   */
   chatUnreadCount?: number;
 
   descriptors: Record<string, { options: any }>;
@@ -41,7 +49,7 @@ export function ClayTabBar({
   state,
   descriptors,
   navigation,
-  notificationBadge = 0,
+  notificationsUnreadCount = 0,
   chatUnreadCount = 0,
 }: ClayTabBarProps) {
   const { isDark } = useTheme();
@@ -49,19 +57,24 @@ export function ClayTabBar({
 
   const backgroundColor = isDark ? "#172033" : "#F8FCFF";
   const borderColor = isDark ? "#263449" : "rgba(255,255,255,0.95)";
+
   const activeBackground = isDark ? "#164E63" : "#E0F2FE";
 
   const activeColor = "#0EA5E9";
+
   const inactiveColor = isDark ? "#94A3B8" : "#64748B";
 
   const activeTextColor = isDark ? "#38BDF8" : "#0369A1";
+
   const inactiveTextColor = isDark ? "#94A3B8" : "#64748B";
 
   const badgeBorderColor = isDark ? "#172033" : "#FFFFFF";
 
   const renderIcon = (routeName: string, focused: boolean) => {
     const color = focused ? activeColor : inactiveColor;
+
     const size = focused ? 22 : 21;
+
     const strokeWidth = focused ? 2.7 : 2.1;
 
     switch (routeName) {
@@ -120,6 +133,7 @@ export function ClayTabBar({
           overflow: "visible",
         }}
       >
+        {/* Top highlight */}
         <View
           pointerEvents="none"
           style={{
@@ -159,12 +173,38 @@ export function ClayTabBar({
 
           const label = options.tabBarLabel || options.title || route.name;
 
-          const badge =
-            route.name === "chat"
-              ? chatUnreadCount
-              : route.name === "notifications"
-                ? notificationBadge
-                : options.tabBarBadge;
+          /*
+           * Select the correct badge for each tab.
+           *
+           * Chat:
+           *   chatUnreadCount
+           *
+           * Notifications:
+           *   notificationsUnreadCount
+           *
+           * Other tabs:
+           *   tabBarBadge
+           */
+          let badge: number | undefined;
+
+          if (route.name === "chat") {
+            badge = chatUnreadCount;
+          } else if (route.name === "notifications") {
+            badge = notificationsUnreadCount;
+          } else if (
+            options.tabBarBadge !== undefined &&
+            options.tabBarBadge !== null
+          ) {
+            const parsedBadge = Number(options.tabBarBadge);
+
+            if (Number.isFinite(parsedBadge)) {
+              badge = parsedBadge;
+            }
+          }
+
+          const numericBadge = Number(badge ?? 0);
+
+          const showBadge = Number.isFinite(numericBadge) && numericBadge > 0;
 
           return (
             <TouchableOpacity
@@ -176,6 +216,11 @@ export function ClayTabBar({
                       selected: true,
                     }
                   : {}
+              }
+              accessibilityLabel={
+                showBadge
+                  ? `${String(label)}, ${numericBadge} unread`
+                  : String(label)
               }
               onPress={onPress}
               onLongPress={onLongPress}
@@ -189,7 +234,9 @@ export function ClayTabBar({
                 className="items-center justify-center"
                 style={{
                   width: route.name === "queue" ? 70 : 58,
+
                   height: 56,
+
                   borderRadius: 17,
 
                   backgroundColor: isFocused ? activeBackground : "transparent",
@@ -208,10 +255,13 @@ export function ClayTabBar({
                   },
 
                   shadowOpacity: isFocused ? 0.06 : 0,
+
                   shadowRadius: isFocused ? 4 : 0,
+
                   elevation: isFocused ? 2 : 0,
                 }}
               >
+                {/* Active tab highlight */}
                 {isFocused && (
                   <View
                     pointerEvents="none"
@@ -227,6 +277,7 @@ export function ClayTabBar({
                   />
                 )}
 
+                {/* Icon + badge */}
                 <View
                   className="relative items-center justify-center"
                   style={{
@@ -236,47 +287,48 @@ export function ClayTabBar({
                 >
                   {renderIcon(route.name, isFocused)}
 
-                  {badge !== undefined &&
-                    badge !== null &&
-                    Number(badge) > 0 && (
-                      <View
-                        className="absolute items-center justify-center rounded-full bg-red-500"
+                  {showBadge && (
+                    <View
+                      className="absolute items-center justify-center rounded-full bg-red-500"
+                      style={{
+                        right: -9,
+                        top: -7,
+
+                        minWidth: 18,
+                        height: 18,
+
+                        paddingHorizontal: 4,
+
+                        borderWidth: 2,
+                        borderColor: badgeBorderColor,
+
+                        shadowColor: "#EF4444",
+
+                        shadowOffset: {
+                          width: 0,
+                          height: 2,
+                        },
+
+                        shadowOpacity: 0.2,
+                        shadowRadius: 3,
+                        elevation: 3,
+                      }}
+                    >
+                      <Text
                         style={{
-                          right: -9,
-                          top: -7,
-
-                          minWidth: 18,
-                          height: 18,
-
-                          paddingHorizontal: 4,
-
-                          borderWidth: 2,
-                          borderColor: badgeBorderColor,
-
-                          shadowColor: "#EF4444",
-                          shadowOffset: {
-                            width: 0,
-                            height: 2,
-                          },
-                          shadowOpacity: 0.2,
-                          shadowRadius: 3,
-                          elevation: 3,
+                          color: "#FFFFFF",
+                          fontSize: 9,
+                          fontWeight: "900",
+                          lineHeight: 11,
                         }}
                       >
-                        <Text
-                          style={{
-                            color: "#FFFFFF",
-                            fontSize: 9,
-                            fontWeight: "900",
-                            lineHeight: 11,
-                          }}
-                        >
-                          {Number(badge) > 99 ? "99+" : String(badge)}
-                        </Text>
-                      </View>
-                    )}
+                        {numericBadge > 99 ? "99+" : String(numericBadge)}
+                      </Text>
+                    </View>
+                  )}
                 </View>
 
+                {/* Label */}
                 <Text
                   style={{
                     marginTop: 3,

@@ -63,6 +63,39 @@ type TerminalId = 1 | 2;
 const MAP_HEIGHT = 315;
 
 /* ============================================================
+   STATUS HELPERS
+============================================================ */
+
+/**
+ * Determines whether a jeepney should be considered
+ * active/online for the commuter map.
+ *
+ * IMPORTANT:
+ * JeepneyMarker does NOT have an isOnline property.
+ * The actual field is `status`.
+ *
+ * DEPARTED is intentionally considered active because
+ * the jeepney can still be travelling on the route.
+ */
+function isInactiveJeepney(status?: string | null): boolean {
+  const normalizedStatus = String(status ?? "")
+    .trim()
+    .toUpperCase();
+
+  return normalizedStatus === "INACTIVE" || normalizedStatus === "OFFLINE";
+}
+
+/**
+ * Filter the fleet down to jeepneys that should be
+ * considered active for the live commuter screen.
+ */
+function getActiveJeepneys(
+  markers: CommuterJeepneyMarker[],
+): CommuterJeepneyMarker[] {
+  return markers.filter((marker) => !isInactiveJeepney(marker.status));
+}
+
+/* ============================================================
    FORMAT
 ============================================================ */
 
@@ -108,17 +141,42 @@ export default function CommuterMapScreen() {
   const { markers, loading, refreshing, error, lastUpdate, refresh } =
     useCommuterGPS();
 
+  /**
+   * ==========================================================
+   * ACTIVE JEEPNEYS
+   * ==========================================================
+   *
+   * This is now the single filtered list used throughout
+   * this screen.
+   *
+   * If there are:
+   *
+   * 3 total
+   * 2 active
+   * 1 inactive
+   *
+   * activeMarkers.length === 2
+   */
+  const activeMarkers = useMemo(() => {
+    return getActiveJeepneys(markers);
+  }, [markers]);
+
   const [selected, setSelected] = useState<CommuterJeepneyMarker | null>(null);
 
-  // Tracks the selected jeepney id synchronously (unlike `selected` state, which updates
-  // through React's render cycle - WebView messages arrive as separate async events and
-  // can race a stale closure over `selected`, silently dropping the ETA that follows a tap).
+  /**
+   * Tracks the selected jeepney ID synchronously.
+   *
+   * This avoids stale React state when WebView ETA messages
+   * arrive asynchronously.
+   */
   const selectedIdRef = useRef<string | null>(null);
 
   const [eta, setEta] = useState<JeepneyETA | null>(null);
 
-  // True once we know the route resolved via the straight-line fallback (OSRM unreachable)
-  // rather than the real road route - surfaced so ETA numbers can be flagged as approximate.
+  /**
+   * True once the route resolved through the straight-line
+   * fallback rather than the real road route.
+   */
   const [routeApproximate, setRouteApproximate] = useState(false);
 
   /* ==========================================================
@@ -130,33 +188,53 @@ export default function CommuterMapScreen() {
       return;
     }
 
-    const updated = markers.find((item) => item.id === selected.id);
+    /**
+     * IMPORTANT:
+     * Search ACTIVE markers only.
+     *
+     * If the selected jeepney becomes inactive, it is
+     * immediately removed from the selected state.
+     */
+    const updated = activeMarkers.find((item) => item.id === selected.id);
 
     if (updated) {
       setSelected(updated);
     } else {
+      /**
+       * Jeepney became inactive or disappeared.
+       */
       setSelected(null);
 
       selectedIdRef.current = null;
 
       setEta(null);
     }
-  }, [markers]);
+  }, [activeMarkers, selected]);
 
   /* ==========================================================
      STATISTICS
   ========================================================== */
 
+  /**
+   * Moving count is based ONLY on active jeepneys.
+   */
   const movingCount = useMemo(() => {
-    return markers.filter((item) => Number(item.speed || 0) > 2).length;
-  }, [markers]);
+    return activeMarkers.filter((item) => Number(item.speed || 0) > 2).length;
+  }, [activeMarkers]);
 
+  /**
+   * Passenger count is based ONLY on active jeepneys.
+   */
   const passengerCount = useMemo(() => {
-    return markers.reduce(
+    return activeMarkers.reduce(
       (total, item) => total + Number(item.occupancy || 0),
       0,
     );
-  }, [markers]);
+  }, [activeMarkers]);
+
+  /* ==========================================================
+     ROUTE STATUS
+  ========================================================== */
 
   const handleRouteStatus = React.useCallback(
     (status: { ready: boolean; approximate?: boolean; error?: string }) => {
@@ -180,13 +258,20 @@ export default function CommuterMapScreen() {
   ========================================================== */
 
   const handleMarkerPress = (jeepneyId: string) => {
-    const jeepney = markers.find((item) => item.id === jeepneyId);
+    /**
+     * ONLY search active jeepneys.
+     *
+     * An inactive jeepney can never become selected.
+     */
+    const jeepney = activeMarkers.find((item) => item.id === jeepneyId);
 
     if (!jeepney) {
+      console.log("🚫 Ignoring inactive/unknown jeepney:", jeepneyId);
+
       return;
     }
 
-    console.log("🚐 Selected jeepney:", jeepney.plateNumber);
+    console.log("🚐 Selected active jeepney:", jeepney.plateNumber);
 
     setSelected(jeepney);
 
@@ -199,18 +284,43 @@ export default function CommuterMapScreen() {
      ETA CALLBACK
   ========================================================== */
 
-  const handleJeepneyETA = React.useCallback((newEta: JeepneyETA) => {
-    console.log("🕐 ETA RECEIVED:", newEta);
+  const handleJeepneyETA = React.useCallback(
+    (newEta: JeepneyETA) => {
+      console.log("🕐 ETA RECEIVED:", newEta);
 
-    /*
-     * Only accept ETA for the currently selected jeepney. Reads from a ref (not the
-     * `selected` state closure) so this can't race the async WebView message against
-     * React's render cycle.
-     */
-    if (selectedIdRef.current && newEta.jeepneyId === selectedIdRef.current) {
-      setEta(newEta);
-    }
-  }, []);
+      /**
+       * Only accept ETA for the currently selected
+       * active jeepney.
+       */
+      if (selectedIdRef.current && newEta.jeepneyId === selectedIdRef.current) {
+        /**
+         * Additional safety check:
+         * make sure that jeepney is still active.
+         */
+        const stillActive = activeMarkers.some(
+          (marker) => marker.id === newEta.jeepneyId,
+        );
+
+        if (!stillActive) {
+          console.log(
+            "🚫 Ignoring ETA because jeepney is no longer active:",
+            newEta.jeepneyId,
+          );
+
+          setSelected(null);
+
+          selectedIdRef.current = null;
+
+          setEta(null);
+
+          return;
+        }
+
+        setEta(newEta);
+      }
+    },
+    [activeMarkers],
+  );
 
   /* ==========================================================
      LOADING
@@ -242,7 +352,9 @@ export default function CommuterMapScreen() {
 
   return (
     <SafeAreaView edges={["top", "bottom"]} className="flex-1 bg-ocean-50">
-      {/* HEADER */}
+      {/* ======================================================
+          HEADER
+      ====================================================== */}
 
       <View className="px-5 pb-3 pt-2">
         <View className="flex-row items-center">
@@ -271,23 +383,29 @@ export default function CommuterMapScreen() {
           </Pressable>
         </View>
 
+        {/* ====================================================
+            ACTIVE JEEPNEY BADGE
+        ==================================================== */}
+
         <View className="mt-3 self-start">
           <View className="flex-row items-center rounded-full border border-white bg-white px-3.5 py-2 shadow-clay-sm">
             <View
               className={`mr-2 h-2 w-2 rounded-full ${
-                markers.length > 0 ? "bg-emerald-500" : "bg-slate-400"
+                activeMarkers.length > 0 ? "bg-emerald-500" : "bg-slate-400"
               }`}
             />
 
             <Text className="text-xs font-bold text-slate-600">
-              {markers.length} jeepney
-              {markers.length !== 1 ? "s" : ""} online
+              {activeMarkers.length} jeepney
+              {activeMarkers.length !== 1 ? "s" : ""} online
             </Text>
           </View>
         </View>
       </View>
 
-      {/* MAP */}
+      {/* ======================================================
+          MAP
+      ====================================================== */}
 
       <View
         style={{
@@ -320,18 +438,16 @@ export default function CommuterMapScreen() {
         }}
       >
         <MapView
-          markers={markers}
-
+          /**
+           * IMPORTANT:
+           * Pass only ACTIVE jeepneys to MapView.
+           */
+          markers={activeMarkers}
           onMarkerPress={handleMarkerPress}
-
           onJeepneyETA={handleJeepneyETA}
-
           onRouteStatus={handleRouteStatus}
-
           showControls={true}
-
           enableRealtime={true}
-
           style={{
             flex: 1,
             width: "100%",
@@ -340,7 +456,9 @@ export default function CommuterMapScreen() {
         />
       </View>
 
-      {/* DETAILS */}
+      {/* ======================================================
+          DETAILS
+      ====================================================== */}
 
       <ScrollView
         style={{
@@ -360,7 +478,9 @@ export default function CommuterMapScreen() {
           />
         }
       >
-        {/* LIVE INFORMATION */}
+        {/* ====================================================
+            LIVE INFORMATION
+        ==================================================== */}
 
         <View className="rounded-[24px] border border-white bg-white p-4 shadow-clay-floating">
           <View className="mb-4 flex-row items-center">
@@ -386,17 +506,29 @@ export default function CommuterMapScreen() {
           </View>
 
           <View className="flex-row gap-3">
+            {/* ==================================================
+                ACTIVE
+            ================================================== */}
+
             <InfoCard
               icon={<CarFront size={17} color={colors.primaryDark} />}
               label="Active"
-              value={String(markers.length)}
+              value={String(activeMarkers.length)}
             />
+
+            {/* ==================================================
+                MOVING
+            ================================================== */}
 
             <InfoCard
               icon={<Gauge size={17} color={colors.primaryDark} />}
               label="Moving"
               value={String(movingCount)}
             />
+
+            {/* ==================================================
+                PASSENGERS
+            ================================================== */}
 
             <InfoCard
               icon={<Users size={17} color={colors.primaryDark} />}
@@ -406,7 +538,9 @@ export default function CommuterMapScreen() {
           </View>
         </View>
 
-        {/* SELECTED JEEPNEY */}
+        {/* ====================================================
+            SELECTED JEEPNEY
+        ==================================================== */}
 
         <View className="mt-3">
           {selected ? (
@@ -431,11 +565,15 @@ export default function CommuterMapScreen() {
           )}
         </View>
 
-        {/* ETA */}
+        {/* ====================================================
+            ETA
+        ==================================================== */}
 
         {selected && <ETASection eta={eta} approximate={routeApproximate} />}
 
-        {/* LAST UPDATE */}
+        {/* ====================================================
+            LAST UPDATE
+        ==================================================== */}
 
         {lastUpdate && (
           <View className="mt-3 flex-row items-center justify-center">
@@ -447,7 +585,9 @@ export default function CommuterMapScreen() {
           </View>
         )}
 
-        {/* ERROR */}
+        {/* ====================================================
+            ERROR
+        ==================================================== */}
 
         {error && (
           <View className="mt-3 flex-row rounded-[20px] border border-red-100 bg-red-50 p-4">
@@ -524,7 +664,9 @@ function ETASection({
         </View>
       </View>
 
-      {/* DESTINATION */}
+      {/* ======================================================
+          DESTINATION
+      ====================================================== */}
 
       <View className="mt-4 rounded-[18px] bg-ocean-50 p-3">
         <View className="flex-row items-center">
@@ -542,7 +684,9 @@ function ETASection({
         </View>
       </View>
 
-      {/* DISTANCE + SPEED */}
+      {/* ======================================================
+          DISTANCE + SPEED
+      ====================================================== */}
 
       <View className="mt-3 flex-row gap-3">
         <RouteInfo
@@ -558,7 +702,9 @@ function ETASection({
         />
       </View>
 
-      {/* TRAVEL + BUFFER */}
+      {/* ======================================================
+          TRAVEL + BUFFER
+      ====================================================== */}
 
       <View className="mt-3 flex-row gap-3">
         <RouteInfo
@@ -574,7 +720,9 @@ function ETASection({
         />
       </View>
 
-      {/* PROGRESS */}
+      {/* ======================================================
+          PROGRESS
+      ====================================================== */}
 
       <View className="mt-4">
         <View className="mb-1.5 flex-row justify-between">
@@ -701,20 +849,16 @@ function SelectedJeepney({ jeepney }: { jeepney: CommuterJeepneyMarker }) {
           </Text>
         </View>
 
-        <View
-          className={`rounded-full px-3 py-1.5 ${
-            jeepney.isOnline ? "bg-emerald-50" : "bg-slate-100"
-          }`}
-        >
-          <Text
-            className={`text-[10px] font-extrabold ${
-              jeepney.isOnline ? "text-emerald-600" : "text-slate-500"
-            }`}
-          >
-            {jeepney.isOnline ? "LIVE" : "OFFLINE"}
+        <View className="rounded-full bg-emerald-50 px-3 py-1.5">
+          <Text className="text-[10px] font-extrabold text-emerald-600">
+            LIVE
           </Text>
         </View>
       </View>
+
+      {/* ======================================================
+          CURRENT SIDE
+      ====================================================== */}
 
       <View className="mt-4 flex-row items-center rounded-[16px] bg-ocean-50 p-3">
         <View className="h-8 w-8 items-center justify-center rounded-[11px] bg-ocean-100">
@@ -729,6 +873,10 @@ function SelectedJeepney({ jeepney }: { jeepney: CommuterJeepneyMarker }) {
           <Text className="text-sm font-bold text-slate-700">{terminal}</Text>
         </View>
       </View>
+
+      {/* ======================================================
+          SPEED + PASSENGERS
+      ====================================================== */}
 
       <View className="mt-3 flex-row gap-3">
         <View className="flex-1 rounded-[18px] bg-ocean-50 p-3">
@@ -751,6 +899,10 @@ function SelectedJeepney({ jeepney }: { jeepney: CommuterJeepneyMarker }) {
           </Text>
         </View>
       </View>
+
+      {/* ======================================================
+          OCCUPANCY
+      ====================================================== */}
 
       <View className="mt-4">
         <View className="mb-1.5 flex-row items-center justify-between">

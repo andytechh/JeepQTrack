@@ -5,7 +5,7 @@ import Svg, {
   Defs,
   LinearGradient,
   Path,
-  Stop
+  Stop,
 } from "react-native-svg";
 
 interface JeepQLaunchSplashProps {
@@ -177,12 +177,12 @@ export default function JeepQLaunchSplash({
         <View pointerEvents="none" style={styles.brandHighlight} />
 
         <Text accessibilityRole="header" style={styles.wordmark}>
-          JeepQ
+          Smart Queue
         </Text>
 
         <View style={styles.wordmarkRule} />
 
-        <Text style={styles.brandSubtitle}>SMART QUEUE</Text>
+        <Text style={styles.brandSubtitle}>COMMUTE WITH EASE</Text>
       </Animated.View>
 
       {/* Donsol → Daraga animated route */}
@@ -467,7 +467,7 @@ const styles = StyleSheet.create({
 
   wordmark: {
     color: "#0F172A",
-    fontSize: 46,
+    fontSize: 35,
     fontWeight: "900",
     letterSpacing: -2.5,
     lineHeight: 52,

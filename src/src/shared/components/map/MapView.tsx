@@ -2,7 +2,11 @@ import React from "react";
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 import { WebView } from "react-native-webview";
 
-import { JeepneyMarker, useGPSMap } from "../../hooks/useGPSMap";
+import {
+  getActiveMapMarkers,
+  JeepneyMarker,
+  useGPSMap,
+} from "../../hooks/useGPSMap";
 
 import MapControls from "./MapControls";
 import { getMapHTML } from "./mapHTML";
@@ -44,9 +48,9 @@ interface MapViewProps {
   onJeepneyETA?: (eta: JeepneyETA) => void;
 
   /**
-   * Fires once the road route resolves - either from OSRM (approximate: false)
-   * or the straight-line fallback used when OSRM is unreachable (approximate: true).
-   * Fires with an error message if the route could not be established at all.
+   * Fires once the road route resolves - either from OSRM
+   * (approximate: false) or the straight-line fallback
+   * (approximate: true).
    */
   onRouteStatus?: (status: {
     ready: boolean;
@@ -70,6 +74,22 @@ export const MapView: React.FC<MapViewProps> = ({
   enableRealtime = true,
   style,
 }) => {
+  /**
+   * ============================================================
+   * ACTIVE MAP MARKERS
+   * ============================================================
+   *
+   * Only active jeepneys are allowed to reach the map.
+   */
+  const activeMarkers = React.useMemo(() => {
+    return getActiveMapMarkers(markers);
+  }, [markers]);
+
+  /**
+   * ============================================================
+   * GPS MAP
+   * ============================================================
+   */
   const {
     webViewRef,
     mapReady,
@@ -79,9 +99,26 @@ export const MapView: React.FC<MapViewProps> = ({
     recenter,
     refreshRoute,
   } = useGPSMap({
-    markers,
+    markers: activeMarkers,
     enableRealtime,
-    onMarkerPress,
+
+    /**
+     * Extra safety check before allowing a marker selection.
+     */
+    onMarkerPress: (jeepneyId) => {
+      const jeepney = activeMarkers.find((marker) => marker.id === jeepneyId);
+
+      if (!jeepney) {
+        console.log(
+          "🚫 Ignoring marker press for inactive/unknown jeepney:",
+          jeepneyId,
+        );
+
+        return;
+      }
+
+      onMarkerPress?.(jeepneyId);
+    },
   });
 
   /**
@@ -121,6 +158,23 @@ export const MapView: React.FC<MapViewProps> = ({
          * ====================================================
          */
         if (data.type === "etaUpdate" && onJeepneyETA) {
+          /**
+           * Only accept ETA updates for jeepneys that
+           * are currently active.
+           */
+          const jeepney = activeMarkers.find(
+            (marker) => marker.id === data.jeepneyId,
+          );
+
+          if (!jeepney) {
+            console.log(
+              "🚫 Ignoring ETA for inactive/unknown jeepney:",
+              data.jeepneyId,
+            );
+
+            return;
+          }
+
           onJeepneyETA({
             jeepneyId: data.jeepneyId,
 
@@ -160,7 +214,7 @@ export const MapView: React.FC<MapViewProps> = ({
        */
       handleMessage(event);
     },
-    [handleMessage, onJeepneyETA],
+    [activeMarkers, handleMessage, onJeepneyETA, onRouteStatus],
   );
 
   return (
@@ -193,11 +247,20 @@ export const MapView: React.FC<MapViewProps> = ({
           onZoomIn={zoomIn}
           onZoomOut={zoomOut}
           onRecenter={() => {
-            const first = markers[0];
+            /**
+             * Only use an active jeepney
+             * when recentering.
+             */
+            const first = activeMarkers[0];
 
             if (first) {
               recenter(first.lat, first.lng);
             } else {
+              /**
+               * No active jeepneys.
+               * Center on the Donsol–Daraga
+               * route instead.
+               */
               recenter(13.025, 123.65);
             }
           }}

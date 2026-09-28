@@ -11,7 +11,7 @@ import {
   Users,
   X,
 } from "lucide-react-native";
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Image,
@@ -26,32 +26,25 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import OceanBackground from "../../../src/shared/components/clay/OceanBackground";
 import { colors } from "../../../src/shared/constants/theme";
-import { useCommuterQueue } from "../../../src/shared/hooks/useCommuterQueue";
+import {
+  CommuterJeepney,
+  CommuterJeepneyStatus,
+  useCommuterQueue,
+} from "../../../src/shared/hooks/useCommuterQueue";
 import { useTerminalSubscriptions } from "../../../src/shared/hooks/useTerminalSubscriptions";
 
-type JeepneyStatus =
-  "LOADING" | "WAITING" | "ARRIVED" | "EN_ROUTE" | "DEPARTED" | "INACTIVE";
-
-interface Jeepney {
-  id: string;
-  number: string;
-  status: JeepneyStatus;
-  passengers: number;
-  capacity: number;
-  estimatedDeparture: string;
-  terminalId: number;
-  jeepName: string;
-  driverName: string;
-  imageUrl: string | null;
-}
+type Jeepney = CommuterJeepney;
 
 const TERMINAL_NAMES: Record<number, string> = {
   1: "Donsol",
   2: "Daraga",
 };
 
+const SERVICE_START_HOUR = 5;
+const SERVICE_END_HOUR = 21;
+
 const STATUS_CONFIG: Record<
-  JeepneyStatus,
+  CommuterJeepneyStatus,
   {
     label: string;
     description: string;
@@ -102,14 +95,21 @@ const STATUS_CONFIG: Record<
 
   INACTIVE: {
     label: "Inactive",
-    description: "Service is currently inactive.",
+    description: "Currently not in service.",
     icon: <BusFront size={16} color="#64748B" strokeWidth={2.5} />,
     container: "bg-slate-100",
     text: "text-slate-600",
   },
 };
 
-function getOccupancyPercentage(passengers: number, capacity: number): number {
+function isServiceHoursActive() {
+  const now = new Date();
+  const hour = now.getHours();
+
+  return hour >= SERVICE_START_HOUR && hour < SERVICE_END_HOUR;
+}
+
+function getOccupancyPercentage(passengers: number, capacity: number) {
   if (capacity <= 0) {
     return 0;
   }
@@ -117,7 +117,7 @@ function getOccupancyPercentage(passengers: number, capacity: number): number {
   return Math.min(100, Math.round((passengers / capacity) * 100));
 }
 
-function getOccupancyLabel(passengers: number, capacity: number): string {
+function getOccupancyLabel(passengers: number, capacity: number) {
   const percentage = getOccupancyPercentage(passengers, capacity);
 
   if (percentage >= 100) {
@@ -136,7 +136,7 @@ function getOccupancyLabel(passengers: number, capacity: number): string {
 }
 
 /* -------------------------------------------------------------------------- */
-/* TERMINAL NOTIFICATION CARD                                                 */
+/* TERMINAL ALERTS                                                            */
 /* -------------------------------------------------------------------------- */
 
 function TerminalNotificationCard({
@@ -210,11 +210,11 @@ function TerminalNotificationCard({
       >
         <View className="flex-row items-start">
           <View className="h-[38px] w-[38px] items-center justify-center rounded-full bg-white">
-            {subscribed ? (
-              <Bell size={18} color="#16A34A" strokeWidth={2.3} />
-            ) : (
-              <Bell size={18} color={colors.primaryDark} strokeWidth={2.3} />
-            )}
+            <Bell
+              size={18}
+              color={subscribed ? "#16A34A" : colors.primaryDark}
+              strokeWidth={2.3}
+            />
           </View>
 
           <View className="ml-3 flex-1">
@@ -305,15 +305,17 @@ function JeepneyCard({
   return (
     <View
       className={`mb-4 rounded-[26px] border border-white/90 bg-clay-surface p-5 shadow-clay-sm ${
-        isDeparted || isInactive ? "opacity-70" : ""
+        isDeparted ? "opacity-65" : ""
       }`}
     >
       {/* HEADER */}
+
       <View className="flex-row items-start justify-between">
         <View className="flex-row items-center">
           {/* JEEPNEY IMAGE */}
+
           <View
-            className={`h-[68px] w-[68px] overflow-hidden rounded-[18px] ${
+            className={`h-[52px] w-[52px] overflow-hidden rounded-[18px] ${
               isDeparted || isInactive ? "bg-slate-100" : "bg-ocean-100"
             }`}
           >
@@ -376,6 +378,7 @@ function JeepneyCard({
       </Text>
 
       {/* OCCUPANCY */}
+
       <View className="mt-5">
         <View className="flex-row items-center justify-between">
           <View className="flex-row items-center">
@@ -417,16 +420,11 @@ function JeepneyCard({
         </View>
       </View>
 
-      {/* ETA / SERVICE STATUS */}
-      <View
-        className={`mt-5 flex-row items-center rounded-[18px] px-4 py-3 ${
-          isInactive ? "bg-slate-100" : "bg-ocean-50"
-        }`}
-      >
+      {/* ETA */}
+
+      <View className="mt-5 flex-row items-center rounded-[18px] bg-ocean-50 px-4 py-3">
         <View className="h-[34px] w-[34px] items-center justify-center rounded-full bg-white">
-          {isInactive ? (
-            <BusFront size={16} color="#64748B" strokeWidth={2.3} />
-          ) : jeepney.status === "EN_ROUTE" ? (
+          {jeepney.status === "EN_ROUTE" ? (
             <MapPin size={16} color={colors.primaryDark} strokeWidth={2.3} />
           ) : (
             <Clock3 size={16} color={colors.primaryDark} strokeWidth={2.3} />
@@ -435,26 +433,25 @@ function JeepneyCard({
 
         <View className="ml-3 flex-1">
           <Text className="text-[9px] font-bold uppercase tracking-[0.6px] text-ink-muted">
-            {isInactive
-              ? "Service status"
-              : jeepney.status === "EN_ROUTE"
-                ? "Estimated arrival"
-                : "Estimated departure"}
+            {jeepney.status === "EN_ROUTE"
+              ? "Estimated arrival"
+              : "Estimated departure"}
           </Text>
 
           <Text className="mt-0.5 text-[14px] font-extrabold text-ink-dark">
-            {isInactive ? "Inactive" : jeepney.estimatedDeparture}
+            {isInactive ? "—" : jeepney.estimatedDeparture}
           </Text>
 
-          <Text className="text-[8px] italic text-ink-muted">
-            {isInactive
-              ? "Service resumes during operating hours"
-              : "* Estimated, may change"}
-          </Text>
+          {!isInactive ? (
+            <Text className="text-[8px] italic text-ink-muted">
+              * Estimated, may change
+            </Text>
+          ) : null}
         </View>
       </View>
 
       {/* DETAILS */}
+
       <TouchableOpacity
         onPress={onPressDetails}
         activeOpacity={0.7}
@@ -470,11 +467,7 @@ function JeepneyCard({
   );
 }
 
-/* -------------------------------------------------------------------------- */
-/* STATUS ORDER                                                               */
-/* -------------------------------------------------------------------------- */
-
-const STATUS_ORDER: JeepneyStatus[] = [
+const STATUS_ORDER: CommuterJeepneyStatus[] = [
   "LOADING",
   "WAITING",
   "ARRIVED",
@@ -482,10 +475,6 @@ const STATUS_ORDER: JeepneyStatus[] = [
   "DEPARTED",
   "INACTIVE",
 ];
-
-/* -------------------------------------------------------------------------- */
-/* SCREEN                                                                     */
-/* -------------------------------------------------------------------------- */
 
 export default function CommuterQueueScreen() {
   const { jeepneys, loading, refreshing, refresh, error } = useCommuterQueue();
@@ -501,6 +490,20 @@ export default function CommuterQueueScreen() {
 
   const [modalVisible, setModalVisible] = useState(false);
 
+  const [serviceActive, setServiceActive] = useState(isServiceHoursActive());
+
+  useEffect(() => {
+    const updateServiceState = () => {
+      setServiceActive(isServiceHoursActive());
+    };
+
+    updateServiceState();
+
+    const interval = setInterval(updateServiceState, 60 * 1000);
+
+    return () => clearInterval(interval);
+  }, []);
+
   const onRefresh = useCallback(() => refresh(), [refresh]);
 
   const openDetails = (jeepney: Jeepney) => {
@@ -513,12 +516,8 @@ export default function CommuterQueueScreen() {
     setSelectedJeepney(null);
   };
 
-  /* ---------------------------------------------------------------------- */
-  /* GROUP BY STATUS                                                        */
-  /* ---------------------------------------------------------------------- */
-
   const grouped = useMemo(() => {
-    const map: Record<JeepneyStatus, Jeepney[]> = {
+    const map: Record<CommuterJeepneyStatus, Jeepney[]> = {
       LOADING: [],
       WAITING: [],
       ARRIVED: [],
@@ -528,9 +527,7 @@ export default function CommuterQueueScreen() {
     };
 
     jeepneys.forEach((jeepney) => {
-      if (map[jeepney.status]) {
-        map[jeepney.status].push(jeepney as Jeepney);
-      }
+      map[jeepney.status].push(jeepney);
     });
 
     return map;
@@ -539,10 +536,6 @@ export default function CommuterQueueScreen() {
   const statusKeys = STATUS_ORDER.filter(
     (status) => grouped[status].length > 0,
   );
-
-  /* ---------------------------------------------------------------------- */
-  /* QUEUE SUMMARY                                                          */
-  /* ---------------------------------------------------------------------- */
 
   const loadingAndWaiting = jeepneys.filter(
     (jeepney) => jeepney.status === "LOADING" || jeepney.status === "WAITING",
@@ -554,10 +547,6 @@ export default function CommuterQueueScreen() {
     2: loadingAndWaiting.filter((jeepney) => jeepney.terminalId === 2).length,
   };
 
-  /* ---------------------------------------------------------------------- */
-  /* TERMINAL COUNTS                                                        */
-  /* ---------------------------------------------------------------------- */
-
   const terminalGroups = useMemo(
     () => ({
       1: jeepneys.filter((jeepney) => jeepney.terminalId === 1),
@@ -566,10 +555,6 @@ export default function CommuterQueueScreen() {
     }),
     [jeepneys],
   );
-
-  /* ---------------------------------------------------------------------- */
-  /* ERROR                                                                  */
-  /* ---------------------------------------------------------------------- */
 
   if (error) {
     return (
@@ -589,10 +574,6 @@ export default function CommuterQueueScreen() {
     );
   }
 
-  /* ---------------------------------------------------------------------- */
-  /* LOADING                                                                */
-  /* ---------------------------------------------------------------------- */
-
   if (loading && jeepneys.length === 0) {
     return (
       <OceanBackground intensity={0.2}>
@@ -606,10 +587,6 @@ export default function CommuterQueueScreen() {
       </OceanBackground>
     );
   }
-
-  /* ---------------------------------------------------------------------- */
-  /* EMPTY                                                                  */
-  /* ---------------------------------------------------------------------- */
 
   if (jeepneys.length === 0 && !loading) {
     return (
@@ -636,10 +613,6 @@ export default function CommuterQueueScreen() {
       </OceanBackground>
     );
   }
-
-  /* ---------------------------------------------------------------------- */
-  /* MAIN                                                                   */
-  /* ---------------------------------------------------------------------- */
 
   return (
     <OceanBackground intensity={0.2}>
@@ -681,6 +654,29 @@ export default function CommuterQueueScreen() {
                 </Text>
               </View>
             </View>
+
+            {/* SINGLE SERVICE ENDED BANNER */}
+
+            {!serviceActive && (
+              <View className="mt-4 overflow-hidden rounded-[21px] border border-white/90 bg-slate-100 px-4 py-3 shadow-clay-sm">
+                <View className="flex-row items-center">
+                  <View className="h-[38px] w-[38px] items-center justify-center rounded-full bg-white">
+                    <Clock3 size={18} color="#64748B" strokeWidth={2.3} />
+                  </View>
+
+                  <View className="ml-3 flex-1">
+                    <Text className="text-[11px] font-extrabold text-slate-700">
+                      Service has ended
+                    </Text>
+
+                    <Text className="mt-0.5 text-[9px] leading-4 text-slate-500">
+                      Jeepney service is currently inactive. Please come back
+                      tomorrow during operating hours.
+                    </Text>
+                  </View>
+                </View>
+              </View>
+            )}
 
             {/* QUEUE SUMMARY */}
 
@@ -732,8 +728,10 @@ export default function CommuterQueueScreen() {
                   </Text>
 
                   <Text className="mt-0.5 text-[14px] font-extrabold text-white">
-                    {loadingAndWaiting[0]?.estimatedDeparture ||
-                      "No jeepney available"}
+                    {serviceActive
+                      ? loadingAndWaiting[0]?.estimatedDeparture ||
+                        "No jeepney available"
+                      : "—"}
                   </Text>
                 </View>
               </View>
@@ -742,8 +740,16 @@ export default function CommuterQueueScreen() {
             {/* LIVE STATUS */}
 
             <View className="mt-5 flex-row items-center rounded-[21px] border border-white/90 bg-clay-surface p-4 shadow-clay-sm">
-              <View className="h-[40px] w-[40px] items-center justify-center rounded-[14px] bg-green-100">
-                <View className="h-[10px] w-[10px] rounded-full bg-green-500" />
+              <View
+                className={`h-[40px] w-[40px] items-center justify-center rounded-[14px] ${
+                  serviceActive ? "bg-green-100" : "bg-slate-100"
+                }`}
+              >
+                <View
+                  className={`h-[10px] w-[10px] rounded-full ${
+                    serviceActive ? "bg-green-500" : "bg-slate-400"
+                  }`}
+                />
               </View>
 
               <View className="ml-3 flex-1">
@@ -759,9 +765,10 @@ export default function CommuterQueueScreen() {
               <RefreshCw size={17} color={colors.textMuted} />
             </View>
 
-            {/* TERMINAL ALERTS */}
+            {/* TERMINAL ALERTS
+                KEPT CLOSE TO LIVE STATUS */}
 
-            <View className="mt-7">
+            <View className="mt-5">
               <View className="flex-row items-end justify-between">
                 <View className="flex-1">
                   <Text className="text-[19px] font-extrabold text-ink-dark">
@@ -783,8 +790,6 @@ export default function CommuterQueueScreen() {
                 </View>
               </View>
 
-              {/* DONSOL */}
-
               <TerminalNotificationCard
                 terminalId={1}
                 terminalName="Donsol"
@@ -794,8 +799,6 @@ export default function CommuterQueueScreen() {
                 expirationLabel={getExpirationLabel(1)}
                 onToggle={() => toggleSubscription(1)}
               />
-
-              {/* DARAGA */}
 
               <TerminalNotificationCard
                 terminalId={2}
@@ -843,8 +846,6 @@ export default function CommuterQueueScreen() {
               </View>
             ))}
 
-            {/* REFRESH HINT */}
-
             <View className="mt-2 items-center pb-3">
               {refreshing ? (
                 <ActivityIndicator size="small" color={colors.primary} />
@@ -883,7 +884,7 @@ export default function CommuterQueueScreen() {
                 {/* IMAGE */}
 
                 {selectedJeepney.imageUrl ? (
-                  <View className="mb-2 overflow-hidden rounded-[20px] bg-slate-100">
+                  <View className="overflow-hidden rounded-[20px] bg-slate-100">
                     <Image
                       source={{
                         uri: selectedJeepney.imageUrl,
@@ -891,7 +892,7 @@ export default function CommuterQueueScreen() {
                       resizeMode="cover"
                       style={{
                         width: "100%",
-                        height: 180,
+                        height: 170,
                       }}
                     />
                   </View>
@@ -906,19 +907,15 @@ export default function CommuterQueueScreen() {
                 </View>
 
                 {selectedJeepney.jeepName ? (
-                  <View className="flex-row items-center">
-                    <Text className="text-sm font-medium text-slate-600">
-                      Name: {selectedJeepney.jeepName}
-                    </Text>
-                  </View>
+                  <Text className="text-sm font-medium text-slate-600">
+                    Name: {selectedJeepney.jeepName}
+                  </Text>
                 ) : null}
 
                 {selectedJeepney.driverName ? (
-                  <View className="flex-row items-center">
-                    <Text className="text-sm text-slate-600">
-                      Driver: {selectedJeepney.driverName}
-                    </Text>
-                  </View>
+                  <Text className="text-sm text-slate-600">
+                    Driver: {selectedJeepney.driverName}
+                  </Text>
                 ) : null}
 
                 <View className="flex-row items-center">
@@ -928,8 +925,6 @@ export default function CommuterQueueScreen() {
                     {TERMINAL_NAMES[selectedJeepney.terminalId] || "Unknown"}
                   </Text>
                 </View>
-
-                {/* STATUS */}
 
                 <View className="flex-row items-center">
                   <View
@@ -947,23 +942,7 @@ export default function CommuterQueueScreen() {
                   </View>
                 </View>
 
-                {/* INACTIVE */}
-
-                {selectedJeepney.status === "INACTIVE" ? (
-                  <View className="flex-row items-center rounded-[16px] bg-slate-100 px-4 py-3">
-                    <BusFront size={18} color="#64748b" />
-
-                    <View className="ml-3">
-                      <Text className="text-sm font-bold text-slate-700">
-                        Service inactive
-                      </Text>
-
-                      <Text className="mt-0.5 text-xs text-slate-500">
-                        This jeepney is currently inactive.
-                      </Text>
-                    </View>
-                  </View>
-                ) : selectedJeepney.status === "EN_ROUTE" ? (
+                {selectedJeepney.status === "EN_ROUTE" ? (
                   <View className="flex-row items-center rounded-[16px] bg-ocean-50 px-4 py-3">
                     <View className="h-[34px] w-[34px] items-center justify-center rounded-full bg-white">
                       <MapPin
@@ -992,15 +971,14 @@ export default function CommuterQueueScreen() {
                     <Clock3 size={18} color="#64748b" />
 
                     <Text className="ml-3 text-sm text-slate-600">
-                      Est. departure: {selectedJeepney.estimatedDeparture}{" "}
+                      Est. departure: {selectedJeepney.estimatedDeparture}
                       <Text className="text-xs italic text-slate-400">
+                        {" "}
                         (may change)
                       </Text>
                     </Text>
                   </View>
                 )}
-
-                {/* PASSENGERS */}
 
                 <View className="flex-row items-center">
                   <Users size={18} color="#64748b" />

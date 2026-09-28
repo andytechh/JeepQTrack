@@ -1,7 +1,9 @@
+import * as ImagePicker from "expo-image-picker";
 import { router, useFocusEffect } from "expo-router";
 import {
   ArrowLeft,
   Check,
+  ImagePlus,
   MessageCircle,
   MoreVertical,
   SendHorizontal,
@@ -15,6 +17,7 @@ import {
   ActivityIndicator,
   AppState,
   FlatList,
+  Image,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -33,6 +36,12 @@ import { useAuthStore } from "@/src/shared/store/authStore";
 
 const PRESENCE_CHANNEL = "staff-presence";
 const BATCH_SIZE = 10;
+
+interface PendingAttachment {
+  uri: string;
+  mimeType?: string | null;
+  fileName?: string | null;
+}
 
 export default function AdminChatScreen() {
   const { user } = useAuthStore();
@@ -61,12 +70,16 @@ export default function AdminChatScreen() {
   const [inputText, setInputText] = useState("");
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
 
+  const [attachment, setAttachment] = useState<PendingAttachment | null>(null);
+  const [attaching, setAttaching] = useState(false);
+
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [onlineCount, setOnlineCount] = useState(0);
   const [totalMembers, setTotalMembers] = useState(0);
 
   const [adminMenuVisible, setAdminMenuVisible] = useState(false);
   const [memberModalVisible, setMemberModalVisible] = useState(false);
+
   const [deleteModalVisible, setDeleteModalVisible] = useState(false);
   const [deleteMessageId, setDeleteMessageId] = useState<string | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
@@ -333,6 +346,7 @@ export default function AdminChatScreen() {
    */
   const handleEditMessage = useCallback(
     (messageId: string, currentText: string) => {
+      setAttachment(null);
       setEditingMessageId(messageId);
       setInputText(currentText);
 
@@ -372,6 +386,53 @@ export default function AdminChatScreen() {
   }, [editingMessageId, inputText, editMessage, cancelEditing]);
 
   /*
+   * PICK IMAGE
+   */
+  const handlePickImage = useCallback(async () => {
+    if (editingMessageId || attaching || sending) {
+      return;
+    }
+
+    try {
+      const permission =
+        await ImagePicker.requestMediaLibraryPermissionsAsync();
+
+      if (!permission.granted) {
+        console.warn("⚠️ Media library permission was not granted.");
+        return;
+      }
+
+      setAttaching(true);
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        quality: 0.7,
+        allowsEditing: false,
+      });
+
+      if (result.canceled || !result.assets?.length) {
+        return;
+      }
+
+      const asset = result.assets[0];
+
+      setAttachment({
+        uri: asset.uri,
+        mimeType: asset.mimeType ?? "image/jpeg",
+        fileName: asset.fileName ?? undefined,
+      });
+    } catch (error) {
+      console.error("Image pick error:", error);
+    } finally {
+      setAttaching(false);
+    }
+  }, [editingMessageId, attaching, sending]);
+
+  const clearAttachment = useCallback(() => {
+    setAttachment(null);
+  }, []);
+
+  /*
    * SEND MESSAGE
    */
   const handleSend = useCallback(async () => {
@@ -382,22 +443,28 @@ export default function AdminChatScreen() {
 
     const text = inputText.trim();
 
-    if (!text || sending) {
+    if ((!text && !attachment) || sending) {
       return;
     }
 
-    await sendMessage(text);
+    try {
+      await sendMessage(text, attachment ?? undefined);
 
-    setInputText("");
+      setInputText("");
+      setAttachment(null);
 
-    if (isNearLatestRef.current) {
-      setTimeout(() => {
-        scrollToLatest(true);
-      }, 100);
+      if (isNearLatestRef.current) {
+        setTimeout(() => {
+          scrollToLatest(true);
+        }, 100);
+      }
+    } catch (error) {
+      console.error("Send message error:", error);
     }
   }, [
     editingMessageId,
     inputText,
+    attachment,
     sending,
     sendMessage,
     handleUpdateMessage,
@@ -547,6 +614,8 @@ export default function AdminChatScreen() {
       </View>
     );
   }
+
+  const sendDisabled = (!inputText.trim() && !attachment) || sending;
 
   return (
     <KeyboardAvoidingView
@@ -945,6 +1014,85 @@ export default function AdminChatScreen() {
         )}
 
         {/* ====================================================== */}
+        {/* ATTACHMENT PREVIEW */}
+        {/* ====================================================== */}
+
+        {attachment && !editingMessageId && (
+          <View
+            style={{
+              marginHorizontal: 12,
+              marginBottom: 6,
+              paddingHorizontal: 10,
+              paddingVertical: 8,
+              borderRadius: 16,
+
+              flexDirection: "row",
+              alignItems: "center",
+
+              backgroundColor: colors.surface,
+
+              borderWidth: 1,
+              borderColor: colors.border,
+
+              shadowColor: "#38BDF8",
+              shadowOffset: { width: 0, height: 3 },
+              shadowOpacity: 0.08,
+              shadowRadius: 7,
+              elevation: 3,
+            }}
+          >
+            <Image
+              source={{ uri: attachment.uri }}
+              style={{
+                width: 46,
+                height: 46,
+                borderRadius: 12,
+              }}
+              resizeMode="cover"
+            />
+
+            <View style={{ flex: 1, marginLeft: 10 }}>
+              <Text
+                style={{
+                  color: colors.primaryDark,
+                  fontSize: 9,
+                  fontWeight: "900",
+                }}
+              >
+                IMAGE ATTACHED
+              </Text>
+
+              <Text
+                numberOfLines={1}
+                style={{
+                  color: colors.secondary,
+                  fontSize: 10,
+                  marginTop: 2,
+                }}
+              >
+                {attachment.fileName || "photo.jpg"}
+              </Text>
+            </View>
+
+            <Pressable
+              onPress={clearAttachment}
+              style={{
+                width: 30,
+                height: 30,
+                borderRadius: 10,
+
+                alignItems: "center",
+                justifyContent: "center",
+
+                backgroundColor: colors.surfaceSoft,
+              }}
+            >
+              <X size={16} color={colors.secondary} />
+            </Pressable>
+          </View>
+        )}
+
+        {/* ====================================================== */}
         {/* INPUT */}
         {/* ====================================================== */}
 
@@ -965,7 +1113,7 @@ export default function AdminChatScreen() {
               maxHeight: 130,
               borderRadius: 22,
 
-              paddingLeft: 15,
+              paddingLeft: 7,
               paddingRight: 7,
               paddingVertical: 7,
 
@@ -984,12 +1132,40 @@ export default function AdminChatScreen() {
               elevation: 5,
             }}
           >
+            <Pressable
+              onPress={handlePickImage}
+              disabled={!!editingMessageId || attaching || sending}
+              style={{
+                width: 40,
+                height: 40,
+                borderRadius: 13,
+                alignSelf: "flex-end",
+                marginBottom: 1,
+
+                alignItems: "center",
+                justifyContent: "center",
+
+                backgroundColor: colors.surfaceSoft,
+                opacity: editingMessageId ? 0.4 : 1,
+              }}
+            >
+              {attaching ? (
+                <ActivityIndicator size="small" color={colors.primaryDark} />
+              ) : (
+                <ImagePlus size={19} color={colors.primaryDark} />
+              )}
+            </Pressable>
+
             <TextInput
               ref={inputRef}
               value={inputText}
               onChangeText={setInputText}
               placeholder={
-                editingMessageId ? "Edit message..." : "Message staff..."
+                editingMessageId
+                  ? "Edit message..."
+                  : attachment
+                    ? "Add a caption..."
+                    : "Message staff..."
               }
               placeholderTextColor={colors.muted}
               multiline
@@ -998,6 +1174,7 @@ export default function AdminChatScreen() {
               editable={!sending}
               style={{
                 flex: 1,
+                marginLeft: 8,
                 maxHeight: 105,
                 minHeight: 42,
 
@@ -1013,7 +1190,7 @@ export default function AdminChatScreen() {
 
             <Pressable
               onPress={handleSend}
-              disabled={!inputText.trim() || sending}
+              disabled={sendDisabled}
               style={{
                 width: 43,
                 height: 43,
@@ -1022,15 +1199,13 @@ export default function AdminChatScreen() {
                 alignItems: "center",
                 justifyContent: "center",
 
-                backgroundColor:
-                  !inputText.trim() || sending
-                    ? "#CBD5E1"
-                    : editingMessageId
-                      ? "#16A34A"
-                      : colors.primaryDark,
+                backgroundColor: sendDisabled
+                  ? "#CBD5E1"
+                  : editingMessageId
+                    ? "#16A34A"
+                    : colors.primaryDark,
 
-                shadowColor:
-                  !inputText.trim() || sending ? "#64748B" : colors.primaryDark,
+                shadowColor: sendDisabled ? "#64748B" : colors.primaryDark,
 
                 shadowOffset: {
                   width: 0,
@@ -1055,6 +1230,7 @@ export default function AdminChatScreen() {
         {/* ====================================================== */}
         {/* CLAY UNSEND CONFIRMATION */}
         {/* ====================================================== */}
+
         <Modal
           visible={deleteModalVisible}
           transparent

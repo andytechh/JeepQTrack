@@ -566,8 +566,9 @@ function AddStaffModal({
       onRequestClose={close}
     >
       <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
         className="flex-1"
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 24}
       >
         <View className="flex-1 justify-end bg-slate-900/35">
           <View className="max-h-[92%] rounded-t-[32px] border border-white/90 bg-clay-surface">
@@ -599,10 +600,14 @@ function AddStaffModal({
 
             <ScrollView
               keyboardShouldPersistTaps="handled"
+              keyboardDismissMode={
+                Platform.OS === "ios" ? "interactive" : "on-drag"
+              }
               showsVerticalScrollIndicator={false}
+              automaticallyAdjustKeyboardInsets={Platform.OS === "ios"}
               contentContainerStyle={{
                 padding: 20,
-                paddingBottom: 35,
+                paddingBottom: 100,
               }}
             >
               {validationError && (

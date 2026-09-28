@@ -1,20 +1,20 @@
+import * as ImagePicker from "expo-image-picker";
 import { router, useFocusEffect } from "expo-router";
 import {
   ArrowLeft,
   Check,
+  ImagePlus,
   MessageCircle,
-  MoreVertical,
   SendHorizontal,
-  Shield,
-  Users,
+  Trash2,
   X,
 } from "lucide-react-native";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   AppState,
   FlatList,
+  Image,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -34,7 +34,13 @@ import { useAuthStore } from "@/src/shared/store/authStore";
 const PRESENCE_CHANNEL = "staff-presence";
 const BATCH_SIZE = 10;
 
-export default function AdminChatScreen() {
+interface PendingAttachment {
+  uri: string;
+  mimeType?: string | null;
+  fileName?: string | null;
+}
+
+export default function DriverChatScreen() {
   const { user } = useAuthStore();
   const { isDark } = useTheme();
   const insets = useSafeAreaInsets();
@@ -52,7 +58,6 @@ export default function AdminChatScreen() {
 
     editMessage,
     deleteMessage,
-    adminDeleteMessage,
 
     addReaction,
     removeReaction,
@@ -61,12 +66,17 @@ export default function AdminChatScreen() {
   const [inputText, setInputText] = useState("");
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
 
+  const [attachment, setAttachment] = useState<PendingAttachment | null>(null);
+  const [attaching, setAttaching] = useState(false);
+
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [onlineCount, setOnlineCount] = useState(0);
   const [totalMembers, setTotalMembers] = useState(0);
 
-  const [adminMenuVisible, setAdminMenuVisible] = useState(false);
-  const [memberModalVisible, setMemberModalVisible] = useState(false);
+  const [deleteModalVisible, setDeleteModalVisible] = useState(false);
+  const [deleteMessageId, setDeleteMessageId] = useState<string | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const flatListRef = useRef<FlatList>(null);
   const inputRef = useRef<TextInput>(null);
@@ -75,14 +85,6 @@ export default function AdminChatScreen() {
   const isNearLatestRef = useRef(true);
   const initialScrollDoneRef = useRef(false);
 
-  const isAdmin = user?.role?.toLowerCase() === "admin";
-
-  /*
-   * CLAYMORPHISM COLORS
-   *
-   * The header intentionally uses the same clay surface
-   * as the rest of the interface instead of a blue header.
-   */
   const colors = useMemo(
     () => ({
       background: isDark ? "#0F172A" : "#EEF8FF",
@@ -91,9 +93,8 @@ export default function AdminChatScreen() {
 
       surfaceSoft: isDark ? "#1E293B" : "#F7FBFE",
 
-      surfaceRaised: isDark ? "#202D42" : "#FDFEFF",
-
       primary: "#0EA5E9",
+
       primaryDark: "#0284C7",
 
       primarySoft: isDark ? "#164E63" : "#E0F2FE",
@@ -215,7 +216,7 @@ export default function AdminChatScreen() {
   }, [user?.uid, user?.displayName]);
 
   /*
-   * RE-TRACK PRESENCE WHEN APP RETURNS
+   * RE-TRACK PRESENCE
    */
   useEffect(() => {
     const subscription = AppState.addEventListener(
@@ -244,7 +245,7 @@ export default function AdminChatScreen() {
   }, [user?.uid, user?.displayName]);
 
   /*
-   * MARK CHAT AS READ WHEN SCREEN IS FOCUSED
+   * MARK READ
    */
   useFocusEffect(
     useCallback(() => {
@@ -255,10 +256,7 @@ export default function AdminChatScreen() {
   );
 
   /*
-   * CHAT DATA
-   *
-   * The hook keeps messages oldest -> newest.
-   * FlatList inverted therefore displays newest at the bottom.
+   * DISPLAY ORDER
    */
   const displayMessages = useMemo(() => [...messages].reverse(), [messages]);
 
@@ -299,7 +297,7 @@ export default function AdminChatScreen() {
   }, [loading, displayMessages.length, scrollToLatest]);
 
   /*
-   * TRACK WHETHER USER IS NEAR THE LATEST MESSAGE
+   * TRACK LATEST POSITION
    */
   const handleScroll = useCallback(({ nativeEvent }: any) => {
     isNearLatestRef.current = nativeEvent.contentOffset.y < 80;
@@ -329,6 +327,7 @@ export default function AdminChatScreen() {
    */
   const handleEditMessage = useCallback(
     (messageId: string, currentText: string) => {
+      setAttachment(null);
       setEditingMessageId(messageId);
       setInputText(currentText);
 
@@ -349,7 +348,7 @@ export default function AdminChatScreen() {
   }, []);
 
   /*
-   * UPDATE MESSAGE
+   * UPDATE
    */
   const handleUpdateMessage = useCallback(async () => {
     if (!editingMessageId) {
@@ -368,7 +367,54 @@ export default function AdminChatScreen() {
   }, [editingMessageId, inputText, editMessage, cancelEditing]);
 
   /*
-   * SEND MESSAGE
+   * PICK IMAGE
+   */
+  const handlePickImage = useCallback(async () => {
+    if (editingMessageId || attaching || sending) {
+      return;
+    }
+
+    try {
+      const permission =
+        await ImagePicker.requestMediaLibraryPermissionsAsync();
+
+      if (!permission.granted) {
+        console.warn("⚠️ Media library permission was not granted.");
+        return;
+      }
+
+      setAttaching(true);
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        quality: 0.7,
+        allowsEditing: false,
+      });
+
+      if (result.canceled || !result.assets?.length) {
+        return;
+      }
+
+      const asset = result.assets[0];
+
+      setAttachment({
+        uri: asset.uri,
+        mimeType: asset.mimeType ?? "image/jpeg",
+        fileName: asset.fileName ?? undefined,
+      });
+    } catch (error) {
+      console.error("Image pick error:", error);
+    } finally {
+      setAttaching(false);
+    }
+  }, [editingMessageId, attaching, sending]);
+
+  const clearAttachment = useCallback(() => {
+    setAttachment(null);
+  }, []);
+
+  /*
+   * SEND
    */
   const handleSend = useCallback(async () => {
     if (editingMessageId) {
@@ -378,22 +424,28 @@ export default function AdminChatScreen() {
 
     const text = inputText.trim();
 
-    if (!text || sending) {
+    if ((!text && !attachment) || sending) {
       return;
     }
 
-    await sendMessage(text);
+    try {
+      await sendMessage(text, attachment ?? undefined);
 
-    setInputText("");
+      setInputText("");
+      setAttachment(null);
 
-    if (isNearLatestRef.current) {
-      setTimeout(() => {
-        scrollToLatest(true);
-      }, 100);
+      if (isNearLatestRef.current) {
+        setTimeout(() => {
+          scrollToLatest(true);
+        }, 100);
+      }
+    } catch (error) {
+      console.error("Send message error:", error);
     }
   }, [
     editingMessageId,
     inputText,
+    attachment,
     sending,
     sendMessage,
     handleUpdateMessage,
@@ -401,50 +453,46 @@ export default function AdminChatScreen() {
   ]);
 
   /*
-   * DELETE / ADMIN DELETE
+   * DELETE
+   *
+   * Uses the same clay confirmation modal style as the admin
+   * screen. Drivers can only delete their own messages, so this
+   * always calls deleteMessage (never adminDeleteMessage).
    */
-  const handleDelete = useCallback(
-    (messageId: string) => {
-      Alert.alert(
-        "Delete message",
-        isAdmin ? "Delete this message for everyone?" : "Delete your message?",
-        [
-          {
-            text: "Cancel",
-            style: "cancel",
-          },
-          {
-            text: "Delete",
-            style: "destructive",
-            onPress: async () => {
-              try {
-                if (isAdmin && typeof adminDeleteMessage === "function") {
-                  await adminDeleteMessage(messageId);
-                } else {
-                  await deleteMessage(messageId);
-                }
-              } catch (error) {
-                console.error("Delete message error:", error);
+  const handleDelete = useCallback((messageId: string) => {
+    setDeleteMessageId(messageId);
+    setDeleteError(null);
+    setDeleteModalVisible(true);
+  }, []);
 
-                Alert.alert(
-                  "Unable to delete",
-                  "You do not have permission to delete this message.",
-                );
-              }
-            },
-          },
-        ],
-      );
-    },
-    [isAdmin, adminDeleteMessage, deleteMessage],
-  );
+  const closeDeleteModal = useCallback(() => {
+    if (deleteBusy) return;
+    setDeleteModalVisible(false);
+    setDeleteMessageId(null);
+    setDeleteError(null);
+  }, [deleteBusy]);
+
+  const confirmDeleteMessage = useCallback(async () => {
+    if (!deleteMessageId || deleteBusy) return;
+
+    setDeleteBusy(true);
+    setDeleteError(null);
+
+    try {
+      await deleteMessage(deleteMessageId);
+
+      setDeleteModalVisible(false);
+      setDeleteMessageId(null);
+    } catch (error) {
+      console.error("Delete message error:", error);
+      setDeleteError("You can only delete your own messages.");
+    } finally {
+      setDeleteBusy(false);
+    }
+  }, [deleteMessageId, deleteBusy, deleteMessage]);
 
   /*
-   * RENDER MESSAGE
-   *
-   * No formattedTime prop is passed here.
-   * OptimizedMessage calculates the Philippine 12-hour
-   * timestamp itself.
+   * MESSAGE
    */
   const renderMessage = useCallback(
     ({ item }: { item: (typeof messages)[number] }) => {
@@ -467,6 +515,8 @@ export default function AdminChatScreen() {
           edited={!!item.edited_at}
           deleted={!!item.deleted_at}
           reactions={item.reactions || {}}
+          attachment_url={item.attachment_url ?? undefined}
+          attachment_type={item.attachment_type ?? undefined}
           onEdit={handleEditMessage}
           onDelete={handleDelete}
           onAddReaction={addReaction}
@@ -487,13 +537,15 @@ export default function AdminChatScreen() {
   );
 
   /*
-   * LOADING SCREEN
+   * LOADING
    */
   if (loading && !messages.length) {
     return (
       <View
-        className="flex-1 items-center justify-center"
         style={{
+          flex: 1,
+          alignItems: "center",
+          justifyContent: "center",
           backgroundColor: colors.background,
         }}
       >
@@ -539,6 +591,8 @@ export default function AdminChatScreen() {
     );
   }
 
+  const sendDisabled = (!inputText.trim() && !attachment) || sending;
+
   return (
     <KeyboardAvoidingView
       style={{
@@ -553,9 +607,7 @@ export default function AdminChatScreen() {
           backgroundColor: colors.background,
         }}
       >
-        {/* ====================================================== */}
-        {/* CLAY HEADER */}
-        {/* ====================================================== */}
+        {/* HEADER */}
 
         <View
           style={{
@@ -563,11 +615,6 @@ export default function AdminChatScreen() {
             paddingBottom: 11,
             paddingHorizontal: 14,
 
-            /*
-             * IMPORTANT:
-             * Header is now clay white/gray instead
-             * of blue.
-             */
             backgroundColor: isDark ? "#172033" : "#DFF3FC",
 
             borderBottomWidth: 1,
@@ -586,9 +633,12 @@ export default function AdminChatScreen() {
             zIndex: 30,
           }}
         >
-          <View className="flex-row items-center">
-            {/* CHAT ICON */}
-
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+            }}
+          >
             <View
               style={{
                 width: 49,
@@ -627,11 +677,9 @@ export default function AdminChatScreen() {
               </Pressable>
             </View>
 
-            {/* CHAT TITLE */}
-
             <View
-              className="flex-1"
               style={{
+                flex: 1,
                 marginLeft: 11,
               }}
             >
@@ -648,13 +696,12 @@ export default function AdminChatScreen() {
               </Text>
 
               <View
-                className="flex-row items-center"
                 style={{
+                  flexDirection: "row",
+                  alignItems: "center",
                   marginTop: 2,
                 }}
               >
-                {/* ONLINE DOT */}
-
                 <View
                   style={{
                     width: 7,
@@ -679,8 +726,6 @@ export default function AdminChatScreen() {
                 </Text>
               </View>
             </View>
-
-            {/* UNREAD */}
 
             {unreadCount > 0 && (
               <View
@@ -717,44 +762,10 @@ export default function AdminChatScreen() {
                 </Text>
               </View>
             )}
-
-            {/* ADMIN BUTTON */}
-
-            {isAdmin && (
-              <Pressable
-                onPress={() => setAdminMenuVisible(true)}
-                style={{
-                  width: 42,
-                  height: 42,
-                  borderRadius: 14,
-
-                  alignItems: "center",
-                  justifyContent: "center",
-
-                  backgroundColor: colors.surface,
-
-                  borderWidth: 1,
-                  borderColor: colors.border,
-
-                  shadowColor: "#64748B",
-                  shadowOffset: {
-                    width: 0,
-                    height: 3,
-                  },
-                  shadowOpacity: 0.12,
-                  shadowRadius: 6,
-                  elevation: 3,
-                }}
-              >
-                <MoreVertical size={21} color={colors.secondary} />
-              </Pressable>
-            )}
           </View>
         </View>
 
-        {/* ====================================================== */}
         {/* MESSAGES */}
-        {/* ====================================================== */}
 
         <FlatList
           ref={flatListRef}
@@ -784,8 +795,8 @@ export default function AdminChatScreen() {
           ListFooterComponent={
             isLoadingMore ? (
               <View
-                className="items-center"
                 style={{
+                  alignItems: "center",
                   paddingVertical: 12,
                 }}
               >
@@ -805,17 +816,19 @@ export default function AdminChatScreen() {
           }
           ListEmptyComponent={
             <View
-              className="items-center justify-center"
               style={{
+                alignItems: "center",
+                justifyContent: "center",
                 minHeight: 280,
               }}
             >
               <View
-                className="items-center justify-center"
                 style={{
                   width: 85,
                   height: 85,
                   borderRadius: 28,
+                  alignItems: "center",
+                  justifyContent: "center",
                   backgroundColor: colors.surface,
 
                   shadowColor: "#38BDF8",
@@ -855,9 +868,7 @@ export default function AdminChatScreen() {
           }
         />
 
-        {/* ====================================================== */}
         {/* EDIT BAR */}
-        {/* ====================================================== */}
 
         {editingMessageId && (
           <View
@@ -896,7 +907,11 @@ export default function AdminChatScreen() {
               }}
             />
 
-            <View className="flex-1">
+            <View
+              style={{
+                flex: 1,
+              }}
+            >
               <Text
                 style={{
                   color: colors.primaryDark,
@@ -935,9 +950,84 @@ export default function AdminChatScreen() {
           </View>
         )}
 
-        {/* ====================================================== */}
+        {/* ATTACHMENT PREVIEW */}
+
+        {attachment && !editingMessageId && (
+          <View
+            style={{
+              marginHorizontal: 12,
+              marginBottom: 6,
+              paddingHorizontal: 10,
+              paddingVertical: 8,
+              borderRadius: 16,
+
+              flexDirection: "row",
+              alignItems: "center",
+
+              backgroundColor: colors.surface,
+
+              borderWidth: 1,
+              borderColor: colors.border,
+
+              shadowColor: "#38BDF8",
+              shadowOffset: { width: 0, height: 3 },
+              shadowOpacity: 0.08,
+              shadowRadius: 7,
+              elevation: 3,
+            }}
+          >
+            <Image
+              source={{ uri: attachment.uri }}
+              style={{
+                width: 46,
+                height: 46,
+                borderRadius: 12,
+              }}
+              resizeMode="cover"
+            />
+
+            <View style={{ flex: 1, marginLeft: 10 }}>
+              <Text
+                style={{
+                  color: colors.primaryDark,
+                  fontSize: 9,
+                  fontWeight: "900",
+                }}
+              >
+                IMAGE ATTACHED
+              </Text>
+
+              <Text
+                numberOfLines={1}
+                style={{
+                  color: colors.secondary,
+                  fontSize: 10,
+                  marginTop: 2,
+                }}
+              >
+                {attachment.fileName || "photo.jpg"}
+              </Text>
+            </View>
+
+            <Pressable
+              onPress={clearAttachment}
+              style={{
+                width: 30,
+                height: 30,
+                borderRadius: 10,
+
+                alignItems: "center",
+                justifyContent: "center",
+
+                backgroundColor: colors.surfaceSoft,
+              }}
+            >
+              <X size={16} color={colors.secondary} />
+            </Pressable>
+          </View>
+        )}
+
         {/* INPUT */}
-        {/* ====================================================== */}
 
         <View
           style={{
@@ -950,15 +1040,17 @@ export default function AdminChatScreen() {
           }}
         >
           <View
-            className="flex-row items-end"
             style={{
               minHeight: 58,
               maxHeight: 130,
               borderRadius: 22,
 
-              paddingLeft: 15,
+              paddingLeft: 7,
               paddingRight: 7,
               paddingVertical: 7,
+
+              flexDirection: "row",
+              alignItems: "flex-end",
 
               backgroundColor: colors.surface,
 
@@ -975,12 +1067,40 @@ export default function AdminChatScreen() {
               elevation: 5,
             }}
           >
+            <Pressable
+              onPress={handlePickImage}
+              disabled={!!editingMessageId || attaching || sending}
+              style={{
+                width: 40,
+                height: 40,
+                borderRadius: 13,
+                alignSelf: "flex-end",
+                marginBottom: 1,
+
+                alignItems: "center",
+                justifyContent: "center",
+
+                backgroundColor: colors.surfaceSoft,
+                opacity: editingMessageId ? 0.4 : 1,
+              }}
+            >
+              {attaching ? (
+                <ActivityIndicator size="small" color={colors.primaryDark} />
+              ) : (
+                <ImagePlus size={19} color={colors.primaryDark} />
+              )}
+            </Pressable>
+
             <TextInput
               ref={inputRef}
               value={inputText}
               onChangeText={setInputText}
               placeholder={
-                editingMessageId ? "Edit message..." : "Message staff..."
+                editingMessageId
+                  ? "Edit message..."
+                  : attachment
+                    ? "Add a caption..."
+                    : "Message staff..."
               }
               placeholderTextColor={colors.muted}
               multiline
@@ -989,6 +1109,7 @@ export default function AdminChatScreen() {
               editable={!sending}
               style={{
                 flex: 1,
+                marginLeft: 8,
                 maxHeight: 105,
                 minHeight: 42,
 
@@ -1004,7 +1125,7 @@ export default function AdminChatScreen() {
 
             <Pressable
               onPress={handleSend}
-              disabled={!inputText.trim() || sending}
+              disabled={sendDisabled}
               style={{
                 width: 43,
                 height: 43,
@@ -1013,15 +1134,13 @@ export default function AdminChatScreen() {
                 alignItems: "center",
                 justifyContent: "center",
 
-                backgroundColor:
-                  !inputText.trim() || sending
-                    ? "#CBD5E1"
-                    : editingMessageId
-                      ? "#16A34A"
-                      : colors.primaryDark,
+                backgroundColor: sendDisabled
+                  ? "#CBD5E1"
+                  : editingMessageId
+                    ? "#16A34A"
+                    : colors.primaryDark,
 
-                shadowColor:
-                  !inputText.trim() || sending ? "#64748B" : colors.primaryDark,
+                shadowColor: sendDisabled ? "#64748B" : colors.primaryDark,
 
                 shadowOffset: {
                   width: 0,
@@ -1043,348 +1162,165 @@ export default function AdminChatScreen() {
           </View>
         </View>
 
-        {/* ====================================================== */}
-        {/* ADMIN MENU */}
-        {/* ====================================================== */}
+        {/* CLAY UNSEND CONFIRMATION */}
 
         <Modal
-          visible={adminMenuVisible}
+          visible={deleteModalVisible}
           transparent
           animationType="fade"
-          onRequestClose={() => setAdminMenuVisible(false)}
+          onRequestClose={closeDeleteModal}
         >
           <Pressable
+            onPress={closeDeleteModal}
             style={{
               flex: 1,
-              backgroundColor: "rgba(15,23,42,0.45)",
-
-              justifyContent: "flex-start",
-              alignItems: "flex-end",
-
-              paddingTop: insets.top + 58,
-              paddingRight: 14,
+              backgroundColor: "rgba(15,23,42,0.48)",
+              alignItems: "center",
+              justifyContent: "center",
+              paddingHorizontal: 24,
             }}
-            onPress={() => setAdminMenuVisible(false)}
           >
             <Pressable
-              onPress={() => {}}
+              onPress={(event) => event.stopPropagation()}
               style={{
-                width: 235,
-                borderRadius: 24,
-                padding: 10,
-
-                backgroundColor: colors.surface,
-
+                width: "100%",
+                maxWidth: 360,
+                borderRadius: 30,
+                padding: 7,
+                backgroundColor: isDark ? "#164E63" : "#EAF9FE",
                 borderWidth: 1,
-                borderColor: colors.border,
-
-                shadowColor: "#000",
-                shadowOffset: {
-                  width: 0,
-                  height: 10,
-                },
-                shadowOpacity: 0.18,
+                borderColor: isDark ? "#286B82" : "#C4E4EF",
+                shadowColor: isDark ? "#000000" : "#43B9E8",
+                shadowOffset: { width: 0, height: 12 },
+                shadowOpacity: isDark ? 0.35 : 0.22,
                 shadowRadius: 20,
-                elevation: 12,
+                elevation: 14,
               }}
             >
-              {/* MENU HEADER */}
-
               <View
                 style={{
-                  paddingHorizontal: 9,
-                  paddingVertical: 8,
+                  borderRadius: 24,
+                  padding: 20,
+                  backgroundColor: isDark ? "#12536A" : "#F4FCFF",
+                  borderWidth: 1,
+                  borderColor: isDark ? "#1C6078" : "#D5EEF7",
                 }}
               >
-                <View className="flex-row items-center">
+                <View style={{ alignItems: "center" }}>
                   <View
                     style={{
-                      width: 34,
-                      height: 34,
-                      borderRadius: 11,
-
+                      width: 64,
+                      height: 64,
+                      borderRadius: 21,
                       alignItems: "center",
                       justifyContent: "center",
-
-                      backgroundColor: colors.primarySoft,
+                      backgroundColor: isDark ? "#713B3B" : "#FDECEC",
+                      shadowColor: "#EF4444",
+                      shadowOffset: { width: 0, height: 4 },
+                      shadowOpacity: 0.15,
+                      shadowRadius: 7,
+                      elevation: 4,
                     }}
                   >
-                    <Shield size={17} color={colors.primaryDark} />
+                    <Trash2 size={28} color="#EF4444" strokeWidth={2.4} />
                   </View>
+
+                  <Text
+                    style={{
+                      marginTop: 15,
+                      color: isDark ? "#FFFFFF" : "#17445A",
+                      fontSize: 19,
+                      fontWeight: "900",
+                      textAlign: "center",
+                    }}
+                  >
+                    Delete message?
+                  </Text>
+
+                  <Text
+                    style={{
+                      marginTop: 7,
+                      color: isDark ? "#B9D9E5" : "#477386",
+                      fontSize: 13,
+                      lineHeight: 20,
+                      fontWeight: "500",
+                      textAlign: "center",
+                    }}
+                  >
+                    {deleteError ||
+                      "This message will be removed from your chat."}
+                  </Text>
 
                   <View
                     style={{
-                      marginLeft: 9,
+                      width: "100%",
+                      flexDirection: "row",
+                      gap: 10,
+                      marginTop: 20,
                     }}
                   >
-                    <Text
+                    <Pressable
+                      onPress={closeDeleteModal}
+                      disabled={deleteBusy}
                       style={{
-                        color: colors.text,
-                        fontSize: 13,
-                        fontWeight: "900",
+                        flex: 1,
+                        minHeight: 48,
+                        borderRadius: 17,
+                        alignItems: "center",
+                        justifyContent: "center",
+                        backgroundColor: isDark ? "#1D6078" : "#DDF4FC",
+                        borderWidth: 1,
+                        borderColor: isDark ? "#2A7891" : "#C4E4EF",
+                        opacity: deleteBusy ? 0.55 : 1,
                       }}
                     >
-                      Admin Controls
-                    </Text>
+                      <Text
+                        style={{
+                          color: isDark ? "#D8F3FC" : "#167BAA",
+                          fontSize: 13,
+                          fontWeight: "800",
+                        }}
+                      >
+                        Cancel
+                      </Text>
+                    </Pressable>
 
-                    <Text
+                    <Pressable
+                      onPress={confirmDeleteMessage}
+                      disabled={deleteBusy}
                       style={{
-                        color: colors.muted,
-                        fontSize: 9,
+                        flex: 1,
+                        minHeight: 48,
+                        borderRadius: 17,
+                        alignItems: "center",
+                        justifyContent: "center",
+                        backgroundColor: deleteBusy ? "#8ADBF4" : "#43B9E8",
+                        shadowColor: "#167BAA",
+                        shadowOffset: { width: 0, height: 5 },
+                        shadowOpacity: 0.22,
+                        shadowRadius: 8,
+                        elevation: 5,
                       }}
                     >
-                      Staff chat management
-                    </Text>
+                      {deleteBusy ? (
+                        <ActivityIndicator size="small" color="#FFFFFF" />
+                      ) : (
+                        <Text
+                          style={{
+                            color: "#FFFFFF",
+                            fontSize: 13,
+                            fontWeight: "900",
+                          }}
+                        >
+                          Delete
+                        </Text>
+                      )}
+                    </Pressable>
                   </View>
                 </View>
               </View>
-
-              {/* MEMBERS */}
-
-              <Pressable
-                onPress={() => {
-                  setAdminMenuVisible(false);
-
-                  setMemberModalVisible(true);
-                }}
-                style={{
-                  flexDirection: "row",
-                  alignItems: "center",
-
-                  padding: 12,
-                  borderRadius: 15,
-
-                  backgroundColor: colors.surfaceSoft,
-
-                  marginTop: 3,
-                }}
-              >
-                <Users size={18} color={colors.primaryDark} />
-
-                <View
-                  style={{
-                    marginLeft: 11,
-                  }}
-                >
-                  <Text
-                    style={{
-                      color: colors.text,
-                      fontSize: 12,
-                      fontWeight: "800",
-                    }}
-                  >
-                    Manage Members
-                  </Text>
-
-                  <Text
-                    style={{
-                      color: colors.muted,
-                      fontSize: 9,
-                    }}
-                  >
-                    {totalMembers} staff members
-                  </Text>
-                </View>
-              </Pressable>
-
-              {/* OVERVIEW */}
-
-              <Pressable
-                onPress={() => setAdminMenuVisible(false)}
-                style={{
-                  flexDirection: "row",
-                  alignItems: "center",
-
-                  padding: 12,
-                  borderRadius: 15,
-
-                  marginTop: 5,
-                }}
-              >
-                <MessageCircle size={18} color={colors.secondary} />
-
-                <View
-                  style={{
-                    marginLeft: 11,
-                  }}
-                >
-                  <Text
-                    style={{
-                      color: colors.text,
-                      fontSize: 12,
-                      fontWeight: "700",
-                    }}
-                  >
-                    Chat Overview
-                  </Text>
-
-                  <Text
-                    style={{
-                      color: colors.muted,
-                      fontSize: 9,
-                    }}
-                  >
-                    {onlineCount} staff currently online
-                  </Text>
-                </View>
-              </Pressable>
             </Pressable>
           </Pressable>
-        </Modal>
-
-        {/* ====================================================== */}
-        {/* MEMBERS MODAL */}
-        {/* ====================================================== */}
-
-        <Modal
-          visible={memberModalVisible}
-          transparent
-          animationType="slide"
-          onRequestClose={() => setMemberModalVisible(false)}
-        >
-          <View
-            style={{
-              flex: 1,
-              justifyContent: "flex-end",
-
-              backgroundColor: "rgba(15,23,42,0.45)",
-            }}
-          >
-            <View
-              style={{
-                backgroundColor: colors.surface,
-
-                borderTopLeftRadius: 30,
-                borderTopRightRadius: 30,
-
-                paddingTop: 8,
-                paddingHorizontal: 18,
-
-                paddingBottom: Math.max(insets.bottom, 18),
-
-                shadowColor: "#000",
-                shadowOffset: {
-                  width: 0,
-                  height: -8,
-                },
-                shadowOpacity: 0.15,
-                shadowRadius: 20,
-                elevation: 15,
-              }}
-            >
-              {/* HANDLE */}
-
-              <View
-                style={{
-                  alignSelf: "center",
-                  width: 40,
-                  height: 4,
-                  borderRadius: 4,
-
-                  backgroundColor: colors.border,
-
-                  marginBottom: 18,
-                }}
-              />
-
-              {/* TITLE */}
-
-              <View className="flex-row items-center">
-                <View
-                  style={{
-                    width: 45,
-                    height: 45,
-                    borderRadius: 15,
-
-                    alignItems: "center",
-                    justifyContent: "center",
-
-                    backgroundColor: colors.primarySoft,
-                  }}
-                >
-                  <Users size={22} color={colors.primaryDark} />
-                </View>
-
-                <View
-                  className="flex-1"
-                  style={{
-                    marginLeft: 11,
-                  }}
-                >
-                  <Text
-                    style={{
-                      color: colors.text,
-                      fontSize: 18,
-                      fontWeight: "900",
-                    }}
-                  >
-                    Staff Members
-                  </Text>
-
-                  <Text
-                    style={{
-                      color: colors.secondary,
-                      fontSize: 11,
-                    }}
-                  >
-                    {onlineCount} online
-                    {" · "}
-                    {totalMembers} total
-                  </Text>
-                </View>
-
-                <Pressable
-                  onPress={() => setMemberModalVisible(false)}
-                  style={{
-                    width: 36,
-                    height: 36,
-                    borderRadius: 12,
-
-                    alignItems: "center",
-                    justifyContent: "center",
-
-                    backgroundColor: colors.surfaceSoft,
-                  }}
-                >
-                  <X size={18} color={colors.secondary} />
-                </Pressable>
-              </View>
-
-              {/* ADMIN INFO */}
-
-              <View
-                style={{
-                  marginTop: 18,
-                  padding: 15,
-                  borderRadius: 18,
-
-                  backgroundColor: colors.primarySoft,
-                }}
-              >
-                <Text
-                  style={{
-                    color: colors.primaryDark,
-                    fontSize: 11,
-                    fontWeight: "800",
-                  }}
-                >
-                  ADMIN ACCESS
-                </Text>
-
-                <Text
-                  style={{
-                    marginTop: 4,
-                    color: colors.secondary,
-                    fontSize: 11,
-                    lineHeight: 17,
-                  }}
-                >
-                  As an administrator, you can manage chat messages and staff
-                  participation.
-                </Text>
-              </View>
-            </View>
-          </View>
         </Modal>
       </View>
     </KeyboardAvoidingView>

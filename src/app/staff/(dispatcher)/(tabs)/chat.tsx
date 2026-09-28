@@ -1,9 +1,12 @@
+import * as ImagePicker from "expo-image-picker";
 import { useFocusEffect } from "expo-router";
 import {
   ArrowLeft,
   Check,
+  ImagePlus,
   MessageCircle,
   SendHorizontal,
+  Trash2,
   X,
 } from "lucide-react-native";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -11,7 +14,9 @@ import {
   ActivityIndicator,
   AppState,
   FlatList,
+  Image,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   Pressable,
   Text,
@@ -29,6 +34,12 @@ import { router } from "expo-router";
 
 const PRESENCE_CHANNEL = "staff-presence";
 const BATCH_SIZE = 10;
+
+interface PendingAttachment {
+  uri: string;
+  mimeType?: string | null;
+  fileName?: string | null;
+}
 
 export default function DispatcherChatScreen() {
   const { user } = useAuthStore();
@@ -56,9 +67,17 @@ export default function DispatcherChatScreen() {
   const [inputText, setInputText] = useState("");
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
 
+  const [attachment, setAttachment] = useState<PendingAttachment | null>(null);
+  const [attaching, setAttaching] = useState(false);
+
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [onlineCount, setOnlineCount] = useState(0);
   const [totalMembers, setTotalMembers] = useState(0);
+
+  const [deleteModalVisible, setDeleteModalVisible] = useState(false);
+  const [deleteMessageId, setDeleteMessageId] = useState<string | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const flatListRef = useRef<FlatList>(null);
   const inputRef = useRef<TextInput>(null);
@@ -309,6 +328,7 @@ export default function DispatcherChatScreen() {
    */
   const handleEditMessage = useCallback(
     (messageId: string, currentText: string) => {
+      setAttachment(null);
       setEditingMessageId(messageId);
       setInputText(currentText);
 
@@ -348,6 +368,53 @@ export default function DispatcherChatScreen() {
   }, [editingMessageId, inputText, editMessage, cancelEditing]);
 
   /*
+   * PICK IMAGE
+   */
+  const handlePickImage = useCallback(async () => {
+    if (editingMessageId || attaching || sending) {
+      return;
+    }
+
+    try {
+      const permission =
+        await ImagePicker.requestMediaLibraryPermissionsAsync();
+
+      if (!permission.granted) {
+        console.warn("⚠️ Media library permission was not granted.");
+        return;
+      }
+
+      setAttaching(true);
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        quality: 0.7,
+        allowsEditing: false,
+      });
+
+      if (result.canceled || !result.assets?.length) {
+        return;
+      }
+
+      const asset = result.assets[0];
+
+      setAttachment({
+        uri: asset.uri,
+        mimeType: asset.mimeType ?? "image/jpeg",
+        fileName: asset.fileName ?? undefined,
+      });
+    } catch (error) {
+      console.error("Image pick error:", error);
+    } finally {
+      setAttaching(false);
+    }
+  }, [editingMessageId, attaching, sending]);
+
+  const clearAttachment = useCallback(() => {
+    setAttachment(null);
+  }, []);
+
+  /*
    * SEND
    */
   const handleSend = useCallback(async () => {
@@ -358,22 +425,28 @@ export default function DispatcherChatScreen() {
 
     const text = inputText.trim();
 
-    if (!text || sending) {
+    if ((!text && !attachment) || sending) {
       return;
     }
 
-    await sendMessage(text);
+    try {
+      await sendMessage(text, attachment ?? undefined);
 
-    setInputText("");
+      setInputText("");
+      setAttachment(null);
 
-    if (isNearLatestRef.current) {
-      setTimeout(() => {
-        scrollToLatest(true);
-      }, 100);
+      if (isNearLatestRef.current) {
+        setTimeout(() => {
+          scrollToLatest(true);
+        }, 100);
+      }
+    } catch (error) {
+      console.error("Send message error:", error);
     }
   }, [
     editingMessageId,
     inputText,
+    attachment,
     sending,
     sendMessage,
     handleUpdateMessage,
@@ -382,17 +455,42 @@ export default function DispatcherChatScreen() {
 
   /*
    * DELETE
+   *
+   * Uses the same clay confirmation modal style as the
+   * admin/driver screens. Dispatchers can only delete their
+   * own messages, so this always calls deleteMessage.
    */
-  const handleDelete = useCallback(
-    async (messageId: string) => {
-      try {
-        await deleteMessage(messageId);
-      } catch (error) {
-        console.error("Delete message error:", error);
-      }
-    },
-    [deleteMessage],
-  );
+  const handleDelete = useCallback((messageId: string) => {
+    setDeleteMessageId(messageId);
+    setDeleteError(null);
+    setDeleteModalVisible(true);
+  }, []);
+
+  const closeDeleteModal = useCallback(() => {
+    if (deleteBusy) return;
+    setDeleteModalVisible(false);
+    setDeleteMessageId(null);
+    setDeleteError(null);
+  }, [deleteBusy]);
+
+  const confirmDeleteMessage = useCallback(async () => {
+    if (!deleteMessageId || deleteBusy) return;
+
+    setDeleteBusy(true);
+    setDeleteError(null);
+
+    try {
+      await deleteMessage(deleteMessageId);
+
+      setDeleteModalVisible(false);
+      setDeleteMessageId(null);
+    } catch (error) {
+      console.error("Delete message error:", error);
+      setDeleteError("You can only delete your own messages.");
+    } finally {
+      setDeleteBusy(false);
+    }
+  }, [deleteMessageId, deleteBusy, deleteMessage]);
 
   /*
    * MESSAGE
@@ -418,6 +516,8 @@ export default function DispatcherChatScreen() {
           edited={!!item.edited_at}
           deleted={!!item.deleted_at}
           reactions={item.reactions || {}}
+          attachment_url={item.attachment_url ?? undefined}
+          attachment_type={item.attachment_type ?? undefined}
           onEdit={handleEditMessage}
           onDelete={handleDelete}
           onAddReaction={addReaction}
@@ -491,6 +591,8 @@ export default function DispatcherChatScreen() {
       </View>
     );
   }
+
+  const sendDisabled = (!inputText.trim() && !attachment) || sending;
 
   return (
     <KeyboardAvoidingView
@@ -849,6 +951,83 @@ export default function DispatcherChatScreen() {
           </View>
         )}
 
+        {/* ATTACHMENT PREVIEW */}
+
+        {attachment && !editingMessageId && (
+          <View
+            style={{
+              marginHorizontal: 12,
+              marginBottom: 6,
+              paddingHorizontal: 10,
+              paddingVertical: 8,
+              borderRadius: 16,
+
+              flexDirection: "row",
+              alignItems: "center",
+
+              backgroundColor: colors.surface,
+
+              borderWidth: 1,
+              borderColor: colors.border,
+
+              shadowColor: "#38BDF8",
+              shadowOffset: { width: 0, height: 3 },
+              shadowOpacity: 0.08,
+              shadowRadius: 7,
+              elevation: 3,
+            }}
+          >
+            <Image
+              source={{ uri: attachment.uri }}
+              style={{
+                width: 46,
+                height: 46,
+                borderRadius: 12,
+              }}
+              resizeMode="cover"
+            />
+
+            <View style={{ flex: 1, marginLeft: 10 }}>
+              <Text
+                style={{
+                  color: colors.primaryDark,
+                  fontSize: 9,
+                  fontWeight: "900",
+                }}
+              >
+                IMAGE ATTACHED
+              </Text>
+
+              <Text
+                numberOfLines={1}
+                style={{
+                  color: colors.secondary,
+                  fontSize: 10,
+                  marginTop: 2,
+                }}
+              >
+                {attachment.fileName || "photo.jpg"}
+              </Text>
+            </View>
+
+            <Pressable
+              onPress={clearAttachment}
+              style={{
+                width: 30,
+                height: 30,
+                borderRadius: 10,
+
+                alignItems: "center",
+                justifyContent: "center",
+
+                backgroundColor: colors.surfaceSoft,
+              }}
+            >
+              <X size={16} color={colors.secondary} />
+            </Pressable>
+          </View>
+        )}
+
         {/* INPUT */}
 
         <View
@@ -867,7 +1046,7 @@ export default function DispatcherChatScreen() {
               maxHeight: 130,
               borderRadius: 22,
 
-              paddingLeft: 15,
+              paddingLeft: 7,
               paddingRight: 7,
               paddingVertical: 7,
 
@@ -889,12 +1068,40 @@ export default function DispatcherChatScreen() {
               elevation: 5,
             }}
           >
+            <Pressable
+              onPress={handlePickImage}
+              disabled={!!editingMessageId || attaching || sending}
+              style={{
+                width: 40,
+                height: 40,
+                borderRadius: 13,
+                alignSelf: "flex-end",
+                marginBottom: 1,
+
+                alignItems: "center",
+                justifyContent: "center",
+
+                backgroundColor: colors.surfaceSoft,
+                opacity: editingMessageId ? 0.4 : 1,
+              }}
+            >
+              {attaching ? (
+                <ActivityIndicator size="small" color={colors.primaryDark} />
+              ) : (
+                <ImagePlus size={19} color={colors.primaryDark} />
+              )}
+            </Pressable>
+
             <TextInput
               ref={inputRef}
               value={inputText}
               onChangeText={setInputText}
               placeholder={
-                editingMessageId ? "Edit message..." : "Message staff..."
+                editingMessageId
+                  ? "Edit message..."
+                  : attachment
+                    ? "Add a caption..."
+                    : "Message staff..."
               }
               placeholderTextColor={colors.muted}
               multiline
@@ -903,6 +1110,7 @@ export default function DispatcherChatScreen() {
               editable={!sending}
               style={{
                 flex: 1,
+                marginLeft: 8,
                 maxHeight: 105,
                 minHeight: 42,
 
@@ -918,7 +1126,7 @@ export default function DispatcherChatScreen() {
 
             <Pressable
               onPress={handleSend}
-              disabled={!inputText.trim() || sending}
+              disabled={sendDisabled}
               style={{
                 width: 43,
                 height: 43,
@@ -927,15 +1135,13 @@ export default function DispatcherChatScreen() {
                 alignItems: "center",
                 justifyContent: "center",
 
-                backgroundColor:
-                  !inputText.trim() || sending
-                    ? "#CBD5E1"
-                    : editingMessageId
-                      ? "#16A34A"
-                      : colors.primaryDark,
+                backgroundColor: sendDisabled
+                  ? "#CBD5E1"
+                  : editingMessageId
+                    ? "#16A34A"
+                    : colors.primaryDark,
 
-                shadowColor:
-                  !inputText.trim() || sending ? "#64748B" : colors.primaryDark,
+                shadowColor: sendDisabled ? "#64748B" : colors.primaryDark,
 
                 shadowOffset: {
                   width: 0,
@@ -956,6 +1162,167 @@ export default function DispatcherChatScreen() {
             </Pressable>
           </View>
         </View>
+
+        {/* CLAY UNSEND CONFIRMATION */}
+
+        <Modal
+          visible={deleteModalVisible}
+          transparent
+          animationType="fade"
+          onRequestClose={closeDeleteModal}
+        >
+          <Pressable
+            onPress={closeDeleteModal}
+            style={{
+              flex: 1,
+              backgroundColor: "rgba(15,23,42,0.48)",
+              alignItems: "center",
+              justifyContent: "center",
+              paddingHorizontal: 24,
+            }}
+          >
+            <Pressable
+              onPress={(event) => event.stopPropagation()}
+              style={{
+                width: "100%",
+                maxWidth: 360,
+                borderRadius: 30,
+                padding: 7,
+                backgroundColor: isDark ? "#164E63" : "#EAF9FE",
+                borderWidth: 1,
+                borderColor: isDark ? "#286B82" : "#C4E4EF",
+                shadowColor: isDark ? "#000000" : "#43B9E8",
+                shadowOffset: { width: 0, height: 12 },
+                shadowOpacity: isDark ? 0.35 : 0.22,
+                shadowRadius: 20,
+                elevation: 14,
+              }}
+            >
+              <View
+                style={{
+                  borderRadius: 24,
+                  padding: 20,
+                  backgroundColor: isDark ? "#12536A" : "#F4FCFF",
+                  borderWidth: 1,
+                  borderColor: isDark ? "#1C6078" : "#D5EEF7",
+                }}
+              >
+                <View style={{ alignItems: "center" }}>
+                  <View
+                    style={{
+                      width: 64,
+                      height: 64,
+                      borderRadius: 21,
+                      alignItems: "center",
+                      justifyContent: "center",
+                      backgroundColor: isDark ? "#713B3B" : "#FDECEC",
+                      shadowColor: "#EF4444",
+                      shadowOffset: { width: 0, height: 4 },
+                      shadowOpacity: 0.15,
+                      shadowRadius: 7,
+                      elevation: 4,
+                    }}
+                  >
+                    <Trash2 size={28} color="#EF4444" strokeWidth={2.4} />
+                  </View>
+
+                  <Text
+                    style={{
+                      marginTop: 15,
+                      color: isDark ? "#FFFFFF" : "#17445A",
+                      fontSize: 19,
+                      fontWeight: "900",
+                      textAlign: "center",
+                    }}
+                  >
+                    Delete message?
+                  </Text>
+
+                  <Text
+                    style={{
+                      marginTop: 7,
+                      color: isDark ? "#B9D9E5" : "#477386",
+                      fontSize: 13,
+                      lineHeight: 20,
+                      fontWeight: "500",
+                      textAlign: "center",
+                    }}
+                  >
+                    {deleteError ||
+                      "This message will be removed from your chat."}
+                  </Text>
+
+                  <View
+                    style={{
+                      width: "100%",
+                      flexDirection: "row",
+                      gap: 10,
+                      marginTop: 20,
+                    }}
+                  >
+                    <Pressable
+                      onPress={closeDeleteModal}
+                      disabled={deleteBusy}
+                      style={{
+                        flex: 1,
+                        minHeight: 48,
+                        borderRadius: 17,
+                        alignItems: "center",
+                        justifyContent: "center",
+                        backgroundColor: isDark ? "#1D6078" : "#DDF4FC",
+                        borderWidth: 1,
+                        borderColor: isDark ? "#2A7891" : "#C4E4EF",
+                        opacity: deleteBusy ? 0.55 : 1,
+                      }}
+                    >
+                      <Text
+                        style={{
+                          color: isDark ? "#D8F3FC" : "#167BAA",
+                          fontSize: 13,
+                          fontWeight: "800",
+                        }}
+                      >
+                        Cancel
+                      </Text>
+                    </Pressable>
+
+                    <Pressable
+                      onPress={confirmDeleteMessage}
+                      disabled={deleteBusy}
+                      style={{
+                        flex: 1,
+                        minHeight: 48,
+                        borderRadius: 17,
+                        alignItems: "center",
+                        justifyContent: "center",
+                        backgroundColor: deleteBusy ? "#8ADBF4" : "#43B9E8",
+                        shadowColor: "#167BAA",
+                        shadowOffset: { width: 0, height: 5 },
+                        shadowOpacity: 0.22,
+                        shadowRadius: 8,
+                        elevation: 5,
+                      }}
+                    >
+                      {deleteBusy ? (
+                        <ActivityIndicator size="small" color="#FFFFFF" />
+                      ) : (
+                        <Text
+                          style={{
+                            color: "#FFFFFF",
+                            fontSize: 13,
+                            fontWeight: "900",
+                          }}
+                        >
+                          Delete
+                        </Text>
+                      )}
+                    </Pressable>
+                  </View>
+                </View>
+              </View>
+            </Pressable>
+          </Pressable>
+        </Modal>
       </View>
     </KeyboardAvoidingView>
   );

@@ -10,7 +10,7 @@ export default {
 
     slug: "JeepQTrack",
 
-    version: "1.0.1",
+    version: "1.0.2",
 
     orientation: "portrait",
 
@@ -66,7 +66,9 @@ export default {
       [
         "expo-splash-screen",
         {
+          image: "./assets/images/logo.png",
           backgroundColor: "#171A1C",
+          imageWidth: 200,
         },
       ],
 
@@ -92,18 +94,18 @@ export default {
       appVariant: variant,
 
       eas: {
-        projectId: "59e56dea-8e12-4f2e-ba74-cb0b92e84592",
+        projectId: "ccba8ad7-76dd-4897-819a-a109dc800d7d",
       },
     },
 
-    owner: "andevs",
+    owner: "andytechhy",
 
     runtimeVersion: {
       policy: "appVersion",
     },
 
     updates: {
-      url: "https://u.expo.dev/59e56dea-8e12-4f2e-ba74-cb0b92e84592",
+      url: "https://u.expo.dev/ccba8ad7-76dd-4897-819a-a109dc800d7d",
     },
   },
 };

@@ -8,6 +8,12 @@ interface MapControlsProps {
   onRecenter: () => void;
   onShowTerminals: () => void;
   onRefreshRoute?: () => void;
+
+  /**
+   * True when at least one active jeepney is currently
+   * available on the map.
+   */
+  hasActiveJeepneys?: boolean;
 }
 
 const CLAY = {
@@ -36,6 +42,7 @@ const MapControls: React.FC<MapControlsProps> = ({
   onZoomOut,
   onRecenter,
   onShowTerminals,
+  hasActiveJeepneys = false,
 }) => {
   return (
     <View style={styles.container}>
@@ -71,12 +78,20 @@ const MapControls: React.FC<MapControlsProps> = ({
           ====================================================== */}
       <TouchableOpacity
         activeOpacity={0.75}
-        style={styles.singleBtn}
+        style={[styles.singleBtn, !hasActiveJeepneys && styles.disabledButton]}
         onPress={onRecenter}
+        disabled={!hasActiveJeepneys}
         accessibilityRole="button"
         accessibilityLabel="Recenter map"
+        accessibilityState={{
+          disabled: !hasActiveJeepneys,
+        }}
       >
-        <Crosshair size={20} color={CLAY.ocean700} strokeWidth={2.3} />
+        <Crosshair
+          size={20}
+          color={hasActiveJeepneys ? CLAY.ocean700 : "#94A3B8"}
+          strokeWidth={2.3}
+        />
       </TouchableOpacity>
 
       {/* ======================================================
@@ -114,11 +129,6 @@ const styles = StyleSheet.create({
   /*
    * ==========================================================
    * ZOOM GROUP
-   *
-   * Soft white clay surface with:
-   * - subtle blue border
-   * - soft shadow
-   * - rounded corners
    * ==========================================================
    */
   zoomGroup: {
@@ -202,6 +212,16 @@ const styles = StyleSheet.create({
     shadowRadius: 10,
 
     elevation: 5,
+  },
+
+  /*
+   * ==========================================================
+   * DISABLED RECENTER BUTTON
+   * ==========================================================
+   */
+  disabledButton: {
+    opacity: 0.65,
+    backgroundColor: CLAY.surfaceSoft,
   },
 });
 

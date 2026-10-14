@@ -32,29 +32,10 @@ import {
   useCommuterGPS,
 } from "@/src/shared/hooks/useCommuterGPS";
 
-/* ============================================================
-   TERMINALS
-============================================================ */
-
-const TERMINALS = {
-  donsOl: {
-    id: 1,
-    name: "Donsol",
-    fullName: "Donsol Terminal",
-    lat: 12.9032,
-    lng: 123.59425,
-  },
-
-  daraga: {
-    id: 2,
-    name: "Daraga",
-    fullName: "Daraga Terminal",
-    lat: 13.14769,
-    lng: 123.71216,
-  },
-};
-
-type TerminalId = 1 | 2;
+import {
+  shortTerminalName,
+  useTerminals,
+} from "@/src/shared/hooks/useTerminals";
 
 /* ============================================================
    MAP HEIGHT
@@ -140,6 +121,22 @@ function formatDuration(minutes: number) {
 export default function CommuterMapScreen() {
   const { markers, loading, refreshing, error, lastUpdate, refresh } =
     useCommuterGPS();
+
+  /**
+   * ==========================================================
+   * LIVE TERMINALS (set by the admin)
+   * ==========================================================
+   *
+   * `terminals` is null until they are read from the database
+   * (or if that fails). The map then falls back to its built-in
+   * real terminals, so the commuter map keeps working.
+   */
+  const { terminals, loading: terminalsLoading } = useTerminals();
+
+  const terminalLabel = (id?: number) =>
+    shortTerminalName(terminals, id === 2 ? 2 : 1);
+
+  const routeName = `${shortTerminalName(terminals, 1)}–${shortTerminalName(terminals, 2)}`;
 
   /**
    * ==========================================================
@@ -326,7 +323,7 @@ export default function CommuterMapScreen() {
      LOADING
   ========================================================== */
 
-  if (loading) {
+  if (loading || terminalsLoading) {
     return (
       <SafeAreaView edges={["top", "bottom"]} className="flex-1 bg-ocean-50">
         <View className="flex-1 items-center justify-center">
@@ -443,6 +440,11 @@ export default function CommuterMapScreen() {
            * Pass only ACTIVE jeepneys to MapView.
            */
           markers={activeMarkers}
+          /**
+           * Live terminals from the database. When undefined (not loaded),
+           * the map uses its built-in real terminals.
+           */
+          terminals={terminals ?? undefined}
           onMarkerPress={handleMarkerPress}
           onJeepneyETA={handleJeepneyETA}
           onRouteStatus={handleRouteStatus}
@@ -544,7 +546,10 @@ export default function CommuterMapScreen() {
 
         <View className="mt-3">
           {selected ? (
-            <SelectedJeepney jeepney={selected} />
+            <SelectedJeepney
+              jeepney={selected}
+              terminalLabel={terminalLabel(selected.terminalId)}
+            />
           ) : (
             <View className="rounded-[24px] border border-white bg-white p-5 shadow-clay-floating">
               <View className="items-center">
@@ -569,7 +574,13 @@ export default function CommuterMapScreen() {
             ETA
         ==================================================== */}
 
-        {selected && <ETASection eta={eta} approximate={routeApproximate} />}
+        {selected && (
+          <ETASection
+            eta={eta}
+            approximate={routeApproximate}
+            routeName={routeName}
+          />
+        )}
 
         {/* ====================================================
             LAST UPDATE
@@ -610,9 +621,11 @@ export default function CommuterMapScreen() {
 function ETASection({
   eta,
   approximate,
+  routeName,
 }: {
   eta: JeepneyETA | null;
   approximate?: boolean;
+  routeName: string;
 }) {
   if (!eta) {
     return (
@@ -628,7 +641,7 @@ function ETASection({
             </Text>
 
             <Text className="mt-1 text-xs text-slate-500">
-              Finding the jeepney's position on the Donsol–Daraga road.
+              Finding the jeepney's position on the {routeName} road.
             </Text>
           </View>
 
@@ -749,8 +762,9 @@ function ETASection({
         ETA uses the jeepney's live GPS speed and its remaining distance along
         {approximate
           ? " an approximate straight-line route (the live road route is currently unavailable)"
-          : " the actual Donsol–Daraga road route"}
-        . A 20-minute allowance is added for stops, loading, and normal delays.
+          : ` the actual ${routeName} road route`}
+        . An allowance for stops, loading, and normal delays is added (up to 20
+        minutes on longer routes, scaled down for shorter ones).
       </Text>
     </View>
   );
@@ -815,7 +829,13 @@ function InfoCard({
    SELECTED JEEPNEY
 ============================================================ */
 
-function SelectedJeepney({ jeepney }: { jeepney: CommuterJeepneyMarker }) {
+function SelectedJeepney({
+  jeepney,
+  terminalLabel,
+}: {
+  jeepney: CommuterJeepneyMarker;
+  terminalLabel: string;
+}) {
   const occupancy = Number(jeepney.occupancy || 0);
 
   const capacity = Number(jeepney.capacity || 24);
@@ -824,10 +844,6 @@ function SelectedJeepney({ jeepney }: { jeepney: CommuterJeepneyMarker }) {
     capacity > 0 ? Math.min(100, Math.round((occupancy / capacity) * 100)) : 0;
 
   const speed = Math.round(Number(jeepney.speed || 0));
-
-  const terminalId = Number(jeepney.terminalId || 1) as TerminalId;
-
-  const terminal = terminalId === 1 ? "Donsol" : "Daraga";
 
   return (
     <View className="rounded-[24px] border border-white bg-white p-4 shadow-clay-floating">
@@ -870,7 +886,9 @@ function SelectedJeepney({ jeepney }: { jeepney: CommuterJeepneyMarker }) {
             Current side
           </Text>
 
-          <Text className="text-sm font-bold text-slate-700">{terminal}</Text>
+          <Text className="text-sm font-bold text-slate-700">
+            {terminalLabel}
+          </Text>
         </View>
       </View>
 

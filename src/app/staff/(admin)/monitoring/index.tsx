@@ -21,7 +21,6 @@ import {
 import { useMemo, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   Modal,
   Pressable,
   RefreshControl,
@@ -37,6 +36,9 @@ import {
   type MonitoringReportLog,
 } from "@/src/shared/services/admin/AdminReportService";
 
+import ClayDialog, {
+  ClayDialogState,
+} from "@/src/shared/components/clay/ClayDialog";
 import OceanBackground from "@/src/shared/components/clay/OceanBackground";
 import { colors } from "@/src/shared/constants/theme";
 import {
@@ -92,15 +94,31 @@ export default function AdminMonitoringScreen() {
   const [selectedReport, setSelectedReport] =
     useState<MonitoringReportLog | null>(null);
   const [exporting, setExporting] = useState<string | null>(null);
+  const [dialog, setDialog] = useState<ClayDialogState>(null);
 
   const handleGenerateReport = async () => {
-    const report = await generateReport();
+    try {
+      const report = await generateReport();
 
-    if (report) {
-      Alert.alert(
-        "Report Generated",
-        "The report snapshot has been saved to the JeepQTrack cloud report history.",
+      setDialog(
+        report
+          ? {
+              kind: "success",
+              title: "Report generated",
+              text: "The report snapshot has been saved to the SmartQs cloud report history.",
+            }
+          : {
+              kind: "error",
+              title: "Couldn't generate report",
+              text: "The report wasn't saved. Check your connection and try again.",
+            },
       );
+    } catch (err: any) {
+      setDialog({
+        kind: "error",
+        title: "Couldn't generate report",
+        text: err?.message || "Something went wrong while saving the report.",
+      });
     }
   };
 
@@ -109,10 +127,13 @@ export default function AdminMonitoringScreen() {
       setExporting(`${report.id}:pdf`);
       await exportReportToPdf(report);
     } catch (err: any) {
-      Alert.alert(
-        "PDF Export Failed",
-        err?.message || "Unable to export the report as PDF.",
-      );
+      // Close the details sheet first so the dialog can show on top (iOS).
+      setSelectedReport(null);
+      setDialog({
+        kind: "error",
+        title: "PDF export failed",
+        text: err?.message || "Unable to export the report as PDF.",
+      });
     } finally {
       setExporting(null);
     }
@@ -123,10 +144,12 @@ export default function AdminMonitoringScreen() {
       setExporting(`${report.id}:excel`);
       await exportReportToExcel(report);
     } catch (err: any) {
-      Alert.alert(
-        "Excel Export Failed",
-        err?.message || "Unable to export the report as Excel.",
-      );
+      setSelectedReport(null);
+      setDialog({
+        kind: "error",
+        title: "Excel export failed",
+        text: err?.message || "Unable to export the report as Excel.",
+      });
     } finally {
       setExporting(null);
     }
@@ -1000,6 +1023,8 @@ export default function AdminMonitoringScreen() {
           )}
         </ScrollView>
 
+        {/* REPORT DETAILS SHEET */}
+
         <Modal
           visible={!!selectedReport}
           transparent
@@ -1117,6 +1142,9 @@ export default function AdminMonitoringScreen() {
             </View>
           </View>
         </Modal>
+
+        {/* CLAY DIALOG (success / error) */}
+        <ClayDialog dialog={dialog} onClose={() => setDialog(null)} />
       </SafeAreaView>
     </OceanBackground>
   );

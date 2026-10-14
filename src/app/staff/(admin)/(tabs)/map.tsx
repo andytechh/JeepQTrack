@@ -27,6 +27,8 @@ import { MapView } from "@/src/shared/components/map/MapView";
 
 import { colors } from "@/src/shared/constants/theme";
 
+import { useTerminalSettings } from "@/src/shared/hooks/admin/useTerminalSettings";
+
 import {
   FleetJeepney,
   useFleetGPS,
@@ -58,7 +60,20 @@ export default function FleetMonitoringScreen() {
     passengerCount,
   } = useFleetGPS();
 
+  /*
+   * Live terminal names/positions (changes made on the Terminals screen
+   * show up here automatically).
+   */
+  const { terminals } = useTerminalSettings();
+
+  const terminalName = (id: number) =>
+    terminals.find((t) => t.id === id)?.name.replace(/ Terminal$/i, "") ??
+    `Terminal ${id}`;
+
   const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  // Freeze page scroll while a finger is on the map so pinch-zoom isn't cancelled.
+  const [mapTouching, setMapTouching] = useState(false);
 
   const selected = useMemo(() => {
     if (!selectedId) {
@@ -171,7 +186,8 @@ export default function FleetMonitoringScreen() {
             </View>
 
             <Text className="mt-1 text-sm text-slate-500">
-              Monitor jeepneys across the Donsol–Daraga route
+              Monitor jeepneys across the {terminalName(1)}–{terminalName(2)}{" "}
+              route
             </Text>
           </View>
 
@@ -216,6 +232,7 @@ export default function FleetMonitoringScreen() {
       ====================================================== */}
 
       <ScrollView
+        scrollEnabled={!mapTouching}
         style={{
           flex: 1,
         }}
@@ -274,7 +291,9 @@ export default function FleetMonitoringScreen() {
         >
           <MapView
             markers={mapMarkers}
+            terminals={terminals}
             onMarkerPress={handleMarkerPress}
+            onTouchActive={setMapTouching}
             showControls={true}
             enableRealtime={true}
             style={{
@@ -304,6 +323,7 @@ export default function FleetMonitoringScreen() {
         {selected ? (
           <SelectedFleetCard
             jeepney={selected}
+            terminalName={terminalName(selected.terminalId)}
             onClose={() => {
               selectedIdRef.current = null;
 
@@ -362,6 +382,7 @@ export default function FleetMonitoringScreen() {
               <FleetListItem
                 key={jeepney.id}
                 jeepney={jeepney}
+                terminalName={terminalName(jeepney.terminalId)}
                 selected={selectedId === jeepney.id}
                 onPress={() => handleMarkerPress(jeepney.id)}
               />
@@ -437,9 +458,12 @@ function FleetStat({
 
 function SelectedFleetCard({
   jeepney,
+  terminalName,
   onClose,
 }: {
   jeepney: FleetJeepney;
+
+  terminalName: string;
 
   onClose: () => void;
 }) {
@@ -451,8 +475,6 @@ function SelectedFleetCard({
     100,
     Math.round((occupancy / capacity) * 100),
   );
-
-  const terminal = jeepney.terminalId === 2 ? "Daraga" : "Donsol";
 
   return (
     <View className="mx-4 mt-4 rounded-[24px] border border-white bg-white p-4 shadow-clay-floating">
@@ -501,7 +523,7 @@ function SelectedFleetCard({
           </Text>
 
           <Text className="text-sm font-extrabold text-slate-700">
-            {terminal}
+            {terminalName}
           </Text>
         </View>
 
@@ -619,17 +641,18 @@ function DetailBox({
 
 function FleetListItem({
   jeepney,
+  terminalName,
   selected,
   onPress,
 }: {
   jeepney: FleetJeepney;
 
+  terminalName: string;
+
   selected: boolean;
 
   onPress: () => void;
 }) {
-  const terminal = jeepney.terminalId === 2 ? "Daraga" : "Donsol";
-
   return (
     <Pressable
       onPress={onPress}
@@ -669,7 +692,7 @@ function FleetListItem({
           </Text>
 
           <Text className="mt-0.5 text-[10px] font-semibold text-slate-400">
-            {terminal} • {formatStatus(jeepney.status)}
+            {terminalName} • {formatStatus(jeepney.status)}
           </Text>
         </View>
 

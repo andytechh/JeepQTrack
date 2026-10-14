@@ -370,13 +370,14 @@ function NextJeepneyCard({
             Next Jeepney
           </Text>
 
+          {/* Jeep name is the headline; plate number sits underneath */}
           <Text className="mt-2 text-[27px] font-extrabold text-ink-dark">
-            {jeepney.plate_number}
+            {jeepney.jeep_name || jeepney.plate_number}
           </Text>
 
           {jeepney.jeep_name ? (
             <Text className="mt-0.5 text-[11px] font-bold text-ocean-700">
-              {jeepney.jeep_name}
+              {jeepney.plate_number}
             </Text>
           ) : null}
 
@@ -672,9 +673,21 @@ function ActivityCard({
                     numberOfLines={2}
                     className="text-[11px] font-bold leading-[16px] text-ink-dark"
                   >
-                    <Text className="font-extrabold">
-                      {activity.plateNumber}
-                    </Text>{" "}
+                    {activity.jeepName ? (
+                      <>
+                        <Text className="font-extrabold text-ocean-700">
+                          {activity.jeepName}
+                        </Text>
+                        <Text className="font-semibold text-ink-secondary">
+                          {" "}
+                          ({activity.plateNumber}){" "}
+                        </Text>
+                      </>
+                    ) : (
+                      <Text className="font-extrabold">
+                        {activity.plateNumber}{" "}
+                      </Text>
+                    )}
                     {getActivityText(activity.status)}
                   </Text>
 

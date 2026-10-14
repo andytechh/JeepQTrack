@@ -1,9 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../../config/supabase";
-import {
-  getOutsideHoursMessage,
-  isWithinOperatingHours,
-} from "../../utils/operatingHours";
 
 export type JeepneyStatus =
   "waiting" | "loading" | "en_route" | "arrived" | "dispatched" | "inactive";
@@ -38,10 +34,7 @@ export interface AdminJeepney {
   created_at: string;
   updated_at: string;
 
-  /*
-   * Timestamp of this jeepney's most recent GPS ping.
-   * Informational only.
-   */
+  /* Timestamp of this jeepney's most recent GPS ping. Informational only. */
   last_gps_at: string | null;
 }
 
@@ -58,25 +51,15 @@ export interface AdminDashboardStats {
 
 export interface AdminDashboardResult {
   jeepneys: AdminJeepney[];
-
   waitingJeepneys: AdminJeepney[];
-
   loadingJeepney: AdminJeepney | null;
-
   enRouteJeepneys: AdminJeepney[];
-
   stats: AdminDashboardStats;
-
   refreshing: boolean;
-
   loading: boolean;
-
   error: string | null;
-
   refresh: () => Promise<void>;
-
   isOperatingHours: boolean;
-
   operatingHoursMessage: string;
 }
 
@@ -121,6 +104,38 @@ const SELECT_COLUMNS = `
   updated_at
 `;
 
+/* ------------------------------------------------------------------
+ * Operating hours (5 AM - 9 PM, Philippine time)
+ * ------------------------------------------------------------------ */
+
+const OPEN_HOUR = 5; // 5:00 AM
+const CLOSE_HOUR = 21; // 9:00 PM
+
+/*
+ * Hour of day in Asia/Manila (UTC+8, no DST), independent of the
+ * device's timezone setting.
+ */
+function getManilaHour(date: Date = new Date()): number {
+  return (date.getUTCHours() + 8) % 24;
+}
+
+function checkOperatingHours(date: Date = new Date()): boolean {
+  const hour = getManilaHour(date);
+  return hour >= OPEN_HOUR && hour < CLOSE_HOUR;
+}
+
+function getOutsideHoursMessage(date: Date = new Date()): string {
+  if (checkOperatingHours(date)) {
+    return "";
+  }
+
+  return "Jeepney service operates from 5:00 AM to 9:00 PM.";
+}
+
+/* ------------------------------------------------------------------
+ * Hook
+ * ------------------------------------------------------------------ */
+
 export function useAdminDashboard(): AdminDashboardResult {
   const [jeepneys, setJeepneys] = useState<AdminJeepney[]>([]);
 
@@ -131,7 +146,7 @@ export function useAdminDashboard(): AdminDashboardResult {
   const [error, setError] = useState<string | null>(null);
 
   const [isOperatingHours, setIsOperatingHours] = useState(() =>
-    isWithinOperatingHours(),
+    checkOperatingHours(),
   );
 
   const [operatingHoursMessage, setOperatingHoursMessage] = useState(() =>
@@ -175,10 +190,7 @@ export function useAdminDashboard(): AdminDashboardResult {
         return;
       }
 
-      /*
-       * Because rows are newest first, the first row we encounter
-       * for each jeepney is its latest door-count record.
-       */
+      /* Rows are newest first, so the first one seen is the latest. */
       if (!latestByJeepId.has(row.jeep_id)) {
         latestByJeepId.set(row.jeep_id, row);
       }
@@ -220,14 +232,11 @@ export function useAdminDashboard(): AdminDashboardResult {
         const rawJeepneys = data ?? [];
 
         /*
-         * ----------------------------------------------------------
-         * Latest door counts
-         * ----------------------------------------------------------
+         * Latest door counts.
          *
          * door_counts is the direct passenger-count source.
-         *
-         * current_occupancy is still retained as the fallback value
-         * from jeepneys when a jeepney does not have a door-count row.
+         * jeepneys.current_occupancy is only a fallback when a jeepney
+         * has no door-count row.
          */
         const jeepneyIds = rawJeepneys
           .map((item: any) => item.id)
@@ -235,10 +244,7 @@ export function useAdminDashboard(): AdminDashboardResult {
 
         const latestDoorCounts = await loadDoorCounts(jeepneyIds);
 
-        /*
-         * Latest GPS ping per jeepney.
-         * Informational only.
-         */
+        /* Latest GPS ping per jeepney. Informational only. */
         const { data: gpsRecords, error: gpsError } = await supabase
           .from("latest_gps_tracking")
           .select("jeepney_id, recorded_at")
@@ -284,11 +290,7 @@ export function useAdminDashboard(): AdminDashboardResult {
 
             capacity: Number(item.capacity ?? 24),
 
-            /*
-             * Direct live passenger total:
-             *
-             * front_count + rear_count
-             */
+            /* Live passenger total: front_count + rear_count */
             current_occupancy: doorTotal,
 
             last_occupancy_update:
@@ -354,14 +356,14 @@ export function useAdminDashboard(): AdminDashboardResult {
   }, [loadDashboard]);
 
   /*
-   * Re-check operating window every minute.
-   *
-   * 5 AM - 9 PM.
+   * Re-check the operating window every minute (5 AM - 9 PM).
    */
   useEffect(() => {
     const tick = () => {
-      setIsOperatingHours(isWithinOperatingHours());
-      setOperatingHoursMessage(getOutsideHoursMessage());
+      const now = new Date();
+
+      setIsOperatingHours(checkOperatingHours(now));
+      setOperatingHoursMessage(getOutsideHoursMessage(now));
     };
 
     tick();
@@ -376,30 +378,50 @@ export function useAdminDashboard(): AdminDashboardResult {
    * REALTIME
    * --------------------------------------------------------------
    *
-   * jeepneys:
-   *   - fleet changes
-   *   - status changes
-   *   - database occupancy mirror changes
-   *
-   * door_counts:
-   *   - DIRECT passenger counter source
-   *
-   * gps_tracking:
-   *   - latest GPS ping
+   * jeepneys:      fleet and status changes
+   * door_counts:   DIRECT passenger counter source
+   * gps_tracking:  latest GPS ping
    */
   useEffect(() => {
     let cancelled = false;
 
     console.log("📡 Starting admin dashboard realtime subscription...");
 
+    /* Shared handler for door_counts INSERT and UPDATE. */
+    const applyDoorCount = (doorCount: DoorCountRow, label: string) => {
+      if (!doorCount.jeep_id) {
+        return;
+      }
+
+      const total =
+        Number(doorCount.front_count ?? 0) + Number(doorCount.rear_count ?? 0);
+
+      const updatedAt = doorCount.updated_at ?? new Date().toISOString();
+
+      console.log(`🚪 Dashboard door count ${label}:`, {
+        jeep_id: doorCount.jeep_id,
+        front_count: doorCount.front_count,
+        rear_count: doorCount.rear_count,
+        total,
+      });
+
+      setJeepneys((current) =>
+        current.map((jeepney) =>
+          jeepney.id === doorCount.jeep_id
+            ? {
+                ...jeepney,
+                current_occupancy: total,
+                last_occupancy_update: updatedAt,
+              }
+            : jeepney,
+        ),
+      );
+    };
+
     const channel = supabase
       .channel("admin-jeepneys-dashboard")
 
-      /*
-       * ----------------------------------------------------------
-       * JEEPNEY INSERT
-       * ----------------------------------------------------------
-       */
+      /* JEEPNEY INSERT */
       .on(
         "postgres_changes",
         {
@@ -416,11 +438,7 @@ export function useAdminDashboard(): AdminDashboardResult {
         },
       )
 
-      /*
-       * ----------------------------------------------------------
-       * JEEPNEY UPDATE
-       * ----------------------------------------------------------
-       */
+      /* JEEPNEY UPDATE */
       .on(
         "postgres_changes",
         {
@@ -441,6 +459,13 @@ export function useAdminDashboard(): AdminDashboardResult {
                 return jeepney;
               }
 
+              /*
+               * NOTE: current_occupancy and last_occupancy_update are
+               * intentionally NOT copied from the jeepneys row here.
+               * door_counts is the source of truth, and copying the
+               * mirrored value would overwrite the live door total
+               * whenever any other jeepney column changes.
+               */
               return {
                 ...jeepney,
 
@@ -455,14 +480,6 @@ export function useAdminDashboard(): AdminDashboardResult {
                 bracket: Number(updated.bracket ?? jeepney.bracket),
 
                 capacity: Number(updated.capacity ?? jeepney.capacity),
-
-                current_occupancy: Number(
-                  updated.current_occupancy ?? jeepney.current_occupancy,
-                ),
-
-                last_occupancy_update:
-                  updated.last_occupancy_update ??
-                  jeepney.last_occupancy_update,
 
                 status: (updated.status ?? jeepney.status) as JeepneyStatus,
 
@@ -504,11 +521,7 @@ export function useAdminDashboard(): AdminDashboardResult {
         },
       )
 
-      /*
-       * ----------------------------------------------------------
-       * JEEPNEY DELETE
-       * ----------------------------------------------------------
-       */
+      /* JEEPNEY DELETE */
       .on(
         "postgres_changes",
         {
@@ -529,13 +542,7 @@ export function useAdminDashboard(): AdminDashboardResult {
         },
       )
 
-      /*
-       * ----------------------------------------------------------
-       * DOOR COUNT INSERT
-       * ----------------------------------------------------------
-       *
-       * This is the primary live passenger-count event.
-       */
+      /* DOOR COUNT INSERT */
       .on(
         "postgres_changes",
         {
@@ -546,53 +553,15 @@ export function useAdminDashboard(): AdminDashboardResult {
         (payload) => {
           if (cancelled) return;
 
-          const doorCount = payload.new as DoorCountRow;
-
-          if (!doorCount.jeep_id) {
-            return;
-          }
-
-          const total =
-            Number(doorCount.front_count ?? 0) +
-            Number(doorCount.rear_count ?? 0);
-
-          const updatedAt = doorCount.updated_at ?? new Date().toISOString();
-
-          console.log("🚪 Dashboard door count INSERT:", {
-            jeep_id: doorCount.jeep_id,
-            front_count: doorCount.front_count,
-            rear_count: doorCount.rear_count,
-            total,
-          });
-
-          setJeepneys((current) =>
-            current.map((jeepney) =>
-              jeepney.id === doorCount.jeep_id
-                ? {
-                    ...jeepney,
-                    current_occupancy: total,
-                    last_occupancy_update: updatedAt,
-                  }
-                : jeepney,
-            ),
-          );
+          applyDoorCount(payload.new as DoorCountRow, "INSERT");
         },
       )
 
       /*
-       * ----------------------------------------------------------
        * DOOR COUNT UPDATE
-       * ----------------------------------------------------------
        *
-       * Example:
-       *
-       * front 8 + rear 5 = 13
-       *
-       * becomes:
-       *
-       * front 8 + rear 3 = 11
-       *
-       * The dashboard immediately changes to 11.
+       * Example: front 8 + rear 5 = 13 becomes front 8 + rear 3 = 11,
+       * and the dashboard immediately shows 11.
        */
       .on(
         "postgres_changes",
@@ -604,44 +573,11 @@ export function useAdminDashboard(): AdminDashboardResult {
         (payload) => {
           if (cancelled) return;
 
-          const doorCount = payload.new as DoorCountRow;
-
-          if (!doorCount.jeep_id) {
-            return;
-          }
-
-          const total =
-            Number(doorCount.front_count ?? 0) +
-            Number(doorCount.rear_count ?? 0);
-
-          const updatedAt = doorCount.updated_at ?? new Date().toISOString();
-
-          console.log("🚪 Dashboard door count UPDATE:", {
-            jeep_id: doorCount.jeep_id,
-            front_count: doorCount.front_count,
-            rear_count: doorCount.rear_count,
-            total,
-          });
-
-          setJeepneys((current) =>
-            current.map((jeepney) =>
-              jeepney.id === doorCount.jeep_id
-                ? {
-                    ...jeepney,
-                    current_occupancy: total,
-                    last_occupancy_update: updatedAt,
-                  }
-                : jeepney,
-            ),
-          );
+          applyDoorCount(payload.new as DoorCountRow, "UPDATE");
         },
       )
 
-      /*
-       * ----------------------------------------------------------
-       * GPS INSERT
-       * ----------------------------------------------------------
-       */
+      /* GPS INSERT */
       .on(
         "postgres_changes",
         {
@@ -704,9 +640,7 @@ export function useAdminDashboard(): AdminDashboardResult {
     };
   }, [loadDashboard]);
 
-  /*
-   * Waiting jeepneys.
-   */
+  /* Waiting jeepneys, ordered by queue position. */
   const waitingJeepneys = useMemo(() => {
     return jeepneys
       .filter(
@@ -718,25 +652,19 @@ export function useAdminDashboard(): AdminDashboardResult {
       );
   }, [jeepneys]);
 
-  /*
-   * Current loading jeepney.
-   */
+  /* Current loading jeepney. */
   const loadingJeepney = useMemo(() => {
     return jeepneys.find((jeepney) => jeepney.status === "loading") ?? null;
   }, [jeepneys]);
 
-  /*
-   * En-route jeepneys.
-   */
+  /* En-route jeepneys. */
   const enRouteJeepneys = useMemo(() => {
     return jeepneys.filter((jeepney) => jeepney.status === "en_route");
   }, [jeepneys]);
 
-  /*
-   * Dashboard statistics.
-   */
+  /* Dashboard statistics. */
   const stats = useMemo<AdminDashboardStats>(() => {
-    if (!jeepneys || jeepneys.length === 0) {
+    if (jeepneys.length === 0) {
       return EMPTY_STATS;
     }
 
@@ -764,15 +692,15 @@ export function useAdminDashboard(): AdminDashboardResult {
   }, [loadDashboard]);
 
   return {
-    jeepneys: jeepneys ?? [],
+    jeepneys,
 
-    waitingJeepneys: waitingJeepneys ?? [],
+    waitingJeepneys,
 
-    enRouteJeepneys: enRouteJeepneys ?? [],
+    enRouteJeepneys,
 
-    loadingJeepney: loadingJeepney ?? null,
+    loadingJeepney,
 
-    stats: stats ?? EMPTY_STATS,
+    stats,
 
     loading,
 

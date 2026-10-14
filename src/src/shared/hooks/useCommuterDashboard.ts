@@ -17,6 +17,10 @@ export interface CommuterDashboardJeepney {
   id: string;
   plate_number: string;
 
+  /* NEW: jeepney display name + photo */
+  jeep_name: string | null;
+  image_url: string | null;
+
   bracket: number | null;
 
   status:
@@ -79,6 +83,9 @@ export interface QueueActivity {
   id: string;
   jeepneyId: string;
   plateNumber: string;
+
+  /* NEW */
+  jeepName: string | null;
 
   status: string;
 
@@ -267,7 +274,7 @@ export function useCommuterDashboard(
 
   /* ==========================================================
      NOTIFICATIONS
-     
+
      Kept here for compatibility with existing consumers of
      this hook.
   ========================================================== */
@@ -318,27 +325,27 @@ export function useCommuterDashboard(
 
   /* ==========================================================
      LOAD JEEPNEY QUEUE
-     
+
      SOURCE:
        public.jeepneys
-     
+
      QUEUE:
        jeepneys.queue_position
        jeepneys.status
-     
+
      OCCUPANCY:
        jeepneys.current_occupancy
-     
+
      IMPORTANT:
-     
+
      front_count and rear_count DO NOT exist on jeepneys.
-     
+
      They exist on:
        public.door_counts
-     
+
      The door_counts trigger calls:
        update_jeepney_occupancy()
-     
+
      which updates:
        jeepneys.current_occupancy
   ========================================================== */
@@ -371,6 +378,7 @@ export function useCommuterDashboard(
               loading_ends_at,
               departed_at,
               jeep_name,
+              image_url,
               driver_name,
               driver_id,
               terminal_id,
@@ -404,6 +412,10 @@ export function useCommuterDashboard(
         id: jeepney.id,
 
         plate_number: jeepney.plate_number ?? "Unknown",
+
+        jeep_name: jeepney.jeep_name ?? null,
+
+        image_url: jeepney.image_url ?? null,
 
         bracket: jeepney.bracket ?? null,
 
@@ -462,9 +474,9 @@ export function useCommuterDashboard(
 
   /* ==========================================================
      LOAD RECENT QUEUE ACTIVITY
-     
+
      Activity is derived from jeepneys.
-     
+
      There is no queue history table used here.
   ========================================================== */
 
@@ -476,6 +488,7 @@ export function useCommuterDashboard(
           `
               id,
               plate_number,
+              jeep_name,
               status,
               queue_position,
               terminal_id,
@@ -518,6 +531,8 @@ export function useCommuterDashboard(
             jeepneyId: jeepney.id,
 
             plateNumber: jeepney.plate_number,
+
+            jeepName: jeepney.jeep_name ?? null,
 
             status: jeepney.status ?? "inactive",
 
@@ -593,31 +608,22 @@ export function useCommuterDashboard(
 
   /* ==========================================================
      REALTIME JEEPNEY + OCCUPANCY UPDATES
-     
+
      We listen to BOTH tables:
-     
+
      1. jeepneys
         - queue changes
         - status changes
         - occupancy changes
         - driver changes
         - location changes
-     
+
      2. door_counts
         - front_count changes
         - rear_count changes
-     
-     Why listen to door_counts?
-     
+
      Android writes passenger counts to door_counts.
-     
-     The database trigger then updates:
-     
-       jeepneys.current_occupancy
-     
-     Listening to door_counts gives the commuter dashboard
-     an immediate refresh path while the jeepneys trigger
-     updates current_occupancy.
+     The database trigger then updates jeepneys.current_occupancy.
   ========================================================== */
 
   useEffect(() => {
@@ -675,9 +681,8 @@ export function useCommuterDashboard(
 
   /* ==========================================================
      TOTAL PASSENGERS
-     
-     This is the combined CURRENT OCCUPANCY of the active
-     queued jeepneys.
+
+     Combined CURRENT OCCUPANCY of the active queued jeepneys.
   ========================================================== */
 
   const totalPassengers = useMemo(() => {
@@ -703,12 +708,12 @@ export function useCommuterDashboard(
 
   /* ==========================================================
      NEXT JEEPNEY
-     
+
      Queue is sorted:
-     
+
        Terminal 1 → queue position
        Terminal 2 → queue position
-     
+
      Therefore the first item is the next active
      jeepney in the combined commuter queue.
   ========================================================== */

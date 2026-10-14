@@ -26,6 +26,7 @@ import {
   ActivityIndicator,
   Alert,
   Image,
+  Keyboard,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -34,6 +35,7 @@ import {
   ScrollView,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -208,6 +210,35 @@ function getStatusPresentation(status: JeepneyStatus) {
         color: "#64748B",
       };
   }
+}
+
+/* ================================================================
+   KEYBOARD HEIGHT HOOK
+   KeyboardAvoidingView is unreliable inside an RN <Modal>, so the
+   modals below shrink/shift themselves by the real keyboard height.
+================================================================ */
+
+function useKeyboardHeight() {
+  const [height, setHeight] = useState(0);
+
+  useEffect(() => {
+    const showEvent =
+      Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
+    const hideEvent =
+      Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
+
+    const show = Keyboard.addListener(showEvent, (e) =>
+      setHeight(e.endCoordinates.height),
+    );
+    const hide = Keyboard.addListener(hideEvent, () => setHeight(0));
+
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, []);
+
+  return height;
 }
 
 export default function AdminJeepneyDetailsScreen() {
@@ -811,7 +842,7 @@ export default function AdminJeepneyDetailsScreen() {
         `Jeepney is now assigned to bracket ${bracket}.`,
       );
     } catch (err: any) {
-      console.error("led to assign bracket:", err);
+      console.error("❌ Failed to assign bracket:", err);
       showError(
         "Unable to Assign Bracket",
         err?.message ?? "The bracket could not be assigned.",
@@ -1672,6 +1703,10 @@ function EditJeepneyModal({
 }) {
   const displayImage = imageUri || imageUrl;
 
+  const keyboardHeight = useKeyboardHeight();
+  const { height: windowHeight } = useWindowDimensions();
+  const maxCardHeight = windowHeight - keyboardHeight - 48;
+
   const choosePhoto = () => {
     if (saving) return;
     onOpenImageSource();
@@ -1682,137 +1717,139 @@ function EditJeepneyModal({
       visible={visible}
       transparent
       animationType="fade"
+      statusBarTranslucent
       onRequestClose={onClose}
     >
-      <KeyboardAvoidingView
-        className="flex-1"
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
+      <View
+        className="flex-1 justify-center bg-black/30 px-5"
+        style={{ paddingBottom: keyboardHeight }}
       >
-        <View className="flex-1 justify-center bg-black/30 px-5">
-          <View className="max-h-[92%] rounded-[30px] border border-white/95 bg-clay-surface p-6">
-            <ScrollView
-              showsVerticalScrollIndicator={false}
-              keyboardShouldPersistTaps="handled"
-            >
-              <View className="flex-row items-center">
-                <View className="h-[46px] w-[46px] items-center justify-center rounded-[15px] bg-ocean-100">
-                  <Pencil
-                    size={21}
-                    color={colors.primaryDark}
-                    strokeWidth={2.4}
-                  />
-                </View>
-                <View className="ml-3 flex-1">
-                  <Text className="text-[17px] font-extrabold text-ink-dark">
-                    Edit Jeepney
-                  </Text>
-                  <Text className="mt-0.5 text-[10px] text-ink-muted">
-                    Update vehicle information and photo.
-                  </Text>
-                </View>
-                <Pressable
-                  disabled={saving}
-                  onPress={onClose}
-                  className="h-[38px] w-[38px] items-center justify-center rounded-full bg-slate-100"
-                >
-                  <XCircle size={19} color="#64748B" strokeWidth={2.3} />
-                </Pressable>
+        <View
+          className="rounded-[30px] border border-white/95 bg-clay-surface p-6"
+          style={{ maxHeight: maxCardHeight }}
+        >
+          <ScrollView
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+          >
+            <View className="flex-row items-center">
+              <View className="h-[46px] w-[46px] items-center justify-center rounded-[15px] bg-ocean-100">
+                <Pencil
+                  size={21}
+                  color={colors.primaryDark}
+                  strokeWidth={2.4}
+                />
               </View>
+              <View className="ml-3 flex-1">
+                <Text className="text-[17px] font-extrabold text-ink-dark">
+                  Edit Jeepney
+                </Text>
+                <Text className="mt-0.5 text-[10px] text-ink-muted">
+                  Update vehicle information and photo.
+                </Text>
+              </View>
+              <Pressable
+                disabled={saving}
+                onPress={onClose}
+                className="h-[38px] w-[38px] items-center justify-center rounded-full bg-slate-100"
+              >
+                <XCircle size={19} color="#64748B" strokeWidth={2.3} />
+              </Pressable>
+            </View>
 
-              <Text className="mt-5 text-[10px] font-extrabold uppercase tracking-[0.6px] text-ink-muted">
-                Jeepney Photo
-              </Text>
-              <View className="mt-2 items-center">
-                <View className="h-[160px] w-full overflow-hidden rounded-[22px] border border-white bg-slate-100">
-                  {displayImage ? (
-                    <Image
-                      source={{ uri: displayImage }}
-                      className="h-full w-full"
-                      resizeMode="cover"
-                    />
-                  ) : (
-                    <View className="flex-1 items-center justify-center">
-                      <BusFront size={45} color="#94A3B8" strokeWidth={1.8} />
-                      <Text className="mt-2 text-[10px] font-bold text-slate-400">
-                        No photo
-                      </Text>
-                    </View>
-                  )}
-                </View>
-                <Pressable
-                  disabled={saving}
-                  onPress={choosePhoto}
-                  className="mt-3 flex-row items-center rounded-full bg-ocean-400 px-5 py-3"
-                >
-                  <Camera size={16} color="#FFFFFF" strokeWidth={2.4} />
-                  <Text className="ml-2 text-[11px] font-extrabold text-white">
-                    {displayImage ? "Change Photo" : "Add Photo"}
-                  </Text>
-                </Pressable>
-                {displayImage && (
-                  <Pressable
-                    disabled={saving}
-                    onPress={onRemoveImage}
-                    className="mt-2 flex-row items-center rounded-full px-4 py-2"
-                  >
-                    <Trash2 size={14} color="#DC2626" strokeWidth={2.3} />
-                    <Text className="ml-1.5 text-[10px] font-extrabold text-red-600">
-                      Remove Photo
+            <Text className="mt-5 text-[10px] font-extrabold uppercase tracking-[0.6px] text-ink-muted">
+              Jeepney Photo
+            </Text>
+            <View className="mt-2 items-center">
+              <View className="h-[160px] w-full overflow-hidden rounded-[22px] border border-white bg-slate-100">
+                {displayImage ? (
+                  <Image
+                    source={{ uri: displayImage }}
+                    className="h-full w-full"
+                    resizeMode="cover"
+                  />
+                ) : (
+                  <View className="flex-1 items-center justify-center">
+                    <BusFront size={45} color="#94A3B8" strokeWidth={1.8} />
+                    <Text className="mt-2 text-[10px] font-bold text-slate-400">
+                      No photo
                     </Text>
-                  </Pressable>
+                  </View>
                 )}
               </View>
-
-              <EditField
-                label="Plate Number"
-                value={plateNumber}
-                onChangeText={setPlateNumber}
-                placeholder="e.g. ABC-1234"
-                autoCapitalize="characters"
-              />
-              <EditField
-                label="Jeepney Name"
-                value={jeepName}
-                onChangeText={setJeepName}
-                placeholder="Optional"
-              />
-              <EditField
-                label="Maximum Capacity"
-                value={capacity}
-                onChangeText={setCapacity}
-                placeholder="e.g. 24"
-                keyboardType="number-pad"
-              />
-
-              <View className="mt-6 flex-row">
+              <Pressable
+                disabled={saving}
+                onPress={choosePhoto}
+                className="mt-3 flex-row items-center rounded-full bg-ocean-400 px-5 py-3"
+              >
+                <Camera size={16} color="#FFFFFF" strokeWidth={2.4} />
+                <Text className="ml-2 text-[11px] font-extrabold text-white">
+                  {displayImage ? "Change Photo" : "Add Photo"}
+                </Text>
+              </Pressable>
+              {displayImage && (
                 <Pressable
                   disabled={saving}
-                  onPress={onClose}
-                  className="flex-1 items-center justify-center rounded-full bg-slate-100 py-3.5"
+                  onPress={onRemoveImage}
+                  className="mt-2 flex-row items-center rounded-full px-4 py-2"
                 >
-                  <Text className="text-[11px] font-extrabold text-ink-secondary">
-                    Cancel
+                  <Trash2 size={14} color="#DC2626" strokeWidth={2.3} />
+                  <Text className="ml-1.5 text-[10px] font-extrabold text-red-600">
+                    Remove Photo
                   </Text>
                 </Pressable>
-                <Pressable
-                  disabled={saving}
-                  onPress={onSubmit}
-                  className="ml-3 flex-1 flex-row items-center justify-center rounded-full bg-ocean-400 py-3.5"
-                >
-                  {saving ? (
-                    <ActivityIndicator size="small" color="#FFFFFF" />
-                  ) : (
-                    <CheckCircle2 size={16} color="#FFFFFF" strokeWidth={2.5} />
-                  )}
-                  <Text className="ml-2 text-[11px] font-extrabold text-white">
-                    {saving ? "Saving..." : "Save Changes"}
-                  </Text>
-                </Pressable>
-              </View>
-            </ScrollView>
-          </View>
+              )}
+            </View>
+
+            <EditField
+              label="Plate Number"
+              value={plateNumber}
+              onChangeText={setPlateNumber}
+              placeholder="e.g. ABC-1234"
+              autoCapitalize="characters"
+            />
+            <EditField
+              label="Jeepney Name"
+              value={jeepName}
+              onChangeText={setJeepName}
+              placeholder="Optional"
+            />
+            <EditField
+              label="Maximum Capacity"
+              value={capacity}
+              onChangeText={setCapacity}
+              placeholder="e.g. 24"
+              keyboardType="number-pad"
+            />
+
+            <View className="mt-6 flex-row">
+              <Pressable
+                disabled={saving}
+                onPress={onClose}
+                className="flex-1 items-center justify-center rounded-full bg-slate-100 py-3.5"
+              >
+                <Text className="text-[11px] font-extrabold text-ink-secondary">
+                  Cancel
+                </Text>
+              </Pressable>
+              <Pressable
+                disabled={saving}
+                onPress={onSubmit}
+                className="ml-3 flex-1 flex-row items-center justify-center rounded-full bg-ocean-400 py-3.5"
+              >
+                {saving ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <CheckCircle2 size={16} color="#FFFFFF" strokeWidth={2.5} />
+                )}
+                <Text className="ml-2 text-[11px] font-extrabold text-white">
+                  {saving ? "Saving..." : "Save Changes"}
+                </Text>
+              </Pressable>
+            </View>
+          </ScrollView>
         </View>
-      </KeyboardAvoidingView>
+      </View>
     </Modal>
   );
 }
@@ -1838,91 +1875,92 @@ function AssignBracketModal({
   onClose: () => void;
   onSubmit: () => void;
 }) {
+  const keyboardHeight = useKeyboardHeight();
+
   return (
     <Modal
       visible={visible}
       transparent
       animationType="fade"
+      statusBarTranslucent
       onRequestClose={onClose}
     >
-      <KeyboardAvoidingView
-        className="flex-1"
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
+      <View
+        className="flex-1 justify-center bg-black/30 px-5"
+        style={{ paddingBottom: keyboardHeight }}
       >
-        <View className="flex-1 justify-center bg-black/30 px-5">
-          <View className="rounded-[30px] border border-white/95 bg-clay-surface p-6">
-            <View className="flex-row items-center">
-              <View className="h-[46px] w-[46px] items-center justify-center rounded-[15px] bg-violet-100">
-                <Gauge size={22} color={colors.primaryDark} strokeWidth={2.4} />
-              </View>
-              <View className="ml-3 flex-1">
-                <Text className="text-[17px] font-extrabold text-ink-dark">
-                  Assign Bracket
-                </Text>
-                <Text className="mt-0.5 text-[10px] text-ink-muted">
-                  Set this jeepney's queue position bracket.
-                </Text>
-              </View>
-              <Pressable
-                disabled={saving}
-                onPress={onClose}
-                className="h-[38px] w-[38px] items-center justify-center rounded-full bg-slate-100"
-              >
-                <XCircle size={19} color="#64748B" strokeWidth={2.3} />
-              </Pressable>
+        <View className="rounded-[30px] border border-white/95 bg-clay-surface p-6">
+          <View className="flex-row items-center">
+            <View className="h-[46px] w-[46px] items-center justify-center rounded-[15px] bg-violet-100">
+              <Gauge size={22} color={colors.primaryDark} strokeWidth={2.4} />
             </View>
-
-            <View className="mt-5 rounded-[18px] bg-violet-50 p-4">
-              <Text className="text-[9px] font-extrabold uppercase tracking-[0.6px] text-ocean-600">
-                Current bracket
+            <View className="ml-3 flex-1">
+              <Text className="text-[17px] font-extrabold text-ink-dark">
+                Assign Bracket
               </Text>
-              <Text className="mt-1 text-[20px] font-extrabold text-ocean-800">
-                {currentBracket !== null
-                  ? `Bracket ${currentBracket}`
-                  : "Not assigned"}
+              <Text className="mt-0.5 text-[10px] text-ink-muted">
+                Set this jeepney's queue position bracket.
               </Text>
             </View>
+            <Pressable
+              disabled={saving}
+              onPress={onClose}
+              className="h-[38px] w-[38px] items-center justify-center rounded-full bg-slate-100"
+            >
+              <XCircle size={19} color="#64748B" strokeWidth={2.3} />
+            </Pressable>
+          </View>
 
-            <EditField
-              label="New Bracket"
-              value={bracket}
-              onChangeText={setBracket}
-              placeholder="e.g. 1"
-              keyboardType="number-pad"
-            />
-
-            <Text className="mt-2 text-[9px] leading-[15px] text-ink-muted">
-              Enter the positive bracket number used by the terminal queue.
+          <View className="mt-5 rounded-[18px] bg-violet-50 p-4">
+            <Text className="text-[9px] font-extrabold uppercase tracking-[0.6px] text-ocean-600">
+              Current bracket
             </Text>
+            <Text className="mt-1 text-[20px] font-extrabold text-ocean-800">
+              {currentBracket !== null
+                ? `Bracket ${currentBracket}`
+                : "Not assigned"}
+            </Text>
+          </View>
 
-            <View className="mt-6 flex-row">
-              <Pressable
-                disabled={saving}
-                onPress={onClose}
-                className="flex-1 items-center justify-center rounded-full bg-slate-100 py-3.5"
-              >
-                <Text className="text-[11px] font-extrabold text-ink-secondary">
-                  Cancel
-                </Text>
-              </Pressable>
-              <Pressable
-                disabled={saving}
-                onPress={onSubmit}
-                className="ml-3 flex-1 flex-row items-center justify-center rounded-full bg-ocean-400 py-3.5"
-              >
-                {saving ? (
-                  <ActivityIndicator size="small" color="#FFFFFF" />
-                ) : (
-                  <CheckCircle2 size={16} color="#FFFFFF" strokeWidth={2.5} />
-                )}
-                <Text className="ml-2 text-[11px] font-extrabold text-white">
-                  {saving ? "Assigning..." : "Assign Bracket"}
-                </Text>
-              </Pressable>
-            </View>
+          <EditField
+            label="New Bracket"
+            value={bracket}
+            onChangeText={setBracket}
+            placeholder="e.g. 1"
+            keyboardType="number-pad"
+          />
+
+          <Text className="mt-2 text-[9px] leading-[15px] text-ink-muted">
+            Enter the positive bracket number used by the terminal queue.
+          </Text>
+
+          <View className="mt-6 flex-row">
+            <Pressable
+              disabled={saving}
+              onPress={onClose}
+              className="flex-1 items-center justify-center rounded-full bg-slate-100 py-3.5"
+            >
+              <Text className="text-[11px] font-extrabold text-ink-secondary">
+                Cancel
+              </Text>
+            </Pressable>
+            <Pressable
+              disabled={saving}
+              onPress={onSubmit}
+              className="ml-3 flex-1 flex-row items-center justify-center rounded-full bg-ocean-400 py-3.5"
+            >
+              {saving ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <CheckCircle2 size={16} color="#FFFFFF" strokeWidth={2.5} />
+              )}
+              <Text className="ml-2 text-[11px] font-extrabold text-white">
+                {saving ? "Assigning..." : "Assign Bracket"}
+              </Text>
+            </Pressable>
           </View>
         </View>
-      </KeyboardAvoidingView>
+      </View>
     </Modal>
   );
 }

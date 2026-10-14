@@ -1,6 +1,9 @@
+// src/shared/components/map/MapView.tsx
 import React from "react";
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 import { WebView } from "react-native-webview";
+
+import type { TerminalConfig } from "@/src/shared/hooks/admin/useTerminalSettings";
 
 import {
   getActiveMapMarkers,
@@ -56,7 +59,27 @@ interface MapViewProps {
     ready: boolean;
     approximate?: boolean;
     error?: string;
+    durationMinutes?: number;
+    distanceKm?: number;
   }) => void;
+
+  /**
+   * Terminals (position, name, geofence radius) to draw and route between.
+   * When omitted the map keeps the built-in real terminals.
+   */
+  terminals?: TerminalConfig[];
+
+  /** When true, a tap on the map is reported through onMapTap. */
+  pickMode?: boolean;
+
+  onMapTap?: (lat: number, lng: number) => void;
+
+  /**
+   * True while a finger is on the map. Use it to freeze a parent ScrollView so
+   * pinch-zoom and drag are not stolen by page scrolling:
+   *   <ScrollView scrollEnabled={!mapTouching}> ... <MapView onTouchActive={setMapTouching} />
+   */
+  onTouchActive?: (active: boolean) => void;
 
   showControls?: boolean;
 
@@ -70,10 +93,20 @@ export const MapView: React.FC<MapViewProps> = ({
   onMarkerPress,
   onJeepneyETA,
   onRouteStatus,
+  terminals,
+  pickMode = false,
+  onMapTap,
+  onTouchActive,
   showControls = true,
   enableRealtime = true,
   style,
 }) => {
+  /**
+   * Build the HTML once. A new { html } object on every render can make the
+   * WebView reload, which resets zoom and position.
+   */
+  const mapSource = React.useMemo(() => ({ html: getMapHTML() }), []);
+
   /**
    * ============================================================
    * ACTIVE MAP MARKERS
@@ -123,6 +156,34 @@ export const MapView: React.FC<MapViewProps> = ({
 
   /**
    * ============================================================
+   * TERMINALS / PICK MODE -> WEBVIEW
+   * ============================================================
+   */
+  React.useEffect(() => {
+    if (!mapReady || !terminals?.length) return;
+
+    webViewRef.current?.postMessage(
+      JSON.stringify({ type: "setTerminals", terminals }),
+    );
+  }, [mapReady, terminals, webViewRef]);
+
+  React.useEffect(() => {
+    if (!mapReady) return;
+
+    webViewRef.current?.postMessage(
+      JSON.stringify({ type: "setPickMode", enabled: Boolean(pickMode) }),
+    );
+  }, [mapReady, pickMode, webViewRef]);
+
+  /**
+   * Fit the whole route on screen (no lat/lng => fitBounds in the WebView).
+   */
+  const fitRoute = React.useCallback(() => {
+    webViewRef.current?.postMessage(JSON.stringify({ type: "recenter" }));
+  }, [webViewRef]);
+
+  /**
+   * ============================================================
    * WEBVIEW MESSAGE HANDLER
    * ============================================================
    */
@@ -142,6 +203,12 @@ export const MapView: React.FC<MapViewProps> = ({
           onRouteStatus({
             ready: true,
             approximate: Boolean(data.approximate),
+            durationMinutes:
+              data.durationMinutes != null
+                ? Number(data.durationMinutes)
+                : undefined,
+            distanceKm:
+              data.distanceKm != null ? Number(data.distanceKm) : undefined,
           });
         }
 
@@ -150,6 +217,19 @@ export const MapView: React.FC<MapViewProps> = ({
             ready: false,
             error: data.message ?? "Unknown route error",
           });
+        }
+
+        if (data.type === "mapTouch") {
+          onTouchActive?.(Boolean(data.active));
+        }
+
+        /**
+         * ====================================================
+         * MAP TAP (pick mode)
+         * ====================================================
+         */
+        if (data.type === "mapTap") {
+          onMapTap?.(Number(data.lat), Number(data.lng));
         }
 
         /**
@@ -196,7 +276,7 @@ export const MapView: React.FC<MapViewProps> = ({
 
             travelMinutes: Number(data.travelMinutes ?? 0),
 
-            additionalMinutes: Number(data.additionalMinutes ?? 20),
+            additionalMinutes: Number(data.additionalMinutes ?? 0),
 
             remainingMinutes: Number(data.remainingMinutes ?? 0),
 
@@ -214,16 +294,30 @@ export const MapView: React.FC<MapViewProps> = ({
        */
       handleMessage(event);
     },
-    [activeMarkers, handleMessage, onJeepneyETA, onRouteStatus],
+    [
+      activeMarkers,
+      handleMessage,
+      onJeepneyETA,
+      onMapTap,
+      onRouteStatus,
+      onTouchActive,
+    ],
   );
 
   return (
-    <View style={[styles.container, style]}>
+    <View
+      style={[styles.container, style]}
+      onTouchStart={() => onTouchActive?.(true)}
+      onTouchEnd={() => onTouchActive?.(false)}
+      onTouchCancel={() => onTouchActive?.(false)}
+    >
       <WebView
         ref={webViewRef}
-        source={{
-          html: getMapHTML(),
-        }}
+        source={mapSource}
+        nestedScrollEnabled={true}
+        scrollEnabled={false}
+        bounces={false}
+        overScrollMode="never"
         onMessage={handleWebViewMessage}
         style={styles.webview}
         javaScriptEnabled={true}
@@ -244,29 +338,23 @@ export const MapView: React.FC<MapViewProps> = ({
 
       {showControls && (
         <MapControls
+          /**
+           * Recenter always works: it follows a jeepney when there is one,
+           * otherwise it fits the whole terminal-to-terminal route.
+           */
+          hasActiveJeepneys={true}
           onZoomIn={zoomIn}
           onZoomOut={zoomOut}
           onRecenter={() => {
-            /**
-             * Only use an active jeepney
-             * when recentering.
-             */
             const first = activeMarkers[0];
 
             if (first) {
               recenter(first.lat, first.lng);
             } else {
-              /**
-               * No active jeepneys.
-               * Center on the Donsol–Daraga
-               * route instead.
-               */
-              recenter(13.025, 123.65);
+              fitRoute();
             }
           }}
-          onShowTerminals={() => {
-            recenter(13.025, 123.65);
-          }}
+          onShowTerminals={fitRoute}
           onRefreshRoute={refreshRoute}
         />
       )}

@@ -1,3 +1,4 @@
+import { useAppUpdates } from "@/src/shared/hooks/useUpdates";
 import Constants from "expo-constants";
 import { NavigationBar } from "expo-navigation-bar";
 import * as Notifications from "expo-notifications";
@@ -5,11 +6,13 @@ import { Slot, router, useSegments } from "expo-router";
 import * as NativeSplashScreen from "expo-splash-screen";
 import { StatusBar } from "expo-status-bar";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AppState, Platform } from "react-native";
-import { SafeAreaProvider } from "react-native-safe-area-context";
+import { AppState, Platform, View } from "react-native";
+import {
+  SafeAreaProvider,
+  useSafeAreaInsets,
+} from "react-native-safe-area-context";
 import Toast from "react-native-toast-message";
 import "../../global.css";
-import SUSFeedbackPrompt from "../src/shared/components/feedback/SUSFeedbackPrompt";
 import ConnectivityStatus from "../src/shared/components/ui/ConnectivityStatus";
 import JeepQLaunchSplash from "../src/shared/components/ui/splashscreen";
 import { supabase } from "../src/shared/config/supabase";
@@ -20,10 +23,39 @@ import { useAuthStore } from "../src/shared/store/authStore";
 import { useChatStore } from "../src/shared/store/chatStore";
 import { getAppFlavor, isStaffApp } from "../src/shared/utils/flavor";
 
+// inside RootLayout, near the other hooks
+
 NativeSplashScreen.preventAutoHideAsync().catch(() => {
   // It may already be hidden during Fast Refresh.
 });
 NativeSplashScreen.setOptions({ duration: 300, fade: true });
+
+// ─── STATUS BAR BACKDROP ─────────────────────────────────────────────
+// Light blue band behind the phone's status bar. Combined with
+// <StatusBar style="dark" />, the time / battery / signal icons are always
+// dark-on-light-blue, even when the phone is in system dark mode.
+const STATUS_BAR_BG = "#BAE6FD";
+
+function StatusBarBackdrop() {
+  const insets = useSafeAreaInsets();
+
+  if (insets.top <= 0) return null;
+
+  return (
+    <View
+      pointerEvents="none"
+      style={{
+        position: "absolute",
+        top: 0,
+        left: 0,
+        right: 0,
+        height: insets.top,
+        backgroundColor: STATUS_BAR_BG,
+        zIndex: 999,
+      }}
+    />
+  );
+}
 
 // ─── NOTIFICATION CHANNEL SETUP ──────────────────────────────────────
 const createNotificationChannels = async () => {
@@ -209,6 +241,7 @@ export default function RootLayout() {
   useEffect(() => {
     clearStore();
   }, []);
+  const { checkForUpdate } = useAppUpdates(isReady && !showSplash);
 
   // ─── REGISTER PUSH TOKEN ───────────────────────────────────────────
   const registerPushToken = useCallback(async () => {
@@ -462,20 +495,24 @@ export default function RootLayout() {
 
   return (
     <SafeAreaProvider>
-      <StatusBar style="auto" />
+      {/* "dark" = always dark icons/text, readable on the light blue band */}
+      <StatusBar style="dark" />
 
       <AppThemeProvider>
         <Slot />
 
+        {/* Light blue band behind the phone status bar */}
+        <StatusBarBackdrop />
+
         <Toast />
 
         <ConnectivityStatus />
-
+        {/* 
         <SUSFeedbackPrompt
           userId={user?.uid}
           role={user?.role}
           enabled={isAuthenticated && isReady && !showSplash}
-        />
+        /> */}
 
         {showSplash ? (
           <JeepQLaunchSplash

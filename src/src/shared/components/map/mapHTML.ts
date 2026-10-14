@@ -1,3 +1,4 @@
+// src/shared/components/map/mapHTML.ts
 export const getMapHTML = () => {
   return `
 <!DOCTYPE html>
@@ -36,17 +37,25 @@ L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
 
 /* ============================================================
    TERMINALS
+   Defaults = the REAL terminals. React Native pushes the live
+   values (from Supabase) with a "setTerminals" message.
 ============================================================ */
-const terminals = {
-  donsOl: { id: 1, name: "Donsol Terminal", lat: 12.9032, lng: 123.59425 },
-  daraga: { id: 2, name: "Daraga Terminal", lat: 13.14769, lng: 123.71216 }
+let terminals = {
+  donsOl: { id: 1, name: "Donsol Terminal", lat: 12.9032,  lng: 123.59425, radius: 100 },
+  daraga: { id: 2, name: "Daraga Terminal", lat: 13.14769, lng: 123.71216, radius: 100 }
 };
+let terminalMarkers = {};
+let geofenceCircles = {};
+let terminalsReceived = false;
+let pickMode = false;
 
 /* ============================================================
    ROUTE
 ============================================================ */
 let routeCoordinates = [];
 let routeTotalDistanceMeters = 0;
+let routeDurationMinutes = 0;
+let routeFetchToken = 0; // ignore stale OSRM responses when terminals change quickly
 let routeLayer = null;
 let routeReady = false;
 let routeCumulativeDistances = []; // routeCumulativeDistances[i] = distance from origin to routeCoordinates[i]
@@ -184,6 +193,7 @@ function buildStraightLineFallbackRoute() {
     [terminals.daraga.lat, terminals.daraga.lng]
   ];
   routeTotalDistanceMeters = calculateRouteDistance(routeCoordinates);
+  routeDurationMinutes = (routeTotalDistanceMeters / 1000) / FALLBACK_SPEED_KMH * 60;
   routeReady = true;
 
   if (routeLayer) map.removeLayer(routeLayer);
@@ -196,13 +206,16 @@ function buildStraightLineFallbackRoute() {
     type: "routeReady",
     approximate: true,
     totalDistance: routeTotalDistanceMeters,
-    totalDistanceKm: routeTotalDistanceMeters / 1000
+    totalDistanceKm: routeTotalDistanceMeters / 1000,
+    distanceKm: routeTotalDistanceMeters / 1000,
+    durationMinutes: routeDurationMinutes
   }));
 
   recalculateAllETAs();
 }
 
 async function fetchRoute() {
+  const token = ++routeFetchToken;
   const url = "https://router.project-osrm.org/route/v1/driving/" +
               terminals.donsOl.lng + "," + terminals.donsOl.lat + ";" +
               terminals.daraga.lng + "," + terminals.daraga.lat +
@@ -210,17 +223,19 @@ async function fetchRoute() {
 
   for (let attempt = 1; attempt <= OSRM_MAX_ATTEMPTS; attempt++) {
     try {
-      console.log("🛣️ Fetching Donsol-Daraga road route (attempt " + attempt + "/" + OSRM_MAX_ATTEMPTS + ")...");
+      console.log("🛣️ Fetching terminal route (attempt " + attempt + "/" + OSRM_MAX_ATTEMPTS + ")...");
       const response = await fetch(url);
       if (!response.ok) throw new Error("OSRM HTTP " + response.status);
       const data = await response.json();
+      if (token !== routeFetchToken) return; // a newer fetch superseded this one
       if (!data.routes || !data.routes.length) throw new Error("No route returned");
       const route = data.routes[0];
       const coords = route.geometry.coordinates;
       routeCoordinates = coords.map(c => [c[1], c[0]]);
       routeTotalDistanceMeters = calculateRouteDistance(routeCoordinates);
+      routeDurationMinutes = route.duration / 60;
       routeReady = true;
-      console.log("✅ ROUTE LOADED, distance:", (routeTotalDistanceMeters/1000).toFixed(2), "km");
+      console.log("✅ ROUTE LOADED, distance:", (routeTotalDistanceMeters/1000).toFixed(2), "km, duration:", routeDurationMinutes.toFixed(1), "min");
 
       if (routeLayer) map.removeLayer(routeLayer);
       routeLayer = L.polyline(routeCoordinates, {
@@ -232,13 +247,16 @@ async function fetchRoute() {
         type: "routeReady",
         approximate: false,
         totalDistance: routeTotalDistanceMeters,
-        totalDistanceKm: routeTotalDistanceMeters / 1000
+        totalDistanceKm: routeTotalDistanceMeters / 1000,
+        distanceKm: routeTotalDistanceMeters / 1000,
+        durationMinutes: routeDurationMinutes
       }));
 
       recalculateAllETAs();
       return;
 
     } catch (error) {
+      if (token !== routeFetchToken) return;
       console.error("❌ Route fetch attempt " + attempt + " failed:", error);
       if (attempt < OSRM_MAX_ATTEMPTS) {
         await sleep(OSRM_RETRY_DELAY_MS * attempt);
@@ -399,12 +417,13 @@ function updateJeepneyMarker(id, lat, lng, speed, status, force) {
 
   const remainingKm = remainingDistance / 1000;
   const travelMinutes = (remainingKm / effectiveSpeed) * 60;
-  // The 20-minute allowance covers stops/loading over the *remaining* trip, so it should
-  // shrink as less trip is left to make stops on - a jeep that's 80% done only has 20%
-  // of the route (and roughly 20% of the potential stops) left, not the full buffer.
+  // The stop/loading allowance covers stops over the *remaining* trip, so it shrinks as less
+  // trip is left. It is also capped at 30% of the route's own drive time, so a short route
+  // (e.g. a 5-minute demo route) doesn't get a flat 20-minute buffer on top.
   const totalRouteKm = routeTotalDistanceMeters / 1000;
   const remainingFraction = totalRouteKm > 0 ? Math.min(1, remainingKm / totalRouteKm) : 0;
-  const additionalMinutes = ADDITIONAL_ETA_MINUTES * remainingFraction;
+  const stopAllowance = Math.min(ADDITIONAL_ETA_MINUTES, routeDurationMinutes * 0.3);
+  const additionalMinutes = stopAllowance * remainingFraction;
   let remainingMinutes = travelMinutes + additionalMinutes;
   if (remainingKm < 0.15) remainingMinutes = 0;
   remainingMinutes = Math.max(0, remainingMinutes);
@@ -460,7 +479,7 @@ function updateAllRouteProgress(data) {
 }
 
 /* ============================================================
-   TERMINAL ICONS
+   TERMINAL ICONS + GEOFENCE CIRCLES
 ============================================================ */
 const originIcon = L.divIcon({
   className: "custom-div-icon",
@@ -477,8 +496,62 @@ const destinationIcon = L.divIcon({
   iconSize: [40,40],
   iconAnchor: [20,44]
 });
-L.marker([terminals.donsOl.lat, terminals.donsOl.lng], { icon: originIcon, zIndexOffset: 1000 }).addTo(map).bindPopup("<strong>Donsol Terminal</strong><br>Origin");
-L.marker([terminals.daraga.lat, terminals.daraga.lng], { icon: destinationIcon, zIndexOffset: 1000 }).addTo(map).bindPopup("<strong>Daraga Terminal</strong><br>Destination");
+
+function renderTerminals() {
+  [["donsOl", originIcon, "Origin"], ["daraga", destinationIcon, "Destination"]].forEach(function(row) {
+    const key = row[0], icon = row[1], role = row[2];
+    const t = terminals[key];
+    if (terminalMarkers[key]) map.removeLayer(terminalMarkers[key]);
+    if (geofenceCircles[key]) map.removeLayer(geofenceCircles[key]);
+    terminalMarkers[key] = L.marker([t.lat, t.lng], { icon: icon, zIndexOffset: 1000 })
+      .addTo(map)
+      .bindPopup("<strong>" + t.name + "</strong><br>" + role + "<br>Geofence: " + t.radius + " m");
+    geofenceCircles[key] = L.circle([t.lat, t.lng], {
+      radius: t.radius, color: "#0ea5e9", weight: 2, fillOpacity: 0.12
+    }).addTo(map);
+  });
+}
+
+function applyTerminals(list) {
+  if (!Array.isArray(list)) return;
+  terminalsReceived = true;
+
+  let coordsChanged = false;
+  list.forEach(function(t) {
+    const key = Number(t.id) === 1 ? "donsOl" : "daraga";
+    const cur = terminals[key];
+    const lat = Number(t.lat), lng = Number(t.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+    if (cur.lat !== lat || cur.lng !== lng) coordsChanged = true;
+    cur.name = t.name || cur.name;
+    cur.lat = lat;
+    cur.lng = lng;
+    const r = Number(t.radius_m != null ? t.radius_m : (t.radius != null ? t.radius : cur.radius));
+    cur.radius = Number.isFinite(r) ? r : cur.radius;
+  });
+
+  renderTerminals(); // name/radius-only changes just redraw the circles
+
+  // Coordinates moved (or first load): the road route and every jeepney's progress are stale.
+  if (coordsChanged || !routeReady) {
+    routeReady = false;
+    Object.keys(markerData).forEach(function(id) {
+      delete markerData[id].segmentIndex;
+      delete markerData[id].lastEtaLat;
+      delete markerData[id].lastEtaLng;
+    });
+    fetchRoute();
+  }
+}
+
+map.on("click", function(e) {
+  if (!pickMode) return;
+  window.ReactNativeWebView.postMessage(JSON.stringify({
+    type: "mapTap", lat: e.latlng.lat, lng: e.latlng.lng
+  }));
+});
+
+renderTerminals();
 
 /* ============================================================
    REACT NATIVE EVENTS
@@ -486,6 +559,8 @@ L.marker([terminals.daraga.lat, terminals.daraga.lng], { icon: destinationIcon, 
 function handleNativeMessage(raw) {
   try {
     const data = typeof raw === "string" ? JSON.parse(raw) : raw;
+    if (data.type === "setTerminals") applyTerminals(data.terminals);
+    if (data.type === "setPickMode") pickMode = !!data.enabled;
     if (data.type === "updateMarkers") {
       // Clear markers
       Object.keys(markers).forEach(key => { map.removeLayer(markers[key]); });
@@ -550,8 +625,13 @@ function handleNativeMessage(raw) {
     if (data.type === "recenter") {
       if (Number.isFinite(Number(data.lat)) && Number.isFinite(Number(data.lng))) {
         map.flyTo([Number(data.lat), Number(data.lng)], 13);
-      } else {
+      } else if (routeCoordinates.length > 1) {
         map.fitBounds(L.latLngBounds(routeCoordinates), { padding: [35,35] });
+      } else {
+        map.fitBounds(L.latLngBounds([
+          [terminals.donsOl.lat, terminals.donsOl.lng],
+          [terminals.daraga.lat, terminals.daraga.lng]
+        ]), { padding: [35,35] });
       }
     }
   } catch (error) {
@@ -559,16 +639,37 @@ function handleNativeMessage(raw) {
   }
 }
 
+/* Tell React Native when a finger is on the map so it can freeze the page scroll
+   (otherwise a slightly vertical pinch/drag gets stolen and the zoom is cancelled). */
+(function() {
+  const el = map.getContainer();
+  let active = false;
+  function setActive(v) {
+    if (active === v) return;
+    active = v;
+    window.ReactNativeWebView.postMessage(JSON.stringify({ type: "mapTouch", active: v }));
+  }
+  el.addEventListener("touchstart", function() { setActive(true); }, { passive: true });
+  el.addEventListener("touchend", function(e) { if (!e.touches || e.touches.length === 0) setActive(false); }, { passive: true });
+  el.addEventListener("touchcancel", function() { setActive(false); }, { passive: true });
+})();
+
 document.addEventListener("message", function(event) { handleNativeMessage(event.data); });
 window.addEventListener("message", function(event) { handleNativeMessage(event.data); });
 
 /* ============================================================
    START
+   If React Native pushes terminals, applyTerminals() fetches the
+   route. Otherwise (a screen that doesn't pass terminals) fall
+   back to the built-in real terminals after a short wait.
 ============================================================ */
-setTimeout(fetchRoute, 500);
 setTimeout(function() {
   window.ReactNativeWebView.postMessage(JSON.stringify({ type: "mapReady" }));
 }, 1000);
+
+setTimeout(function() {
+  if (!terminalsReceived && !routeReady) fetchRoute();
+}, 2500);
 
 </script>
 </body>

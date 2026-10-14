@@ -1,22 +1,22 @@
-import { router } from "expo-router";
+// Replaces your current AdminTerminalsScreen (same route/file). No jeepney assignment anymore.
+import * as Location from "expo-location";
+import { router, useFocusEffect } from "expo-router";
 import {
   AlertTriangle,
   ArrowLeft,
-  ArrowRightLeft,
-  BusFront,
   CheckCircle2,
-  Clock3,
+  Crosshair,
   MapPin,
+  Minus,
+  Navigation,
+  Plus,
   RefreshCw,
-  Search,
-  Users,
+  Save,
   X,
-  XCircle,
 } from "lucide-react-native";
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  Modal,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -26,165 +26,288 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import ClayDialog, {
+  ClayDialogState,
+} from "@/src/shared/components/clay/ClayDialog";
 import OceanBackground from "@/src/shared/components/clay/OceanBackground";
+import { MapView } from "@/src/shared/components/map/MapView";
+import { REAL_TERMINALS } from "@/src/shared/constants/terminalDefaults";
 import { colors } from "@/src/shared/constants/theme";
 import {
-  TerminalJeepney,
-  useAdminTerminals,
-} from "@/src/shared/hooks/admin/useAdminTerminal";
+  TerminalConfig,
+  TerminalId,
+  useTerminalSettings,
+} from "@/src/shared/hooks/admin/useTerminalSettings";
 
-type TerminalId = 1 | 2;
+const RADIUS_STEP = 25;
+const RADIUS_MIN = 50;
+const RADIUS_MAX = 500;
+const TARGET_MINUTES = 5;
 
-const TERMINALS = {
-  1: {
-    id: 1 as TerminalId,
-    name: "Donsol",
-    subtitle: "Terminal 1",
-  },
-  2: {
-    id: 2 as TerminalId,
-    name: "Daraga",
-    subtitle: "Terminal 2",
-  },
+type RouteInfo = {
+  ready: boolean;
+  approximate?: boolean;
+  durationMinutes?: number;
+  distanceKm?: number;
 };
 
+type TerminalSettings = ReturnType<typeof useTerminalSettings>;
+
+/**
+ * Waits for the REAL saved terminals before showing the editor, so the built-in defaults can
+ * never appear as if they were your saved geofence.
+ */
 export default function AdminTerminalsScreen() {
-  const {
-    terminalOneJeepneys,
-    terminalTwoJeepneys,
-    terminalOne,
-    terminalTwo,
-    loading,
-    refreshing,
-    saving,
-    error,
-    success,
-    refresh,
-    assignTerminal,
-    clearMessages,
-  } = useAdminTerminals();
+  const settings = useTerminalSettings();
 
-  const [selectedJeepney, setSelectedJeepney] =
-    useState<TerminalJeepney | null>(null);
-
-  const [targetTerminal, setTargetTerminal] = useState<TerminalId | null>(null);
-
-  const [search, setSearch] = useState("");
-
-  const [modalType, setModalType] = useState<
-    "assign" | "success" | "error" | null
-  >(null);
-
-  const filteredTerminalOne = useMemo(() => {
-    return filterJeepneys(terminalOneJeepneys, search);
-  }, [terminalOneJeepneys, search]);
-
-  const filteredTerminalTwo = useMemo(() => {
-    return filterJeepneys(terminalTwoJeepneys, search);
-  }, [terminalTwoJeepneys, search]);
-
-  /**
-   * Navigate back using the same pattern as System Status.
-   *
-   * If there is a previous screen in the navigation stack,
-   * go back normally. Otherwise, return to the admin tabs.
-   */
-  const handleBack = () => {
-    if (router.canGoBack()) {
-      router.back();
-      return;
-    }
-
-    router.replace("/staff/(admin)/(tabs)");
-  };
-
-  const openAssignModal = (jeepney: TerminalJeepney) => {
-    setSelectedJeepney(jeepney);
-    setTargetTerminal(jeepney.terminal_id === 1 ? 2 : 1);
-    setModalType("assign");
-  };
-
-  const closeModal = () => {
-    if (saving) {
-      return;
-    }
-
-    setModalType(null);
-    setSelectedJeepney(null);
-    setTargetTerminal(null);
-  };
-
-  const confirmAssignment = async () => {
-    if (!selectedJeepney || !targetTerminal) {
-      return;
-    }
-
-    const result = await assignTerminal(selectedJeepney.id, targetTerminal);
-
-    if (result) {
-      setModalType("success");
-    } else {
-      setModalType("error");
-    }
-  };
-
-  const closeFeedback = () => {
-    clearMessages();
-    setModalType(null);
-  };
-
-  if (loading) {
+  if (!settings.loaded) {
     return (
       <OceanBackground intensity={0.28}>
-        <SafeAreaView className="flex-1">
-          <View className="flex-1 items-center justify-center px-6">
-            <View className="h-[72px] w-[72px] items-center justify-center rounded-[25px] border border-white/90 bg-clay-surface shadow-clay">
-              <ActivityIndicator size="small" color={colors.primaryDark} />
-            </View>
-
-            <Text className="mt-4 text-[15px] font-extrabold text-ink-dark">
-              Loading terminals...
-            </Text>
-
-            <Text className="mt-1 text-center text-[11px] font-semibold text-ink-muted">
-              Getting the latest terminal assignments
-            </Text>
-          </View>
+        <SafeAreaView className="flex-1 items-center justify-center px-8">
+          {settings.loading ? (
+            <>
+              <ActivityIndicator color={colors.primaryDark} />
+              <Text className="mt-3 text-[13px] font-bold text-ink-dark">
+                Loading saved terminals...
+              </Text>
+            </>
+          ) : (
+            <>
+              <AlertTriangle size={30} color="#B45309" strokeWidth={2.3} />
+              <Text className="mt-3 text-center text-[13px] font-extrabold text-ink-dark">
+                Couldn't load the saved terminals
+              </Text>
+              <Text className="mt-1 text-center text-[11px] text-ink-secondary">
+                {settings.error ?? "Check your connection and try again."}
+              </Text>
+              <Pressable
+                onPress={settings.refresh}
+                className="mt-4 rounded-full bg-ocean-400 px-6 py-3"
+              >
+                <Text className="text-[11px] font-extrabold text-white">
+                  Retry
+                </Text>
+              </Pressable>
+              <Pressable
+                onPress={() => router.back()}
+                className="mt-2 px-6 py-3"
+              >
+                <Text className="text-[11px] font-bold text-slate-500">
+                  Go back
+                </Text>
+              </Pressable>
+            </>
+          )}
         </SafeAreaView>
       </OceanBackground>
     );
   }
 
+  return <TerminalsEditor settings={settings} />;
+}
+
+function TerminalsEditor({ settings }: { settings: TerminalSettings }) {
+  const { terminals, isReal, saving, refresh, save, restoreReal } = settings;
+
+  // Re-read the database every time this screen is opened.
+  useFocusEffect(
+    useCallback(() => {
+      refresh();
+    }, [refresh]),
+  );
+
+  const [drafts, setDrafts] = useState<TerminalConfig[]>(terminals);
+  const [pickTarget, setPickTarget] = useState<TerminalId | null>(null);
+  const [locatingId, setLocatingId] = useState<TerminalId | null>(null);
+  const [route, setRoute] = useState<RouteInfo | null>(null);
+  const [dialog, setDialog] = useState<ClayDialogState>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [mapTouching, setMapTouching] = useState(false);
+
+  const dirty = useMemo(
+    () => JSON.stringify(drafts) !== JSON.stringify(terminals),
+    [drafts, terminals],
+  );
+
+  // Follow server changes (first load, realtime, refresh) unless the admin is mid-edit.
+  // "Mid-edit" means the draft differs from the LAST SYNCED server values, not the live ones.
+  // (Comparing to the live values wrongly blocked the first load: the draft starts as the
+  // defaults, so the freshly loaded saved terminals looked like an unsaved edit.)
+  const syncedRef = useRef<TerminalConfig[]>(terminals);
+  useEffect(() => {
+    const midEdit =
+      JSON.stringify(drafts) !== JSON.stringify(syncedRef.current);
+    if (!midEdit) setDrafts(terminals);
+    syncedRef.current = terminals;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [terminals]);
+
+  const update = (id: TerminalId, patch: Partial<TerminalConfig>) => {
+    setDrafts((prev) =>
+      prev.map((t) => (t.id === id ? { ...t, ...patch } : t)),
+    );
+  };
+
+  const showLocationError = (text: string) =>
+    setDialog({ kind: "error", title: "Location problem", text });
+
+  /* ---------- actions ---------- */
+
+  const useMyLocation = async (id: TerminalId) => {
+    setLocatingId(id);
+    try {
+      const perm = await Location.requestForegroundPermissionsAsync();
+      if (perm.status !== "granted") {
+        showLocationError(
+          "Location permission was denied. Allow it in your phone's app settings.",
+        );
+        return;
+      }
+
+      // Master location switch. On Android this offers the "turn on location" dialog.
+      const servicesOn = await Location.hasServicesEnabledAsync();
+      if (!servicesOn) {
+        try {
+          await Location.enableNetworkProviderAsync();
+        } catch {
+          showLocationError(
+            "Location services are off. Turn on Location in your phone's quick settings.",
+          );
+          return;
+        }
+      }
+
+      const coords = await getBestPosition();
+      if (!coords) {
+        showLocationError(
+          "No location fix yet. Step near a window or outdoors, make sure Google Location Accuracy is on, then try again.",
+        );
+        return;
+      }
+
+      update(id, { lat: coords.latitude, lng: coords.longitude });
+    } catch (e: any) {
+      // Show the real reason instead of hiding it.
+      showLocationError(
+        `Couldn't get your location: ${e?.message ?? String(e)}`,
+      );
+    } finally {
+      setLocatingId(null);
+    }
+  };
+
+  const handleMapTap = async (lat: number, lng: number) => {
+    if (!pickTarget) return;
+    const target = pickTarget;
+    setPickTarget(null);
+    const snapped = await snapToRoad(lat, lng);
+    update(target, snapped);
+  };
+
+  const doSave = async () => {
+    // Save exactly what the database will store, so the draft matches it afterwards.
+    const clean = drafts.map((t) => ({
+      ...t,
+      name: t.name.trim(),
+      radius_m: Math.round(t.radius_m),
+    }));
+    const message = await save(clean);
+    if (!message) setDrafts(clean);
+    setDialog(
+      message
+        ? { kind: "error", title: "Couldn't save", text: message }
+        : {
+            kind: "success",
+            title: "Changes saved",
+            text: "Devices will pick up the new terminals within a minute.",
+          },
+    );
+  };
+
+  const handleSave = () => {
+    if (!isReal) {
+      doSave();
+      return;
+    }
+    // Saving while the real terminals are active replaces them for every device.
+    setDialog({
+      kind: "confirm",
+      title: "Replace the real terminals?",
+      text: "Devices will follow these new locations within a minute. You can restore the real terminals at any time.",
+      confirmLabel: "Save",
+      onConfirm: doSave,
+    });
+  };
+
+  const handleRestoreReal = () => {
+    setDialog({
+      kind: "confirm",
+      title: "Restore real terminals?",
+      text: "Devices will go back to the real Donsol and Daraga geofences within a minute.",
+      confirmLabel: "Restore",
+      onConfirm: async () => {
+        setPickTarget(null);
+        const message = await restoreReal();
+        if (message) {
+          setDialog({
+            kind: "error",
+            title: "Couldn't restore",
+            text: message,
+          });
+        } else {
+          setDrafts(REAL_TERMINALS);
+          setDialog({
+            kind: "success",
+            title: "Terminals restored",
+            text: "Devices are back on the real Donsol and Daraga geofences.",
+          });
+        }
+      },
+    });
+  };
+
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    await refresh();
+    setRefreshing(false);
+  };
+
+  const handleBack = () => {
+    if (router.canGoBack()) router.back();
+    else router.replace("/staff/(admin)/(tabs)");
+  };
+
+  /* ---------- derived ---------- */
+
+  const minutes = route?.durationMinutes;
+  const routeOk = minutes != null && minutes >= 3 && minutes <= 8;
+
   return (
     <OceanBackground intensity={0.28}>
       <SafeAreaView className="flex-1">
         <ScrollView
+          scrollEnabled={!mapTouching}
           showsVerticalScrollIndicator={false}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
-              onRefresh={refresh}
+              onRefresh={handleRefresh}
               tintColor={colors.primaryDark}
             />
           }
           contentContainerStyle={{
             paddingHorizontal: 20,
             paddingTop: 10,
-            paddingBottom: 140,
+            paddingBottom: 160,
           }}
         >
-          {/* =====================================================
-              HEADER
-          ====================================================== */}
-
+          {/* HEADER */}
           <View className="flex-row items-center">
-            {/* BACK BUTTON */}
-
             <Pressable
-              onPress={() => router.back()}
-              className="h-[48px] w-[48px] items-center justify-center rounded-[16px] bg-white/80"
+              onPress={handleBack}
               accessibilityRole="button"
               accessibilityLabel="Go back"
+              className="h-[48px] w-[48px] items-center justify-center rounded-[16px] bg-white/80"
             >
               <ArrowLeft
                 size={19}
@@ -193,25 +316,20 @@ export default function AdminTerminalsScreen() {
               />
             </Pressable>
 
-            {/* TITLE */}
-
             <View className="ml-3 flex-1">
               <Text className="text-[10px] font-extrabold uppercase tracking-[1.3px] text-ocean-700">
                 ADMIN
               </Text>
-
               <Text className="mt-0.5 text-[25px] font-extrabold text-ink-dark">
-                Terminals
+                {isReal ? "Terminals" : "Terminals · Demo"}
               </Text>
             </View>
 
-            {/* REFRESH */}
-
             <Pressable
-              onPress={refresh}
+              onPress={handleRefresh}
               disabled={refreshing}
               accessibilityRole="button"
-              accessibilityLabel="Refresh terminals"
+              accessibilityLabel="Refresh"
               className="h-[44px] w-[44px] items-center justify-center rounded-[16px] border border-white/90 bg-clay-surface shadow-clay-sm"
             >
               <RefreshCw
@@ -223,495 +341,325 @@ export default function AdminTerminalsScreen() {
           </View>
 
           <Text className="mt-2 text-[11px] font-medium leading-[17px] text-ink-secondary">
-            Assign and manage jeepneys between the Donsol and Daraga terminals.
+            Set where each terminal is and how large its geofence is. Jeepney
+            devices follow these values automatically.
           </Text>
 
-          {/* =====================================================
-              SEARCH
-          ====================================================== */}
-
-          <View className="mt-5 flex-row items-center rounded-[19px] border border-white/90 bg-clay-surface px-4">
-            <Search size={18} color="#64748B" strokeWidth={2.3} />
-
-            <TextInput
-              value={search}
-              onChangeText={setSearch}
-              placeholder="Search jeepney or plate number..."
-              placeholderTextColor="#94A3B8"
-              className="ml-3 h-[48px] flex-1 text-[12px] font-semibold text-ink-dark"
-            />
-
-            {search.length > 0 && (
-              <Pressable
-                onPress={() => setSearch("")}
-                accessibilityRole="button"
-                accessibilityLabel="Clear search"
-                className="h-[30px] w-[30px] items-center justify-center rounded-full bg-slate-100"
+          {/* ACTIVE GEOFENCE STATUS */}
+          <View
+            className={`mt-5 rounded-[22px] border p-4 ${
+              isReal
+                ? "border-emerald-100 bg-emerald-50"
+                : "border-amber-200 bg-amber-50"
+            }`}
+          >
+            <View className="flex-row items-center">
+              {isReal ? (
+                <CheckCircle2 size={18} color="#059669" strokeWidth={2.4} />
+              ) : (
+                <AlertTriangle size={18} color="#B45309" strokeWidth={2.4} />
+              )}
+              <Text
+                className={`ml-2 flex-1 text-[12px] font-extrabold ${
+                  isReal ? "text-emerald-700" : "text-amber-700"
+                }`}
               >
-                <X size={14} color="#64748B" strokeWidth={2.5} />
+                {isReal
+                  ? "Devices are using the real terminals"
+                  : "Demo geofence active"}
+              </Text>
+            </View>
+
+            <Text className="mt-1.5 text-[10px] font-semibold leading-[15px] text-ink-secondary">
+              {isReal
+                ? "Any change you save here replaces the real geofence on every device."
+                : "Devices are following your custom locations, not the real Donsol and Daraga terminals."}
+            </Text>
+
+            {!isReal && (
+              <Pressable
+                onPress={handleRestoreReal}
+                disabled={saving}
+                className="mt-3 flex-row items-center self-start rounded-full bg-amber-400 px-4 py-2.5"
+              >
+                <RefreshCw size={13} color="#FFFFFF" strokeWidth={2.6} />
+                <Text className="ml-1.5 text-[10px] font-extrabold text-white">
+                  Restore real terminals
+                </Text>
               </Pressable>
             )}
           </View>
 
-          {/* =====================================================
-              OVERVIEW
-          ====================================================== */}
-
-          <View className="mt-5 flex-row">
-            <TerminalSummaryCard
-              name="Donsol"
-              terminal="Terminal 1"
-              total={terminalOne.total}
-              active={terminalOne.active}
-              icon={<MapPin size={18} color="#0369A1" strokeWidth={2.4} />}
-            />
+          {/* ROUTE SUMMARY */}
+          <View className="mt-4 flex-row items-center rounded-[22px] border border-white/90 bg-clay-surface p-4 shadow-clay-sm">
+            <View
+              className={`h-[44px] w-[44px] items-center justify-center rounded-[15px] ${
+                minutes == null
+                  ? "bg-slate-100"
+                  : routeOk
+                    ? "bg-emerald-100"
+                    : "bg-amber-100"
+              }`}
+            >
+              {minutes == null ? (
+                <ActivityIndicator size="small" color={colors.primaryDark} />
+              ) : routeOk ? (
+                <CheckCircle2 size={22} color="#059669" strokeWidth={2.4} />
+              ) : (
+                <AlertTriangle size={22} color="#B45309" strokeWidth={2.4} />
+              )}
+            </View>
 
             <View className="ml-3 flex-1">
-              <TerminalSummaryCard
-                name="Daraga"
-                terminal="Terminal 2"
-                total={terminalTwo.total}
-                active={terminalTwo.active}
-                icon={<MapPin size={18} color="#4338CA" strokeWidth={2.4} />}
-              />
+              <Text className="text-[9px] font-bold uppercase tracking-[0.5px] text-ink-muted">
+                Drive time between terminals
+              </Text>
+              <Text className="mt-0.5 text-[16px] font-extrabold text-ink-dark">
+                {minutes == null
+                  ? "Calculating..."
+                  : `${minutes.toFixed(1)} min · ${(route?.distanceKm ?? 0).toFixed(1)} km`}
+              </Text>
+              <Text className="mt-0.5 text-[10px] font-semibold text-ink-secondary">
+                {route?.approximate
+                  ? "Straight-line estimate (road routing unavailable)"
+                  : `Target about ${TARGET_MINUTES} min (car estimate)`}
+              </Text>
             </View>
           </View>
 
-          {/* =====================================================
-              TERMINAL 1
-          ====================================================== */}
+          {/* MAP */}
+          <View
+            className="mt-4 overflow-hidden rounded-[28px] border border-white bg-white shadow-clay-floating"
+            style={{ height: 320 }}
+          >
+            <MapView
+              markers={[]}
+              terminals={drafts}
+              pickMode={pickTarget !== null}
+              onMapTap={handleMapTap}
+              onTouchActive={setMapTouching}
+              onRouteStatus={(s) =>
+                setRoute({
+                  ready: s.ready,
+                  approximate: s.approximate,
+                  durationMinutes: s.durationMinutes,
+                  distanceKm: s.distanceKm,
+                })
+              }
+              showControls
+              enableRealtime={false}
+              style={{ flex: 1, width: "100%", height: "100%" }}
+            />
 
-          <TerminalSection
-            terminal={TERMINALS[1]}
-            jeepneys={filteredTerminalOne}
-            total={terminalOne.total}
-            active={terminalOne.active}
-            inactive={terminalOne.inactive}
-            onAssign={openAssignModal}
-          />
+            {pickTarget !== null && (
+              <View className="absolute left-3 right-16 top-3 flex-row items-center rounded-full border border-white bg-white px-3 py-2 shadow-clay-sm">
+                <Crosshair
+                  size={14}
+                  color={colors.primaryDark}
+                  strokeWidth={2.5}
+                />
+                <Text className="ml-2 flex-1 text-[10px] font-extrabold text-ink-dark">
+                  Tap the map to place{" "}
+                  {drafts.find((t) => t.id === pickTarget)?.name}
+                </Text>
+                <Pressable
+                  onPress={() => setPickTarget(null)}
+                  accessibilityLabel="Cancel picking"
+                  className="h-[22px] w-[22px] items-center justify-center rounded-full bg-slate-100"
+                >
+                  <X size={12} color="#64748B" strokeWidth={2.6} />
+                </Pressable>
+              </View>
+            )}
+          </View>
 
-          {/* =====================================================
-              TERMINAL 2
-          ====================================================== */}
-
-          <TerminalSection
-            terminal={TERMINALS[2]}
-            jeepneys={filteredTerminalTwo}
-            total={terminalTwo.total}
-            active={terminalTwo.active}
-            inactive={terminalTwo.inactive}
-            onAssign={openAssignModal}
-          />
+          {/* EDITORS */}
+          {drafts.map((t) => (
+            <TerminalEditor
+              key={t.id}
+              terminal={t}
+              picking={pickTarget === t.id}
+              locating={locatingId === t.id}
+              onName={(name) => update(t.id, { name })}
+              onRadius={(radius_m) =>
+                update(t.id, {
+                  radius_m: Math.min(
+                    RADIUS_MAX,
+                    Math.max(RADIUS_MIN, radius_m),
+                  ),
+                })
+              }
+              onUseMyLocation={() => useMyLocation(t.id)}
+              onPick={() => setPickTarget(pickTarget === t.id ? null : t.id)}
+            />
+          ))}
         </ScrollView>
 
-        {/* =======================================================
-            ASSIGN MODAL
-        ======================================================== */}
+        {/* SAVE BAR */}
+        <View className="absolute bottom-0 left-0 right-0 px-5 pb-6 pt-3">
+          <View className="flex-row rounded-[26px] border border-white/90 bg-clay-surface p-2 shadow-clay">
+            <Pressable
+              onPress={() => {
+                setDrafts(terminals);
+                setPickTarget(null);
+              }}
+              disabled={!dirty || saving}
+              className="items-center justify-center rounded-full px-5"
+            >
+              <Text
+                className={`text-[11px] font-extrabold ${dirty ? "text-slate-600" : "text-slate-300"}`}
+              >
+                Reset
+              </Text>
+            </Pressable>
 
-        <AssignModal
-          visible={modalType === "assign"}
-          jeepney={selectedJeepney}
-          targetTerminal={targetTerminal}
-          saving={saving}
-          onClose={closeModal}
-          onChangeTerminal={setTargetTerminal}
-          onConfirm={confirmAssignment}
-        />
+            <Pressable
+              onPress={handleSave}
+              disabled={!dirty || saving}
+              className={`ml-2 flex-1 flex-row items-center justify-center rounded-full py-3.5 ${
+                dirty && !saving ? "bg-ocean-400" : "bg-slate-200"
+              }`}
+            >
+              {saving ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <>
+                  <Save size={15} color="#FFFFFF" strokeWidth={2.5} />
+                  <Text className="ml-1.5 text-[11px] font-extrabold text-white">
+                    {dirty ? "Save changes" : "No changes"}
+                  </Text>
+                </>
+              )}
+            </Pressable>
+          </View>
+        </View>
 
-        {/* =======================================================
-            FEEDBACK MODAL
-        ======================================================== */}
-
-        <FeedbackModal
-          visible={modalType === "success" || modalType === "error"}
-          type={modalType === "success" ? "success" : "error"}
-          message={
-            modalType === "success"
-              ? (success ?? "Terminal assignment updated successfully.")
-              : (error ?? "Unable to update terminal assignment.")
-          }
-          onClose={closeFeedback}
-        />
+        {/* CLAY DIALOG (confirm / success / error) */}
+        <ClayDialog dialog={dialog} onClose={() => setDialog(null)} />
       </SafeAreaView>
     </OceanBackground>
   );
 }
 
 /* ================================================================
-   HELPERS
+   TERMINAL EDITOR
 ================================================================ */
 
-function filterJeepneys(jeepneys: TerminalJeepney[], search: string) {
-  const query = search.trim().toLowerCase();
-
-  if (!query) {
-    return jeepneys;
-  }
-
-  return jeepneys.filter((jeepney) => {
-    return (
-      jeepney.plate_number.toLowerCase().includes(query) ||
-      (jeepney.jeep_name ?? "").toLowerCase().includes(query) ||
-      (jeepney.driver_name ?? "").toLowerCase().includes(query)
-    );
-  });
-}
-
-function getStatusPresentation(status: TerminalJeepney["status"]) {
-  switch (status) {
-    case "waiting":
-      return {
-        label: "Waiting",
-        background: "#DBEAFE",
-        color: "#0369A1",
-      };
-
-    case "loading":
-      return {
-        label: "Loading",
-        background: "#FEF3C7",
-        color: "#B45309",
-      };
-
-    case "en_route":
-      return {
-        label: "En Route",
-        background: "#E0E7FF",
-        color: "#4338CA",
-      };
-
-    case "arrived":
-      return {
-        label: "Arrived",
-        background: "#D1FAE5",
-        color: "#047857",
-      };
-
-    case "dispatched":
-      return {
-        label: "Dispatched",
-        background: "#E0F2FE",
-        color: "#0369A1",
-      };
-
-    default:
-      return {
-        label: "Inactive",
-        background: "#F1F5F9",
-        color: "#64748B",
-      };
-  }
-}
-
-/* ================================================================
-   TERMINAL SUMMARY
-================================================================ */
-
-function TerminalSummaryCard({
-  name,
+function TerminalEditor({
   terminal,
-  total,
-  active,
-  icon,
+  picking,
+  locating,
+  onName,
+  onRadius,
+  onUseMyLocation,
+  onPick,
 }: {
-  name: string;
-  terminal: string;
-  total: number;
-  active: number;
-  icon: React.ReactNode;
+  terminal: TerminalConfig;
+  picking: boolean;
+  locating: boolean;
+  onName: (name: string) => void;
+  onRadius: (radius: number) => void;
+  onUseMyLocation: () => void;
+  onPick: () => void;
 }) {
   return (
-    <View className="flex-1 rounded-[24px] border border-white/90 bg-clay-surface p-4 shadow-clay-sm">
-      <View className="h-[40px] w-[40px] items-center justify-center rounded-[14px] bg-ocean-100">
-        {icon}
-      </View>
-
-      <Text className="mt-3 text-[15px] font-extrabold text-ink-dark">
-        {name}
-      </Text>
-
-      <Text className="mt-0.5 text-[9px] font-bold uppercase tracking-[0.5px] text-ink-muted">
-        {terminal}
-      </Text>
-
-      <View className="mt-4 flex-row items-end">
-        <Text className="text-[25px] font-extrabold text-ink-dark">
-          {total}
-        </Text>
-
-        <Text className="mb-1 ml-1 text-[9px] font-bold text-ink-muted">
-          jeepneys
-        </Text>
-      </View>
-
-      <View className="mt-2 flex-row items-center">
-        <View className="h-[7px] w-[7px] rounded-full bg-emerald-500" />
-
-        <Text className="ml-1.5 text-[9px] font-bold text-emerald-700">
-          {active} active
-        </Text>
-      </View>
-    </View>
-  );
-}
-
-/* ================================================================
-   TERMINAL SECTION
-================================================================ */
-
-function TerminalSection({
-  terminal,
-  jeepneys,
-  total,
-  active,
-  inactive,
-  onAssign,
-}: {
-  terminal: {
-    id: TerminalId;
-    name: string;
-    subtitle: string;
-  };
-  jeepneys: TerminalJeepney[];
-  total: number;
-  active: number;
-  inactive: number;
-  onAssign: (jeepney: TerminalJeepney) => void;
-}) {
-  return (
-    <View className="mt-7">
-      <View className="mb-3 flex-row items-end justify-between">
-        <View className="flex-1">
-          <Text className="text-[17px] font-extrabold text-ink-dark">
-            {terminal.name}
-          </Text>
-
-          <Text className="mt-0.5 text-[10px] font-semibold text-ink-muted">
-            {terminal.subtitle}
-          </Text>
-        </View>
-
-        <View className="rounded-full bg-ocean-100 px-3 py-1.5">
-          <Text className="text-[10px] font-extrabold text-ocean-700">
-            {total}
-          </Text>
-        </View>
-      </View>
-
-      <View className="mb-3 flex-row">
-        <MiniStat
-          label="Active"
-          value={active}
-          icon={<CheckCircle2 size={14} color="#059669" strokeWidth={2.4} />}
-        />
-
-        <View className="ml-2 flex-1">
-          <MiniStat
-            label="Inactive"
-            value={inactive}
-            icon={<XCircle size={14} color="#64748B" strokeWidth={2.4} />}
-          />
-        </View>
-      </View>
-
-      {jeepneys.length === 0 ? (
-        <EmptyTerminal />
-      ) : (
-        jeepneys.map((jeepney) => (
-          <JeepneyTerminalCard
-            key={jeepney.id}
-            jeepney={jeepney}
-            terminalId={terminal.id}
-            onAssign={() => onAssign(jeepney)}
-          />
-        ))
-      )}
-    </View>
-  );
-}
-
-/* ================================================================
-   MINI STAT
-================================================================ */
-
-function MiniStat({
-  label,
-  value,
-  icon,
-}: {
-  label: string;
-  value: number;
-  icon: React.ReactNode;
-}) {
-  return (
-    <View className="flex-1 flex-row items-center rounded-[17px] border border-white/90 bg-clay-surface px-3 py-3">
-      {icon}
-
-      <View className="ml-2">
-        <Text className="text-[9px] font-bold uppercase text-ink-muted">
-          {label}
-        </Text>
-
-        <Text className="mt-0.5 text-[13px] font-extrabold text-ink-dark">
-          {value}
-        </Text>
-      </View>
-    </View>
-  );
-}
-
-/* ================================================================
-   JEEPNEY CARD
-================================================================ */
-
-function JeepneyTerminalCard({
-  jeepney,
-  terminalId,
-  onAssign,
-}: {
-  jeepney: TerminalJeepney;
-  terminalId: TerminalId;
-  onAssign: () => void;
-}) {
-  const status = getStatusPresentation(jeepney.status);
-
-  const occupancy = Math.min(
-    100,
-    Math.round(
-      (jeepney.current_occupancy / Math.max(jeepney.capacity, 1)) * 100,
-    ),
-  );
-
-  const targetTerminal = terminalId === 1 ? "Daraga" : "Donsol";
-
-  return (
-    <View className="mb-3 rounded-[25px] border border-white/90 bg-clay-surface p-4 shadow-clay-sm">
-      {/* HEADER */}
-
+    <View className="mt-5 rounded-[26px] border border-white/90 bg-clay-surface p-4 shadow-clay-sm">
       <View className="flex-row items-center">
-        <View className="h-[47px] w-[47px] items-center justify-center rounded-[15px] bg-ocean-100">
-          <BusFront size={23} color={colors.primaryDark} strokeWidth={2.3} />
+        <View className="h-[42px] w-[42px] items-center justify-center rounded-[14px] bg-ocean-100">
+          <MapPin size={20} color={colors.primaryDark} strokeWidth={2.4} />
         </View>
-
         <View className="ml-3 flex-1">
-          <Text
-            numberOfLines={1}
-            className="text-[13px] font-extrabold text-ink-dark"
-          >
-            {jeepney.jeep_name || jeepney.plate_number || "Unnamed Jeepney"}
+          <Text className="text-[9px] font-bold uppercase tracking-[0.5px] text-ink-muted">
+            Terminal {terminal.id}
           </Text>
-
-          <Text className="mt-0.5 text-[10px] font-semibold text-ink-secondary">
-            {jeepney.plate_number || "No plate number"}
-          </Text>
-        </View>
-
-        <View
-          className="rounded-full px-2.5 py-1.5"
-          style={{
-            backgroundColor: status.background,
-          }}
-        >
-          <Text
-            className="text-[8px] font-extrabold uppercase"
-            style={{
-              color: status.color,
-            }}
-          >
-            {status.label}
-          </Text>
+          <TextInput
+            value={terminal.name}
+            onChangeText={onName}
+            placeholder="Terminal name"
+            placeholderTextColor="#94A3B8"
+            className="mt-0.5 h-[34px] text-[15px] font-extrabold text-ink-dark"
+          />
         </View>
       </View>
 
-      {/* DRIVER / BRACKET */}
-
-      <View className="mt-4 flex-row">
-        <InfoItem
-          icon={<Users size={14} color="#64748B" strokeWidth={2.2} />}
-          label="Driver"
-          value={jeepney.driver_name || "Unassigned"}
-        />
-
-        <InfoItem
-          icon={<MapPin size={14} color="#64748B" strokeWidth={2.2} />}
-          label="Bracket"
-          value={String(jeepney.bracket)}
-        />
+      <View className="mt-3 rounded-[16px] bg-ocean-50 p-3">
+        <Text className="text-[8px] font-bold uppercase text-ink-muted">
+          Coordinates
+        </Text>
+        <Text className="mt-1 text-[12px] font-extrabold text-ink-dark">
+          {terminal.lat.toFixed(5)}, {terminal.lng.toFixed(5)}
+        </Text>
       </View>
-
-      {/* OCCUPANCY / QUEUE */}
 
       <View className="mt-3 flex-row">
-        <InfoItem
-          icon={<Users size={14} color="#64748B" strokeWidth={2.2} />}
-          label="Occupancy"
-          value={`${jeepney.current_occupancy}/${jeepney.capacity}`}
-        />
-
-        <InfoItem
-          icon={<Clock3 size={14} color="#64748B" strokeWidth={2.2} />}
-          label="Queue"
-          value={
-            jeepney.queue_position !== null ? `#${jeepney.queue_position}` : "—"
-          }
-        />
-      </View>
-
-      {/* OCCUPANCY BAR */}
-
-      <View className="mt-4">
-        <View className="h-[7px] overflow-hidden rounded-full bg-slate-100">
-          <View
-            className="h-full rounded-full bg-ocean-400"
-            style={{
-              width: `${occupancy}%`,
-            }}
-          />
-        </View>
-
-        <View className="mt-2 flex-row items-center justify-between">
-          <Text className="text-[9px] font-semibold text-ink-muted">
-            Occupancy
-          </Text>
-
-          <Text className="text-[9px] font-extrabold text-ocean-700">
-            {occupancy}%
-          </Text>
-        </View>
-      </View>
-
-      {/* GPS / MOVE */}
-
-      <View className="mt-4 flex-row items-center">
-        <View className="flex-1 flex-row items-center">
-          {jeepney.last_gps_at && isToday(jeepney.last_gps_at) ? (
-            <>
-              <View className="h-[7px] w-[7px] rounded-full bg-emerald-500" />
-
-              <Text className="ml-1.5 text-[9px] font-bold text-emerald-700">
-                GPS active today
-              </Text>
-            </>
+        <Pressable
+          onPress={onUseMyLocation}
+          disabled={locating}
+          className="flex-1 flex-row items-center justify-center rounded-full bg-ocean-100 py-3"
+        >
+          {locating ? (
+            <ActivityIndicator size="small" color={colors.primaryDark} />
           ) : (
             <>
-              <View className="h-[7px] w-[7px] rounded-full bg-slate-400" />
-
-              <Text className="ml-1.5 text-[9px] font-bold text-slate-500">
-                No GPS today
+              <Navigation
+                size={14}
+                color={colors.primaryDark}
+                strokeWidth={2.5}
+              />
+              <Text className="ml-1.5 text-[10px] font-extrabold text-ocean-700">
+                Use my location
               </Text>
             </>
           )}
+        </Pressable>
+
+        <Pressable
+          onPress={onPick}
+          className={`ml-2 flex-1 flex-row items-center justify-center rounded-full py-3 ${
+            picking ? "bg-ocean-400" : "bg-ocean-100"
+          }`}
+        >
+          <Crosshair
+            size={14}
+            color={picking ? "#FFFFFF" : colors.primaryDark}
+            strokeWidth={2.5}
+          />
+          <Text
+            className={`ml-1.5 text-[10px] font-extrabold ${picking ? "text-white" : "text-ocean-700"}`}
+          >
+            {picking ? "Tap the map..." : "Pick on map"}
+          </Text>
+        </Pressable>
+      </View>
+
+      <View className="mt-4 flex-row items-center">
+        <View className="flex-1">
+          <Text className="text-[9px] font-bold uppercase tracking-[0.5px] text-ink-muted">
+            Geofence radius
+          </Text>
+          <Text className="mt-0.5 text-[10px] font-semibold text-ink-secondary">
+            100 m or more is most reliable on Android
+          </Text>
         </View>
 
         <Pressable
-          onPress={onAssign}
-          className="flex-row items-center rounded-full bg-ocean-400 px-3.5 py-2.5"
+          onPress={() => onRadius(terminal.radius_m - RADIUS_STEP)}
+          accessibilityLabel="Decrease radius"
+          className="h-[36px] w-[36px] items-center justify-center rounded-full bg-slate-100"
         >
-          <ArrowRightLeft size={13} color="#FFFFFF" strokeWidth={2.5} />
+          <Minus size={16} color="#475569" strokeWidth={2.6} />
+        </Pressable>
 
-          <Text className="ml-1.5 text-[9px] font-extrabold text-white">
-            Move to {targetTerminal}
-          </Text>
+        <Text className="w-[64px] text-center text-[15px] font-extrabold text-ink-dark">
+          {terminal.radius_m} m
+        </Text>
+
+        <Pressable
+          onPress={() => onRadius(terminal.radius_m + RADIUS_STEP)}
+          accessibilityLabel="Increase radius"
+          className="h-[36px] w-[36px] items-center justify-center rounded-full bg-slate-100"
+        >
+          <Plus size={16} color="#475569" strokeWidth={2.6} />
         </Pressable>
       </View>
     </View>
@@ -719,367 +667,82 @@ function JeepneyTerminalCard({
 }
 
 /* ================================================================
-   INFO ITEM
+   LOCATION FIX (tries several ways before giving up)
 ================================================================ */
 
-function InfoItem({
-  icon,
-  label,
-  value,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  value: string;
-}) {
-  return (
-    <View className="flex-1 flex-row items-center">
-      <View className="h-[29px] w-[29px] items-center justify-center rounded-[10px] bg-slate-50">
-        {icon}
-      </View>
-
-      <View className="ml-2 flex-1">
-        <Text className="text-[8px] font-bold uppercase tracking-[0.4px] text-ink-muted">
-          {label}
-        </Text>
-
-        <Text
-          numberOfLines={1}
-          className="mt-0.5 text-[10px] font-extrabold text-ink-dark"
-        >
-          {value}
-        </Text>
-      </View>
-    </View>
-  );
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error("Location request timed out")),
+      ms,
+    );
+    promise.then(
+      (v) => {
+        clearTimeout(timer);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(timer);
+        reject(e);
+      },
+    );
+  });
 }
 
-/* ================================================================
-   EMPTY
-================================================================ */
+async function getBestPosition(): Promise<{
+  latitude: number;
+  longitude: number;
+} | null> {
+  // 1. Precise fix (GPS), 2. network/balanced fix, 3. last known fix.
+  const attempts: Array<() => Promise<Location.LocationObject | null>> = [
+    () =>
+      withTimeout(
+        Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High }),
+        15000,
+      ),
+    () =>
+      withTimeout(
+        Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.Balanced,
+        }),
+        10000,
+      ),
+    () => Location.getLastKnownPositionAsync({ maxAge: 10 * 60 * 1000 }),
+  ];
 
-function EmptyTerminal() {
-  return (
-    <View className="items-center rounded-[25px] border border-white/90 bg-white/70 px-6 py-8">
-      <View className="h-[52px] w-[52px] items-center justify-center rounded-[17px] bg-ocean-100">
-        <BusFront size={24} color={colors.primaryDark} strokeWidth={2.3} />
-      </View>
-
-      <Text className="mt-3 text-[14px] font-extrabold text-ink-dark">
-        No jeepneys assigned
-      </Text>
-
-      <Text className="mt-1 text-center text-[10px] leading-[16px] text-ink-secondary">
-        There are currently no jeepneys assigned to this terminal.
-      </Text>
-    </View>
-  );
-}
-
-/* ================================================================
-   ASSIGN MODAL
-================================================================ */
-
-function AssignModal({
-  visible,
-  jeepney,
-  targetTerminal,
-  saving,
-  onClose,
-  onChangeTerminal,
-  onConfirm,
-}: {
-  visible: boolean;
-  jeepney: TerminalJeepney | null;
-  targetTerminal: TerminalId | null;
-  saving: boolean;
-  onClose: () => void;
-  onChangeTerminal: (terminal: TerminalId) => void;
-  onConfirm: () => void;
-}) {
-  if (!jeepney) {
-    return null;
+  let lastError: unknown = null;
+  for (const attempt of attempts) {
+    try {
+      const pos = await attempt();
+      if (pos?.coords) return pos.coords;
+    } catch (e) {
+      lastError = e;
+    }
   }
-
-  return (
-    <Modal
-      visible={visible}
-      transparent
-      animationType="fade"
-      onRequestClose={onClose}
-    >
-      <View className="flex-1 items-center justify-center bg-black/30 px-5">
-        <View className="w-full max-w-[430px] rounded-[30px] border border-white/95 bg-clay-surface p-5 shadow-clay">
-          <View className="flex-row items-center">
-            <View className="h-[48px] w-[48px] items-center justify-center rounded-[16px] bg-ocean-100">
-              <ArrowRightLeft
-                size={22}
-                color={colors.primaryDark}
-                strokeWidth={2.4}
-              />
-            </View>
-
-            <View className="ml-3 flex-1">
-              <Text className="text-[16px] font-extrabold text-ink-dark">
-                Assign Terminal
-              </Text>
-
-              <Text className="mt-0.5 text-[10px] font-semibold text-ink-muted">
-                Change this jeepney&apos;s terminal
-              </Text>
-            </View>
-
-            <Pressable
-              onPress={onClose}
-              disabled={saving}
-              className="h-[34px] w-[34px] items-center justify-center rounded-full bg-white"
-            >
-              <X size={16} color="#64748B" strokeWidth={2.5} />
-            </Pressable>
-          </View>
-
-          <View className="mt-5 rounded-[19px] bg-white/80 p-4">
-            <Text className="text-[13px] font-extrabold text-ink-dark">
-              {jeepney.jeep_name || jeepney.plate_number}
-            </Text>
-
-            <Text className="mt-1 text-[10px] font-semibold text-ink-secondary">
-              {jeepney.plate_number}
-            </Text>
-
-            <View className="mt-3 flex-row">
-              <View className="flex-1">
-                <Text className="text-[8px] font-bold uppercase text-ink-muted">
-                  Current terminal
-                </Text>
-
-                <Text className="mt-1 text-[11px] font-extrabold text-ink-dark">
-                  {jeepney.terminal_id === 1 ? "Donsol" : "Daraga"}
-                </Text>
-              </View>
-
-              <View className="flex-1">
-                <Text className="text-[8px] font-bold uppercase text-ink-muted">
-                  Bracket
-                </Text>
-
-                <Text className="mt-1 text-[11px] font-extrabold text-ink-dark">
-                  {jeepney.bracket}
-                </Text>
-              </View>
-            </View>
-          </View>
-
-          <Text className="mt-5 text-[10px] font-extrabold uppercase tracking-[0.6px] text-ink-muted">
-            Select terminal
-          </Text>
-
-          <TerminalOption
-            name="Donsol"
-            subtitle="Terminal 1"
-            selected={targetTerminal === 1}
-            disabled={jeepney.terminal_id === 1}
-            onPress={() => onChangeTerminal(1)}
-          />
-
-          <TerminalOption
-            name="Daraga"
-            subtitle="Terminal 2"
-            selected={targetTerminal === 2}
-            disabled={jeepney.terminal_id === 2}
-            onPress={() => onChangeTerminal(2)}
-          />
-
-          <View className="mt-5 flex-row">
-            <Pressable
-              onPress={onClose}
-              disabled={saving}
-              className="flex-1 items-center justify-center rounded-full bg-white py-3.5"
-            >
-              <Text className="text-[11px] font-extrabold text-slate-600">
-                Cancel
-              </Text>
-            </Pressable>
-
-            <Pressable
-              onPress={onConfirm}
-              disabled={
-                saving ||
-                !targetTerminal ||
-                targetTerminal === jeepney.terminal_id
-              }
-              className={`ml-2 flex-1 flex-row items-center justify-center rounded-full py-3.5 ${
-                saving ||
-                !targetTerminal ||
-                targetTerminal === jeepney.terminal_id
-                  ? "bg-slate-200"
-                  : "bg-ocean-400"
-              }`}
-            >
-              {saving ? (
-                <ActivityIndicator size="small" color="#FFFFFF" />
-              ) : (
-                <>
-                  <CheckCircle2 size={15} color="#FFFFFF" strokeWidth={2.5} />
-
-                  <Text className="ml-1.5 text-[11px] font-extrabold text-white">
-                    Confirm
-                  </Text>
-                </>
-              )}
-            </Pressable>
-          </View>
-        </View>
-      </View>
-    </Modal>
-  );
+  if (lastError) throw lastError;
+  return null;
 }
 
 /* ================================================================
-   TERMINAL OPTION
+   SNAP TO ROAD (free OSRM "nearest")
 ================================================================ */
 
-function TerminalOption({
-  name,
-  subtitle,
-  selected,
-  disabled,
-  onPress,
-}: {
-  name: string;
-  subtitle: string;
-  selected: boolean;
-  disabled: boolean;
-  onPress: () => void;
-}) {
-  return (
-    <Pressable
-      onPress={onPress}
-      disabled={disabled}
-      className={`mt-2 flex-row items-center rounded-[19px] border p-4 ${
-        selected
-          ? "border-ocean-300 bg-ocean-50"
-          : "border-white/90 bg-white/70"
-      }`}
-    >
-      <View
-        className={`h-[38px] w-[38px] items-center justify-center rounded-[13px] ${
-          selected ? "bg-ocean-100" : "bg-slate-100"
-        }`}
-      >
-        <MapPin
-          size={18}
-          color={selected ? colors.primaryDark : "#64748B"}
-          strokeWidth={2.3}
-        />
-      </View>
-
-      <View className="ml-3 flex-1">
-        <Text className="text-[12px] font-extrabold text-ink-dark">{name}</Text>
-
-        <Text className="mt-0.5 text-[9px] font-semibold text-ink-muted">
-          {subtitle}
-        </Text>
-      </View>
-
-      {disabled ? (
-        <View className="rounded-full bg-slate-100 px-2.5 py-1.5">
-          <Text className="text-[8px] font-extrabold text-slate-500">
-            CURRENT
-          </Text>
-        </View>
-      ) : selected ? (
-        <CheckCircle2 size={20} color={colors.primaryDark} strokeWidth={2.5} />
-      ) : (
-        <View className="h-[20px] w-[20px] rounded-full border-2 border-slate-200" />
-      )}
-    </Pressable>
-  );
-}
-
-/* ================================================================
-   FEEDBACK MODAL
-================================================================ */
-
-function FeedbackModal({
-  visible,
-  type,
-  message,
-  onClose,
-}: {
-  visible: boolean;
-  type: "success" | "error";
-  message: string;
-  onClose: () => void;
-}) {
-  const successMode = type === "success";
-
-  return (
-    <Modal
-      visible={visible}
-      transparent
-      animationType="fade"
-      onRequestClose={onClose}
-    >
-      <View className="flex-1 items-center justify-center bg-black/30 px-5">
-        <View className="w-full max-w-[410px] rounded-[30px] border border-white/95 bg-clay-surface p-6 shadow-clay">
-          <View className="items-center">
-            <View
-              className={`h-[68px] w-[68px] items-center justify-center rounded-[23px] ${
-                successMode ? "bg-emerald-100" : "bg-red-50"
-              }`}
-            >
-              {successMode ? (
-                <CheckCircle2 size={34} color="#059669" strokeWidth={2.3} />
-              ) : (
-                <AlertTriangle size={34} color="#DC2626" strokeWidth={2.3} />
-              )}
-            </View>
-
-            <Text className="mt-4 text-[17px] font-extrabold text-ink-dark">
-              {successMode ? "Assignment Updated" : "Assignment Failed"}
-            </Text>
-
-            <Text className="mt-2 text-center text-[11px] leading-[17px] text-ink-secondary">
-              {message}
-            </Text>
-
-            <Pressable
-              onPress={onClose}
-              className={`mt-5 w-full items-center justify-center rounded-full py-3.5 ${
-                successMode ? "bg-ocean-400" : "bg-slate-700"
-              }`}
-            >
-              <Text className="text-[11px] font-extrabold text-white">
-                {successMode ? "Done" : "Close"}
-              </Text>
-            </Pressable>
-          </View>
-        </View>
-      </View>
-    </Modal>
-  );
-}
-
-/* ================================================================
-   DATE HELPER
-================================================================ */
-
-function isToday(dateString: string | null) {
-  if (!dateString) {
-    return false;
+async function snapToRoad(lat: number, lng: number) {
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 6000);
+    const res = await fetch(
+      `https://router.project-osrm.org/nearest/v1/driving/${lng},${lat}`,
+      { signal: ctrl.signal },
+    );
+    clearTimeout(timer);
+    const json = await res.json();
+    const loc = json?.waypoints?.[0]?.location; // [lng, lat]
+    if (Array.isArray(loc) && loc.length === 2) {
+      return { lat: loc[1] as number, lng: loc[0] as number };
+    }
+  } catch {
+    // fall through to the raw tap
   }
-
-  const date = new Date(dateString);
-
-  if (Number.isNaN(date.getTime())) {
-    return false;
-  }
-
-  const now = new Date();
-
-  return (
-    date.getFullYear() === now.getFullYear() &&
-    date.getMonth() === now.getMonth() &&
-    date.getDate() === now.getDate()
-  );
+  return { lat, lng };
 }

@@ -10,7 +10,7 @@ export default {
 
     slug: "JeepQTrack",
 
-    version: "1.0.2",
+    version: "1.0.5",
 
     orientation: "portrait",
 
@@ -94,18 +94,18 @@ export default {
       appVariant: variant,
 
       eas: {
-        projectId: "ccba8ad7-76dd-4897-819a-a109dc800d7d",
+        projectId: "59e56dea-8e12-4f2e-ba74-cb0b92e84592",
       },
     },
 
-    owner: "andytechhy",
+    owner: "andevs",
 
     runtimeVersion: {
       policy: "appVersion",
     },
 
     updates: {
-      url: "https://u.expo.dev/ccba8ad7-76dd-4897-819a-a109dc800d7d",
+      url: "https://u.expo.dev/59e56dea-8e12-4f2e-ba74-cb0b92e84592",
     },
   },
 };

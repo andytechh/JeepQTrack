@@ -4,6 +4,7 @@ import {
   Bus,
   ChevronRight,
   FileBarChart,
+  FileClock,
   LogOut,
   MapPin,
   Settings,
@@ -83,6 +84,11 @@ const monitoringItems: DrawerItem[] = [
     label: "Logs and Reports",
     icon: FileBarChart,
     route: "/staff/(admin)/monitoring",
+  },
+  {
+    label: "Trip History",
+    icon: FileClock,
+    route: "/staff/(admin)/trips",
   },
 ];
 

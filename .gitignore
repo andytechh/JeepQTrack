@@ -13,7 +13,7 @@ my-jeepq-app-firebase-adminsdk-fbsvc-a883f67b60.json
 .kotlin/
 *.orig.*
 *.jks
-
+.env
 *.p8
 *.p12
 *.key
